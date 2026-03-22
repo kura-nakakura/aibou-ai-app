@@ -21,7 +21,15 @@ st.title("🤖 相棒AI コントロールパネル")
 scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
 try:
-    creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+    # 🌟 クラウドとローカルで鍵の取り出し方を自動で切り替える！
+    if "GOOGLE_CREDENTIALS" in st.secrets:
+        # クラウド（Streamlit）の場合：Secretsから読み込む
+        creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    else:
+        # 手元のPC（VS Code）の場合：ファイルから読み込む
+        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+        
     client = gspread.authorize(creds)
     sheet = client.open("AibouAgent").worksheet("Agent_Brain")
     
