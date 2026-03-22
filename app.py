@@ -35,7 +35,7 @@ try:
         if new_goal:
             with st.status("🧠 相棒が作戦を立案中...", expanded=True) as status:
                 try: # ★エラーを捕まえる網をここにも張る！
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    model = genai.GenerativeModel('gemini-2.5-flash')
                     prompt = f"""目標「{new_goal}」を達成するための具体的な手順を3〜5個のタスクに分解して。
                     出力は必ず以下のJSON形式のリストのみにして。余計な説明は不要。
                     [ {{"id": 1, "task": "..."}}, {{"id": 2, "task": "..."}} ]"""
