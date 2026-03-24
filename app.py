@@ -53,6 +53,7 @@ video_base64 = get_base64_video("bg.mp4")
 if video_base64:
     st.markdown("""
         <style>
+        /* 1. 全体の背景（白・微グレー）とサイドバーの枠線完全除去 */
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background-color: #e0e5ec !important; background-image: none !important; }
         [data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child { background-color: #e0e5ec !important; border-right: none !important; box-shadow: none !important; }
         .stApp, p, span, div { color: #2d3748 !important; }
@@ -61,6 +62,7 @@ if video_base64:
         [data-testid="stSidebar"] [data-testid="stExpander"] { border: none !important; background: transparent !important; box-shadow: none !important; }
         [data-testid="stSidebar"] [data-testid="stExpander"] summary p { color: #1a202c !important; font-weight: 800 !important; letter-spacing: 2px !important; font-size: 14px !important; }
         
+        /* 2. 【ボタン全体】クリアで3Dなボタンベース */
         div[role="radiogroup"] { gap: 15px; padding: 10px; }
         div[role="radiogroup"] > label { background: rgba(255, 255, 255, 0.6) !important; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.8) !important; border-radius: 15px !important; padding: 10px 20px !important; box-shadow: 6px 6px 12px rgba(163, 177, 198, 0.5), -6px -6px 12px rgba(255, 255, 255, 0.9) !important; transition: all 0.2s ease-in-out; cursor: pointer; }
         div[role="radiogroup"] > label p { color: #1a202c !important; font-weight: bold !important; }
@@ -69,9 +71,34 @@ if video_base64:
         div[role="radiogroup"] > label[data-checked="true"] span[data-baseweb="radio"] > div { background-color: #00f3ff !important; }
         div[role="radiogroup"] > label[data-checked="true"] span[data-baseweb="radio"] > div > div { background-color: #00f3ff !important; }
         
-        [data-testid="stChatInput"] { background: rgba(255, 255, 255, 0.5) !important; backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.9) !important; border-radius: 20px !important; box-shadow: 10px 10px 20px rgba(163, 177, 198, 0.6), -10px -10px 20px rgba(255, 255, 255, 1), inset 2px 2px 5px rgba(255, 255, 255, 0.6) !important; padding: 5px !important; transition: all 0.2s ease-in-out; }
-        [data-testid="stChatInput"] textarea { color: #2b6cb0 !important; font-weight: bold; font-family: 'Share Tech Mono', sans-serif; }
-        [data-testid="stChatInput"]:focus-within { border-color: #00f3ff !important; box-shadow: inset 2px 2px 5px rgba(255, 255, 255, 0.6), 0 0 15px rgba(0, 243, 255, 0.5) !important; outline: none !important; }
+        /* 🚨 3. 【すべての入力欄】スマホののっぺり化を解除し、3Dガラスエフェクトを適用 */
+        [data-testid="stChatInput"], 
+        [data-testid="stTextArea"] textarea, 
+        [data-testid="stTextInput"] input { 
+            -webkit-appearance: none !important; /* スマホの標準デザインを強制解除 */
+            appearance: none !important;
+            background: rgba(255, 255, 255, 0.5) !important; 
+            backdrop-filter: blur(15px); 
+            border: 1px solid rgba(255, 255, 255, 0.9) !important; 
+            border-radius: 20px !important; 
+            box-shadow: 10px 10px 20px rgba(163, 177, 198, 0.6), -10px -10px 20px rgba(255, 255, 255, 1), inset 2px 2px 5px rgba(255, 255, 255, 0.6) !important; 
+            padding: 10px 15px !important; 
+            color: #2b6cb0 !important; 
+            font-weight: bold; 
+            font-family: 'Share Tech Mono', sans-serif; 
+            transition: all 0.2s ease-in-out; 
+        }
+        
+        /* 入力中（フォーカス時）は水色に発光 */
+        [data-testid="stChatInput"]:focus-within, 
+        [data-testid="stTextArea"] textarea:focus, 
+        [data-testid="stTextInput"] input:focus { 
+            border-color: #00f3ff !important; 
+            box-shadow: inset 2px 2px 5px rgba(255, 255, 255, 0.6), 0 0 15px rgba(0, 243, 255, 0.5) !important; 
+            outline: none !important; 
+        }
+        
+        /* 4. チャットの吹き出し */
         [data-testid="stChatMessage"] { background: rgba(255, 255, 255, 0.4) !important; backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.8) !important; border-radius: 15px !important; box-shadow: 5px 5px 10px rgba(163, 177, 198, 0.3), -5px -5px 10px rgba(255, 255, 255, 0.8); }
         [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] div { color: #1a202c !important; }
         .stChatFloatingInputContainer { box-shadow: none !important; }
@@ -399,8 +426,10 @@ elif page == "Forge Lab":
         project_list = list(st.session_state.projects.keys())
         selected_project = st.selectbox("Current Project", project_list, index=project_list.index(st.session_state.current_project), label_visibility="collapsed")
         
+        # 🚨 修正1：プロジェクトを「切り替えた時」に右画面のアプリも消去する
         if selected_project != st.session_state.current_project:
             st.session_state.current_project = selected_project
+            st.session_state.generated_app_code = ""  # 👈 コードリセット！
             st.rerun()
 
         with st.expander("⚙️ Manage Projects"):
@@ -409,25 +438,29 @@ elif page == "Forge Lab":
                 if new_proj_name and new_proj_name not in st.session_state.projects:
                     st.session_state.projects[new_proj_name] = []
                     st.session_state.current_project = new_proj_name
+                    st.session_state.generated_app_code = ""  # 👈 新規作成時もリセット！
                     st.rerun()
             st.divider()
+            
+            # 🚨 修正2：プロジェクトを「削除した時」に右画面のアプリを完全に消去する
             if st.button("🗑️ Delete Current", use_container_width=True):
                 if len(st.session_state.projects) > 1:
                     del st.session_state.projects[st.session_state.current_project]
                     st.session_state.current_project = list(st.session_state.projects.keys())[0]
+                    st.session_state.generated_app_code = ""  # 👈 削除時もリセット！
                     st.rerun()
                 else:
                     st.error("最後のプロジェクトは削除できません。")
 
         st.markdown("<div style='text-align:center; font-weight:800; color:#2b6cb0; letter-spacing:2px; font-size:12px; margin-top:20px; margin-bottom:10px;'>[ COMMAND INPUT ]</div>", unsafe_allow_html=True)
         
+        # 👇 入力フォームとマイクはそのまま維持！
         with st.form("forge_sidebar_form", clear_on_submit=True):
             forge_prompt = st.text_area("命令", placeholder="例：ポモドーロタイマーを作って\n（Shift + Enterで改行）", height=150, label_visibility="collapsed")
             submitted = st.form_submit_button("DEPLOY COMMAND ⚡", use_container_width=True)
         
         st.markdown("<style>iframe[title*='mic'] { mix-blend-mode: multiply; opacity: 0.8; margin-top: 10px; }</style>", unsafe_allow_html=True)
         spoken_text = speech_to_text(language='ja', start_prompt="🎙️ 音声で命令する", stop_prompt="🛑 録音停止＆送信", use_container_width=True, key='Forge_STT')
-
     # 🖥️ メイン画面：左(コア＆ログ) / 右(プレビュー)
     col_log, col_preview = st.columns([4, 6])
 
@@ -455,11 +488,22 @@ elif page == "Forge Lab":
         
         if st.session_state.generated_app_code:
             st.success(f"✨ 実行中: {st.session_state.current_project}")
+            
+            # 🚨 プラス案1：ダウンロードボタンの実装！
+            st.download_button(
+                label="💾 このアプリのコードを保存 (Pythonファイル)",
+                data=st.session_state.generated_app_code,
+                file_name=f"{st.session_state.current_project.replace(' ', '_')}.py",
+                mime="text/plain",
+                use_container_width=True
+            )
+            
             with st.container(border=True):
                 try:
                     exec(st.session_state.generated_app_code)
                 except Exception as e:
-                    st.error(f"実行エラー:\n{e}")
+                    # エラーが出た場合も分かりやすく表示
+                    st.error(f"実行エラーが発生しました。左の入力欄から「エラーが出たから直して」と命令してください。\n\n詳細: {e}")
                     
             with st.expander("📝 ソースコードを表示"):
                 st.code(st.session_state.generated_app_code, language="python")
@@ -487,17 +531,32 @@ elif page == "Forge Lab":
         
         with st.spinner("Building Application..."):
             try:
-                system_instruction = """
-                あなたは優秀なPythonエンジニアです。ユーザーの指示に従って、Streamlitで動くアプリケーションのコードを作成してください。
-                【重要ルール】
-                1. 返答は、実行可能なPythonコードのみを含めてください。
-                2. Markdownの ```python と ``` でコードを囲んでください。
-                3. import streamlit as st は必ず含めてください。
-                4. st.set_page_config() は絶対に書かないでください。
+                # 🚨 対策案1：これまでの会話履歴をすべて連結してAIに渡す（健忘症治療）
+                history_text = "【これまでの会話履歴】\n"
+                for msg in st.session_state.projects[st.session_state.current_project][:-1]:
+                    role_name = "ユーザー" if msg["role"] == "user" else "AI"
+                    history_text += f"{role_name}: {msg['content']}\n"
+                
+                # 🚨 対策案2＆ボス提案：プロンプトの超絶強化（手抜き防止＋提案機能）
+                system_instruction = f"""
+                あなたは世界最高峰のPythonエンジニアであり、UI/UXデザイナーです。
+                ユーザーの指示と過去の会話履歴を元に、Streamlitで動く最高品質のアプリケーションコードを作成してください。
+                
+                【絶対遵守のルール】
+                1. 手抜き、省略、プレースホルダーは一切禁止。実用的で高度なコードを出力すること。
+                2. データの保持や状態管理（Todoリストや家計簿など）が必要な場合は、必ず `st.session_state` を使用すること。これがないとアプリとして機能しません。
+                3. UIは美しく、使いやすく、整理されたレイアウトを心がけること。
+                4. 返答は、実行可能なPythonコードのみを含めること。Markdownの ```python と ``` でコードを囲むこと。
+                5. import streamlit as st は必ず含めること。
+                6. st.set_page_config() は絶対に書かないこと。
+                7. 【重要】コードの出力後、そのコードブロックの外（下部）に、ユーザーが次に追加したくなるような機能のアイデア（選択肢）を3つ提案してください。
+                   提案は「💡 次の拡張アイデア：」という見出しの後に、箇条書きで出力してください。
+                
+                {history_text}
                 """
                 
                 model = genai.GenerativeModel('gemini-2.5-flash')
-                response = model.generate_content(system_instruction + "\n指示: " + trigger_prompt)
+                response = model.generate_content(system_instruction + "\n現在の指示: " + trigger_prompt)
                 ai_text = response.text
                 
                 code_match = re.search(r'```python\n(.*?)\n```', ai_text, re.DOTALL)
@@ -505,10 +564,15 @@ elif page == "Forge Lab":
                 if code_match:
                     extracted_code = code_match.group(1)
                     st.session_state.generated_app_code = extracted_code
-                    reply_text = "構築が完了しました。右側のパネルをご確認ください。"
+                    
+                    # 🚨 AIの出力からコード部分を除外し、「提案テキスト」だけを抽出する
+                    reply_text = ai_text.replace(code_match.group(0), "").strip()
+                    if not reply_text:
+                        reply_text = "構築が完了しました。右側のパネルをご確認ください。"
                 else:
                     reply_text = "申し訳ありません、コードの生成に失敗しました。\n\n" + ai_text
                 
+                # 音声生成（コード以外の提案テキストを読み上げる）
                 clean_text = re.sub(r'[*#`_]', '', reply_text)
                 tts = gTTS(text=clean_text, lang='ja')
                 audio_fp = io.BytesIO()
@@ -520,7 +584,6 @@ elif page == "Forge Lab":
                 st.rerun()
             except Exception as e:
                 st.error(f"Error: {e}")
-
 # ------------------------------------------
 # 📋 モード：現在のタスク
 # ------------------------------------------
