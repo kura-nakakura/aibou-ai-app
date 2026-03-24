@@ -3,13 +3,13 @@ import google.generativeai as genai
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-import json
-import re
 from gtts import gTTS
-import io
 import base64
-import os
+import io
+import re
 from streamlit_mic_recorder import speech_to_text
+import pypdf
+import os  # 👈 これを追加！
 
 st.set_page_config(page_title="相棒AI ダッシュボード", page_icon="🤖", layout="wide")
 
@@ -37,7 +37,7 @@ st.sidebar.title("A.I. CORE")
 
 with st.sidebar.expander("SELECT MODE", expanded=False):
     page = st.radio("mode_select", 
-        ["AI Console", "Forge Lab", "Active Tasks", "Task History", "Dashboard", "Secure Vault", "🧠 Core Upgrade"],
+        ["AI Console", "Forge Lab", "📂 Document Vault", "Active Tasks", "Task History", "Dashboard", "Secure Vault", "🧠 Core Upgrade"], # 👈 Upgrade復活！
         label_visibility="collapsed"
     )
 
@@ -404,186 +404,277 @@ if page == "AI Console":
                 st.rerun()
 
 # ------------------------------------------
-# 🔥 モード：Forge Lab (App Forge)
+# ❖ モード：Forge Lab (サイバー・ダッシュボード仕様)
 # ------------------------------------------
 elif page == "Forge Lab":
-    if "projects" not in st.session_state:
-        st.session_state.projects = {"Project Alpha": []}
-    if "current_project" not in st.session_state:
-        st.session_state.current_project = "Project Alpha"
-    if "ai_voice_base64" not in st.session_state:
+    # 💎 UIデザイン用CSS（エラーにならないよう、ここに移動しました！）
+    st.markdown("""
+        <style>
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            background: rgba(255, 255, 255, 0.4) !important;
+            backdrop-filter: blur(10px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.9) !important;
+            border-radius: 15px !important;
+            box-shadow: 6px 6px 15px rgba(163, 177, 198, 0.4), -6px -6px 15px rgba(255, 255, 255, 0.9) !important;
+            transition: all 0.3s ease !important;
+        }
+        [data-testid="stVerticalBlockBorderWrapper"]:hover {
+            transform: translateY(-3px);
+            box-shadow: 10px 10px 20px rgba(163, 177, 198, 0.5), -10px -10px 20px rgba(255, 255, 255, 1), 0 0 15px rgba(0, 243, 255, 0.3) !important;
+            border-color: rgba(0, 243, 255, 0.8) !important;
+        }
+        .cyber-title { color: #2b6cb0; font-weight: 800; letter-spacing: 2px; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(255,255,255,0.8); }
+        .status-dot { color: #00e676; font-size: 10px; margin-right: 5px; animation: blink 2s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        </style>
+    """, unsafe_allow_html=True)
+
+    if "forge_workspaces" not in st.session_state:
+        st.session_state.forge_workspaces = {"First Project": {"chat": [], "code": ""}}
+    if "current_forge_ws" not in st.session_state:
+        st.session_state.current_forge_ws = None 
+
+    if st.session_state.ai_voice_base64 not in st.session_state:
         st.session_state.ai_voice_base64 = None
     if "just_generated_audio" not in st.session_state:
         st.session_state.just_generated_audio = False
-    if "generated_app_code" not in st.session_state:
-        st.session_state.generated_app_code = ""
 
-    # 🎛️ サイドバー：プロジェクト管理 ＆ コマンド入力
-    with st.sidebar:
-        st.markdown("<hr style='margin: 10px 0; border: 0.5px solid rgba(0,0,0,0.1);'>", unsafe_allow_html=True)
-        st.markdown("<div style='text-align:center; font-weight:800; color:#2b6cb0; letter-spacing:2px; font-size:12px; margin-bottom:10px;'>[ WORKSPACE ]</div>", unsafe_allow_html=True)
+    # 🚪 ダッシュボード画面
+    if st.session_state.current_forge_ws is None:
+        st.markdown("<h2 class='cyber-title'>❖ FORGE LAB WORKSPACES</h2>", unsafe_allow_html=True)
+        st.caption("開発環境を選択、または新しいプロジェクトを立ち上げてください。")
         
-        project_list = list(st.session_state.projects.keys())
-        selected_project = st.selectbox("Current Project", project_list, index=project_list.index(st.session_state.current_project), label_visibility="collapsed")
+        items = ["__NEW__"] + list(st.session_state.forge_workspaces.keys())
         
-        # 🚨 修正1：プロジェクトを「切り替えた時」に右画面のアプリも消去する
-        if selected_project != st.session_state.current_project:
-            st.session_state.current_project = selected_project
-            st.session_state.generated_app_code = ""  # 👈 コードリセット！
+        for i in range(0, len(items), 3):
+            cols = st.columns(3)
+            for j in range(3):
+                if i + j < len(items):
+                    ws_name = items[i + j]
+                    with cols[j]:
+                        if ws_name == "__NEW__":
+                            with st.container(border=True):
+                                st.markdown("<h4 style='text-align:center; color:#00f3ff; font-weight:800;'>⬡ CREATE NEW</h4>", unsafe_allow_html=True)
+                                new_ws_name = st.text_input("Project Name", key="new_ws_name", label_visibility="collapsed", placeholder="New Project Name...")
+                                if st.button("INITIALIZE ⚡", key="create_ws", use_container_width=True):
+                                    if new_ws_name and new_ws_name not in st.session_state.forge_workspaces:
+                                        st.session_state.forge_workspaces[new_ws_name] = {"chat": [], "code": ""}
+                                        st.session_state.current_forge_ws = new_ws_name
+                                        st.rerun()
+                        else:
+                            with st.container(border=True):
+                                st.markdown(f"<h4 style='color:#1a202c; font-weight:bold;'>❖ {ws_name}</h4>", unsafe_allow_html=True)
+                                chat_count = len(st.session_state.forge_workspaces[ws_name]['chat'])
+                                st.markdown(f"<p style='font-size: 12px; color: #718096;'><span class='status-dot'>●</span>ONLINE | Logs: {chat_count}</p>", unsafe_allow_html=True)
+                                
+                                c1, c2 = st.columns([7, 3])
+                                with c1:
+                                    if st.button("ACCESS ➔", key=f"open_ws_{ws_name}", use_container_width=True):
+                                        st.session_state.current_forge_ws = ws_name
+                                        st.rerun()
+                                with c2:
+                                    if st.button("DEL", key=f"del_ws_{ws_name}", use_container_width=True):
+                                        del st.session_state.forge_workspaces[ws_name]
+                                        st.rerun()
+
+    # 🖥️ ワークスペース内部画面
+    else:
+        ws_name = st.session_state.current_forge_ws
+        ws_data = st.session_state.forge_workspaces[ws_name]
+        
+        if st.button("⬅ RETURN TO DASHBOARD"):
+            st.session_state.current_forge_ws = None
+            st.rerun()
+            
+        st.markdown(f"<h2 class='cyber-title'>❖ PROJECT : {ws_name}</h2>", unsafe_allow_html=True)
+
+        with st.sidebar:
+            st.markdown(f"<div style='text-align:center; font-weight:800; color:#2b6cb0; margin-bottom:10px;'>[ ❖ {ws_name} ]</div>", unsafe_allow_html=True)
+            with st.form("forge_sidebar_form", clear_on_submit=True):
+                forge_prompt = st.text_area("命令", placeholder="例：ポモドーロタイマーを作って\n（Shift + Enterで改行）", height=150, label_visibility="collapsed")
+                submitted = st.form_submit_button("DEPLOY COMMAND ⚡", use_container_width=True)
+            st.markdown("<style>iframe[title*='mic'] { mix-blend-mode: multiply; opacity: 0.8; margin-top: 10px; }</style>", unsafe_allow_html=True)
+            spoken_text = speech_to_text(language='ja', start_prompt="🎙️ 音声で命令する", stop_prompt="🛑 録音停止＆送信", use_container_width=True, key='Forge_STT')
+
+        # 幅の拡張 [3 : 7]
+        col_log, col_preview = st.columns([3, 7])
+        
+        with col_log:
+            st.markdown("<p style='font-weight:bold; color:#718096;'>[ COMMAND TERMINAL ]</p>", unsafe_allow_html=True)
+            core_height = 200 
+            v_data = st.session_state.ai_voice_base64 if st.session_state.ai_voice_base64 else ""
+            autoplay = "autoplay" if st.session_state.just_generated_audio else ""
+            st.session_state.just_generated_audio = False 
+
+            core_html = MASTER_CORE_TEMPLATE.replace("H_VAL", str(core_height)).replace("MAX_Wpx", "200").replace("V_DATA", v_data).replace("A_PLAY", autoplay)
+            st.components.v1.html(core_html, height=core_height + 10)
+
+            with st.container(height=400, border=False):
+                if not ws_data["chat"]:
+                    st.info("命令を入力してください。")
+                for m in ws_data["chat"]:
+                    with st.chat_message(m["role"], avatar="👤" if m["role"]=="user" else "🤖"):
+                        st.markdown(m["content"])
+
+        with col_preview:
+            st.markdown("<p style='font-weight:bold; color:#718096;'>[ THE FORGE / PREVIEW ]</p>", unsafe_allow_html=True)
+            if ws_data["code"]:
+                st.download_button(label="💾 CODE EXPORT (.py)", data=ws_data["code"], file_name=f"{ws_name}.py", mime="text/plain", use_container_width=True)
+                with st.container(border=True):
+                    try:
+                        exec(ws_data["code"])
+                    except Exception as e:
+                        st.error(f"実行エラー:\n{e}")
+                with st.expander("📝 SOURCE CODE"):
+                    st.code(ws_data["code"], language="python")
+            else:
+                st.info("System Online. Waiting for commands...")
+
+        # 実行ロジック
+        trigger_prompt = forge_prompt if submitted else spoken_text if spoken_text else None
+        if trigger_prompt:
+            ws_data["chat"].append({"role": "user", "avatar": "👤", "content": trigger_prompt})
+            with st.spinner("Building Application..."):
+                try:
+                    history_text = "【履歴】\n" + "\n".join([f"{msg['role']}: {msg['content']}" for msg in ws_data["chat"][:-1]])
+                    system_instruction = f"""
+                    あなたはStreamlitアプリを作成する天才エンジニア。
+                    省略禁止。st.sidebar使用禁止。st.session_stateを活用すること。
+                    コードブロックの後に、次の拡張アイデアを3つ提案すること。
+                    {history_text}
+                    """
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    response = model.generate_content(system_instruction + "\n現在の指示: " + trigger_prompt)
+                    ai_text = response.text
+                    
+                    code_match = re.search(r'```python\n(.*?)\n```', ai_text, re.DOTALL)
+                    if code_match:
+                        ws_data["code"] = code_match.group(1)
+                        reply_text = ai_text.replace(code_match.group(0), "").strip() or "構築が完了しました。"
+                    else:
+                        reply_text = "コード生成に失敗しました。\n" + ai_text
+                        
+                    tts = gTTS(text=re.sub(r'[*#`_]', '', reply_text), lang='ja')
+                    audio_fp = io.BytesIO()
+                    tts.write_to_fp(audio_fp)
+                    st.session_state.ai_voice_base64 = base64.b64encode(audio_fp.getvalue()).decode()
+                    st.session_state.just_generated_audio = True
+                    ws_data["chat"].append({"role": "assistant", "avatar": "🤖", "content": reply_text})
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+# ------------------------------------------
+# ⌘ モード：Document Vault (サイバー・ダッシュボード仕様)
+# ------------------------------------------
+elif page == "📂 Document Vault":
+    if "vault_notebooks" not in st.session_state:
+        st.session_state.vault_notebooks = {} 
+    if "current_vault_nb" not in st.session_state:
+        st.session_state.current_vault_nb = None
+
+    if st.session_state.current_vault_nb is None:
+        st.markdown("<h2 class='cyber-title'>⌘ DOCUMENT VAULT</h2>", unsafe_allow_html=True)
+        st.caption("資料保管庫（ノートブック）を選択、または新規作成してください。")
+        
+        items = ["__NEW__"] + list(st.session_state.vault_notebooks.keys())
+        for i in range(0, len(items), 3):
+            cols = st.columns(3)
+            for j in range(3):
+                if i + j < len(items):
+                    nb_name = items[i + j]
+                    with cols[j]:
+                        if nb_name == "__NEW__":
+                            with st.container(border=True):
+                                st.markdown("<h4 style='text-align:center; color:#00f3ff; font-weight:800;'>⬡ NEW VAULT</h4>", unsafe_allow_html=True)
+                                new_nb_name = st.text_input("Vault Name", key="new_nb_name", label_visibility="collapsed", placeholder="New Vault Name...")
+                                if st.button("INITIALIZE ⚡", key="create_nb", use_container_width=True):
+                                    if new_nb_name and new_nb_name not in st.session_state.vault_notebooks:
+                                        st.session_state.vault_notebooks[new_nb_name] = {"docs": {}, "chat": []}
+                                        st.session_state.current_vault_nb = new_nb_name
+                                        st.rerun()
+                        else:
+                            with st.container(border=True):
+                                st.markdown(f"<h4 style='color:#1a202c; font-weight:bold;'>⌘ {nb_name}</h4>", unsafe_allow_html=True)
+                                doc_count = len(st.session_state.vault_notebooks[nb_name]['docs'])
+                                st.markdown(f"<p style='font-size: 12px; color: #718096;'><span class='status-dot'>●</span>SECURED | Docs: {doc_count}</p>", unsafe_allow_html=True)
+                                
+                                c1, c2 = st.columns([7, 3])
+                                with c1:
+                                    if st.button("ACCESS ➔", key=f"open_nb_{nb_name}", use_container_width=True):
+                                        st.session_state.current_vault_nb = nb_name
+                                        st.rerun()
+                                with c2:
+                                    if st.button("DEL", key=f"del_nb_{nb_name}", use_container_width=True):
+                                        del st.session_state.vault_notebooks[nb_name]
+                                        st.rerun()
+
+    else:
+        nb_name = st.session_state.current_vault_nb
+        nb_data = st.session_state.vault_notebooks[nb_name]
+        
+        if st.button("⬅ RETURN TO VAULT INDEX"):
+            st.session_state.current_vault_nb = None
             st.rerun()
 
-        with st.expander("⚙️ Manage Projects"):
-            new_proj_name = st.text_input("New Project Name", placeholder="プロジェクト名...")
-            if st.button("➕ Create Project", use_container_width=True):
-                if new_proj_name and new_proj_name not in st.session_state.projects:
-                    st.session_state.projects[new_proj_name] = []
-                    st.session_state.current_project = new_proj_name
-                    st.session_state.generated_app_code = ""  # 👈 新規作成時もリセット！
-                    st.rerun()
-            st.divider()
-            
-            # 🚨 修正2：プロジェクトを「削除した時」に右画面のアプリを完全に消去する
-            if st.button("🗑️ Delete Current", use_container_width=True):
-                if len(st.session_state.projects) > 1:
-                    del st.session_state.projects[st.session_state.current_project]
-                    st.session_state.current_project = list(st.session_state.projects.keys())[0]
-                    st.session_state.generated_app_code = ""  # 👈 削除時もリセット！
-                    st.rerun()
-                else:
-                    st.error("最後のプロジェクトは削除できません。")
-
-        st.markdown("<div style='text-align:center; font-weight:800; color:#2b6cb0; letter-spacing:2px; font-size:12px; margin-top:20px; margin-bottom:10px;'>[ COMMAND INPUT ]</div>", unsafe_allow_html=True)
+        st.markdown(f"<h2 class='cyber-title'>⌘ VAULT : {nb_name}</h2>", unsafe_allow_html=True)
         
-        # 👇 入力フォームとマイクはそのまま維持！
-        with st.form("forge_sidebar_form", clear_on_submit=True):
-            forge_prompt = st.text_area("命令", placeholder="例：ポモドーロタイマーを作って\n（Shift + Enterで改行）", height=150, label_visibility="collapsed")
-            submitted = st.form_submit_button("DEPLOY COMMAND ⚡", use_container_width=True)
-        
-        st.markdown("<style>iframe[title*='mic'] { mix-blend-mode: multiply; opacity: 0.8; margin-top: 10px; }</style>", unsafe_allow_html=True)
-        spoken_text = speech_to_text(language='ja', start_prompt="🎙️ 音声で命令する", stop_prompt="🛑 録音停止＆送信", use_container_width=True, key='Forge_STT')
-    # 🖥️ メイン画面：左(コア＆ログ) / 右(プレビュー)
-    col_log, col_preview = st.columns([4, 6])
+        col_log, col_preview = st.columns([3, 7])
 
-    with col_log:
-        st.subheader("COMMAND TERMINAL")
-        
-        core_height = 250 
-        v_data = st.session_state.ai_voice_base64 if st.session_state.ai_voice_base64 else ""
-        autoplay = "autoplay" if st.session_state.just_generated_audio else ""
-        st.session_state.just_generated_audio = False 
+        with col_log:
+            st.markdown("<p style='font-weight:bold; color:#718096;'>[ VAULT CONCIERGE ]</p>", unsafe_allow_html=True)
+            core_height = 200
+            vault_core_html = MASTER_CORE_TEMPLATE.replace("H_VAL", str(core_height)).replace("MAX_Wpx", "200").replace("V_DATA", "").replace("A_PLAY", "")
+            st.components.v1.html(vault_core_html, height=core_height + 10)
 
-        core_html = MASTER_CORE_TEMPLATE.replace("H_VAL", str(core_height)).replace("MAX_Wpx", "250").replace("V_DATA", v_data).replace("A_PLAY", autoplay)
-        st.components.v1.html(core_html, height=core_height + 20)
+            with st.container(height=400, border=False):
+                if not nb_data["chat"]:
+                    st.info("資料をアップロードし、質問してください。")
+                for m in nb_data["chat"]:
+                    with st.chat_message(m["role"], avatar="👤" if m["role"]=="user" else "🤖"):
+                        st.markdown(m["content"])
 
-        with st.container(height=400, border=False):
-            current_history = st.session_state.projects[st.session_state.current_project]
-            if not current_history:
-                st.info("プロジェクトを開始しました。命令を入力してください。")
-            for m in current_history:
-                with st.chat_message(m["role"], avatar=m["avatar"]):
-                    st.markdown(m["content"])
+            if prompt := st.chat_input("この資料について質問する...", key="vault_chat_input"):
+                nb_data["chat"].append({"role": "user", "avatar": "👤", "content": prompt})
+                with st.spinner("知識を抽出中..."):
+                    try:
+                        if not nb_data["docs"]:
+                            response_text = "資料がありません。右のパネルからアップロードしてください。"
+                        else:
+                            all_context = "\n\n=== 資料 ===\n" + "\n---\n".join([f"【{fname}】\n{content}" for fname, content in nb_data["docs"].items()])
+                            system_instruction = f"専属コンシェルジュとして、以下の資料【のみ】に基づいて回答せよ。\n{all_context}"
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            response = model.generate_content(system_instruction + "\n質問: " + prompt)
+                            response_text = response.text
+                        nb_data["chat"].append({"role": "assistant", "avatar": "🤖", "content": response_text})
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"解析エラー: {e}")
 
-    with col_preview:
-        st.subheader("THE FORGE")
-        
-        if st.session_state.generated_app_code:
-            st.success(f"✨ 実行中: {st.session_state.current_project}")
-            
-            # 🚨 プラス案1：ダウンロードボタンの実装！
-            st.download_button(
-                label="💾 このアプリのコードを保存 (Pythonファイル)",
-                data=st.session_state.generated_app_code,
-                file_name=f"{st.session_state.current_project.replace(' ', '_')}.py",
-                mime="text/plain",
-                use_container_width=True
-            )
-            
+        with col_preview:
+            st.markdown("<p style='font-weight:bold; color:#718096;'>[ MATERIAL MANAGEMENT ]</p>", unsafe_allow_html=True)
             with st.container(border=True):
-                try:
-                    exec(st.session_state.generated_app_code)
-                except Exception as e:
-                    # エラーが出た場合も分かりやすく表示
-                    st.error(f"実行エラーが発生しました。左の入力欄から「エラーが出たから直して」と命令してください。\n\n詳細: {e}")
-                    
-            with st.expander("📝 ソースコードを表示"):
-                st.code(st.session_state.generated_app_code, language="python")
-        else:
-            st.markdown("""
-                <div style="background: rgba(255, 255, 255, 0.4); backdrop-filter: blur(10px); border-radius: 15px; padding: 25px; border: 1px solid white; box-shadow: 6px 6px 12px rgba(163, 177, 198, 0.5); min-height: 550px;">
-                    <p style="color: #2b6cb0; font-weight: bold; margin-bottom: 5px;">[ FORGE ENGINE STATUS ]</p>
-                    <code style="color: #1a202c;">System: Online... Waiting for build commands.</code>
-                    <hr style="border: 0.5px solid rgba(0,0,0,0.1); margin: 20px 0;">
-                    <div style="text-align: center; color: #a0aec0; margin-top: 150px;">
-                        <p>ここにAIが具現化したアプリやコードが表示されます、ボス。</p>
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
+                st.markdown("#### 📥 UPLOAD DATA (PDF, TXT, MD)")
+                uploaded_files = st.file_uploader("ファイルをドロップ", type=["txt", "md", "pdf"], accept_multiple_files=True, label_visibility="collapsed")
+                if st.button("STORE IN VAULT (丸のみ) ⚡", use_container_width=True):
+                    if uploaded_files:
+                        for uf in uploaded_files:
+                            if uf.name not in nb_data["docs"]:
+                                if uf.name.lower().endswith('.pdf'):
+                                    pdf_text = "".join([page.extract_text() + "\n" for page in pypdf.PdfReader(uf).pages])
+                                    nb_data["docs"][uf.name] = pdf_text
+                                else:
+                                    nb_data["docs"][uf.name] = io.StringIO(uf.getvalue().decode("utf-8")).read()
+                        st.rerun()
 
-    # ⚙️ 実行ロジック
-    trigger_prompt = None
-    if submitted and forge_prompt:
-        trigger_prompt = forge_prompt
-    elif spoken_text:
-        trigger_prompt = spoken_text
-
-    if trigger_prompt:
-        st.session_state.projects[st.session_state.current_project].append({"role": "user", "avatar": "👤", "content": trigger_prompt})
-        
-        with st.spinner("Building Application..."):
-            try:
-                # 🚨 対策案1：これまでの会話履歴をすべて連結してAIに渡す（健忘症治療）
-                history_text = "【これまでの会話履歴】\n"
-                for msg in st.session_state.projects[st.session_state.current_project][:-1]:
-                    role_name = "ユーザー" if msg["role"] == "user" else "AI"
-                    history_text += f"{role_name}: {msg['content']}\n"
-                
-                # 🚨 対策案2＆ボス提案：プロンプトの超絶強化（手抜き防止＋提案機能）
-                system_instruction = f"""
-                あなたは世界最高峰のPythonエンジニアであり、UI/UXデザイナーです。
-                ユーザーの指示と過去の会話履歴を元に、Streamlitで動く最高品質のアプリケーションコードを作成してください。
-                
-                【絶対遵守のルール】
-                1. 手抜き、省略、プレースホルダーは一切禁止。実用的で高度なコードを出力すること。
-                2. データの保持や状態管理（Todoリストや家計簿など）が必要な場合は、必ず `st.session_state` を使用すること。これがないとアプリとして機能しません。
-                3. UIは美しく、使いやすく、整理されたレイアウトを心がけること。
-                4. 返答は、実行可能なPythonコードのみを含めること。Markdownの ```python と ``` でコードを囲むこと。
-                5. import streamlit as st は必ず含めること。
-                6. st.set_page_config() は絶対に書かないこと。
-                7. 【重要】コードの出力後、そのコードブロックの外（下部）に、ユーザーが次に追加したくなるような機能のアイデア（選択肢）を3つ提案してください。
-                   提案は「💡 次の拡張アイデア：」という見出しの後に、箇条書きで出力してください。
-                
-                {history_text}
-                """
-                
-                model = genai.GenerativeModel('gemini-2.5-flash')
-                response = model.generate_content(system_instruction + "\n現在の指示: " + trigger_prompt)
-                ai_text = response.text
-                
-                code_match = re.search(r'```python\n(.*?)\n```', ai_text, re.DOTALL)
-                
-                if code_match:
-                    extracted_code = code_match.group(1)
-                    st.session_state.generated_app_code = extracted_code
-                    
-                    # 🚨 AIの出力からコード部分を除外し、「提案テキスト」だけを抽出する
-                    reply_text = ai_text.replace(code_match.group(0), "").strip()
-                    if not reply_text:
-                        reply_text = "構築が完了しました。右側のパネルをご確認ください。"
-                else:
-                    reply_text = "申し訳ありません、コードの生成に失敗しました。\n\n" + ai_text
-                
-                # 音声生成（コード以外の提案テキストを読み上げる）
-                clean_text = re.sub(r'[*#`_]', '', reply_text)
-                tts = gTTS(text=clean_text, lang='ja')
-                audio_fp = io.BytesIO()
-                tts.write_to_fp(audio_fp)
-                st.session_state.ai_voice_base64 = base64.b64encode(audio_fp.getvalue()).decode()
-                st.session_state.just_generated_audio = True
-                
-                st.session_state.projects[st.session_state.current_project].append({"role": "assistant", "avatar": "🤖", "content": reply_text})
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
+            if nb_data["docs"]:
+                st.markdown(f"#### 🧠 STORED DATA ({len(nb_data['docs'])} files)")
+                for fname in list(nb_data["docs"].keys()):
+                    with st.expander(f"📄 {fname}", expanded=False):
+                        st.code(nb_data["docs"][fname][:200] + "...", language="text")
+                        if st.button(f"DELETE", key=f"del_{fname}", use_container_width=True):
+                            del nb_data["docs"][fname]
+                            st.rerun()
 # ------------------------------------------
 # 📋 モード：現在のタスク
 # ------------------------------------------
@@ -696,16 +787,23 @@ elif page == "🧠 Core Upgrade":
                 try:
                     model = genai.GenerativeModel('gemini-2.5-flash')
                     
-                    # 暴走を防ぎ、確実なアップデートを行わせる絶対ルール
+                    # 暴走を防ぎ、あらゆる指示に対して圧倒的クオリティを担保する【真・汎用自己進化プロンプト】
                     system_prompt = """
-                    あなたは自分自身（Streamlitアプリ）のソースコードをアップデートする超優秀なAIです。
+                    あなたは自分自身（Streamlitアプリ）のソースコードをアップデートする、世界最高峰のAIアーキテクトです。
                     ユーザーからの「進化の指示」に従い、現在のソースコードを書き換えた【完全版の新しいソースコード】を出力してください。
                     
-                    【厳守ルール】
-                    1. 変更を加えた「app.pyの完全なPythonコード（最初から最後まで）」を出力すること。省略や「...」は絶対に禁止。
-                    2. Markdownの ```python と ``` で囲むこと。
-                    3. 既存の機能（UI、コアのアニメーション、Forge Labなど）は絶対に壊さないこと。
-                    4. 指定された箇所のみを的確にアップデートすること。
+                    【絶対遵守のセーフティ＆クオリティ基準】
+                    1. 🚨 コードの省略・中略は絶対禁止（致死クラスのルール）：
+                       「# ...既存のコードと同じ...」などのプレースホルダーはアプリの破壊を意味します。必ず1行目のimportから最終行まで、1文字も漏らさず【完全な app.py のコード】を出力すること。
+                    2. 🛡️ 指示以外の変更・削除禁止：
+                       ユーザーが指示した箇所【のみ】を的確にアップデートすること。指示されていない既存の機能（AI Console、Forge Labのロジック、コアアニメーションなど）は1ミリも変更、削除、破損してはならない。
+                    3. 🎨 世界観とUIの完全統一：
+                       どのような機能を追加する場合でも、既存の「サイバー・ガラスモルフィズム（水色ネオン #00f3ff と 微グレー #e0e5ec）」のCSSデザインを必ず踏襲すること。st.columnsやst.expanderなどを駆使し、最初からプロ級の美しいレイアウトで実装すること。
+                    4. ⚙️ 技術的堅牢性の確保（importと状態管理）：
+                       新機能に必要なライブラリがあれば、必ずファイルの最上部に `import` を追加すること。また、ユーザーの入力やデータを保持する必要がある機能の場合は、必ず `st.session_state` を用いてリロードしても消えない設計にすること。
+                    5. 🐍 インデントの厳守：
+                       Pythonのインデント（スペース）のズレは致命的なエラーを引き起こします。既存のコードのインデント構造を正確に維持し、Syntax Errorが絶対に起きないようにすること。
+                    6. 出力は必ずMarkdownの ```python と ``` で囲むこと。
                     """
                     
                     response = model.generate_content(
