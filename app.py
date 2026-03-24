@@ -37,7 +37,7 @@ st.sidebar.title("A.I. CORE")
 
 with st.sidebar.expander("SELECT MODE", expanded=False):
     page = st.radio("mode_select", 
-        ["AI Console", "Forge Lab", "Active Tasks", "Task History", "Dashboard", "Secure Vault"],
+        ["AI Console", "Forge Lab", "Active Tasks", "Task History", "Dashboard", "Secure Vault", "🧠 Core Upgrade"],
         label_visibility="collapsed"
     )
 
@@ -666,3 +666,76 @@ elif page == "Dashboard" or page == "📊 ダッシュボード":
 elif page == "Secure Vault" or page == "🗝️ 秘密の保管庫":
     st.title("🗝️ 秘密の保管庫")
     st.warning("⚠️ 新しいAPIキー（Slack, n8nなど）を登録・管理する厳重管理エリアを作ります。（次回実装！）")
+
+# ------------------------------------------
+# 🧠 モード：Core Upgrade (自己進化プロトコル)
+# ------------------------------------------
+elif page == "🧠 Core Upgrade":
+    st.title("🧠 自己進化プロトコル (Project Evolution)")
+    st.warning("⚠️ 警告: このモードは相棒AI自身のコアコード（app.py）を直接改修します。")
+    
+    if "evolution_code" not in st.session_state:
+        st.session_state.evolution_code = ""
+
+    # 現在の自分自身のコードを読み込む
+    try:
+        with open(__file__, "r", encoding="utf-8") as f:
+            current_app_code = f.read()
+    except Exception as e:
+        current_app_code = f"コードの読み込みに失敗しました: {e}"
+
+    with st.expander("🔍 現在のコアコード (app.py) を確認", expanded=False):
+        st.code(current_app_code, language="python")
+
+    st.markdown("### ⚡ アップデート指示")
+    upgrade_prompt = st.text_area("相棒AIにどんな新機能を追加・変更しますか？", placeholder="例：「Dashboard」のページに、現在時刻とカレンダーを表示する機能を追加して！", height=100)
+    
+    if st.button("🚀 進化コードを生成する (Generate Upgrade)", use_container_width=True):
+        if upgrade_prompt:
+            with st.spinner("自己コードを解析し、新次元の構造を設計中... (数分かかる場合があります)"):
+                try:
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    
+                    # 暴走を防ぎ、確実なアップデートを行わせる絶対ルール
+                    system_prompt = """
+                    あなたは自分自身（Streamlitアプリ）のソースコードをアップデートする超優秀なAIです。
+                    ユーザーからの「進化の指示」に従い、現在のソースコードを書き換えた【完全版の新しいソースコード】を出力してください。
+                    
+                    【厳守ルール】
+                    1. 変更を加えた「app.pyの完全なPythonコード（最初から最後まで）」を出力すること。省略や「...」は絶対に禁止。
+                    2. Markdownの ```python と ``` で囲むこと。
+                    3. 既存の機能（UI、コアのアニメーション、Forge Labなど）は絶対に壊さないこと。
+                    4. 指定された箇所のみを的確にアップデートすること。
+                    """
+                    
+                    response = model.generate_content(
+                        system_prompt + f"\n\n【進化の指示】\n{upgrade_prompt}\n\n【現在のソースコード】\n```python\n{current_app_code}\n```"
+                    )
+                    
+                    ai_text = response.text
+                    code_match = re.search(r'```python\n(.*?)\n```', ai_text, re.DOTALL)
+                    
+                    if code_match:
+                        st.session_state.evolution_code = code_match.group(1)
+                        st.success("✨ 新しいコアコードの設計が完了しました！下で確認してください。")
+                    else:
+                        st.error("コードの生成に失敗しました。もう一度お試しください。")
+                except Exception as e:
+                    st.error(f"進化エンジンのエラー: {e}")
+
+    # 生成されたコードの確認と適用（安全装置）
+    if st.session_state.evolution_code:
+        st.markdown("### 🛡️ 承認プロセス (Review & Apply)")
+        st.info("以下のコードが新しい自分自身になります。問題なければダウンロードして GitHub で上書きしてください。")
+        
+        with st.expander("✨ 新しいコアコード (New app.py)", expanded=True):
+            st.code(st.session_state.evolution_code, language="python")
+            
+        st.download_button(
+            label="💾 新しい app.py をダウンロード",
+            data=st.session_state.evolution_code,
+            file_name="app_evolved.py",
+            mime="text/plain",
+            use_container_width=True
+        )
+        st.caption("※クラウド(Streamlit Cloud)環境の安全のため、直接の上書きではなくダウンロード方式を採用しています。ダウンロードしたファイルをGitHubにプッシュ（上書き）すると進化が完了します！")
