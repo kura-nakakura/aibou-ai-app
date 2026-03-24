@@ -1,0 +1,12 @@
+[theme]
+# ボタンや選択時のメインカラー（水色ネオン）
+primaryColor = "#00f3ff"
+
+# 全体の背景色（ボスのCSSに合わせた微グレー）
+backgroundColor = "#e0e5ec"
+
+# サイドバーなどのサブ背景色
+secondaryBackgroundColor = "#ffffff"
+
+# 文字色（濃いグレー・黒）
+textColor = "#1a202c"
