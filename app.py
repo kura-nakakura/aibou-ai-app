@@ -10,7 +10,27 @@ import re
 from streamlit_mic_recorder import speech_to_text
 import pypdf
 import os
-import json  # 👈 これを追加！
+import json
+import hashlib 
+import smtplib
+from email.mime.text import MIMEText
+import random
+# === 新規追加：カレンダー操作用の道具 ===
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+import datetime
+
+# === システム起動時の「金庫の鍵」自動読み込み ===
+if "global_api_keys" not in st.session_state:
+    st.session_state.global_api_keys = {}
+    vault_file = "vault_data.json"
+    if os.path.exists(vault_file):
+        try:
+            with open(vault_file, "r", encoding="utf-8") as f:
+                vd = json.load(f)
+                st.session_state.global_api_keys = vd.get("api_keys", {})
+        except:
+            pass
 
 st.set_page_config(page_title="AIbou", page_icon="❖", layout="wide")
 
@@ -339,11 +359,58 @@ MASTER_CORE_TEMPLATE = """
 """
 
 # ==========================================
+# 📅 GOOGLE CALENDAR CONTROLLER (手足となる機能)
+# ==========================================
+def get_calendar_service(json_str):
+    if not json_str: return None
+    try:
+        creds_dict = json.loads(json_str)
+        creds = Credentials.from_service_account_info(
+            creds_dict, scopes=['https://www.googleapis.com/auth/calendar']
+        )
+        return build('calendar', 'v3', credentials=creds)
+    except Exception as e:
+        return None
+
+def get_upcoming_events(service):
+    if not service: return "カレンダーが連携されていません。"
+    try:
+        now = datetime.datetime.utcnow().isoformat() + 'Z'
+        events_result = service.events().list(calendarId='primary', timeMin=now,
+                                              maxResults=5, singleEvents=True,
+                                              orderBy='startTime').execute()
+        events = events_result.get('items', [])
+        if not events: return "直近の予定はありません。"
+        
+        res = "【直近の予定】\n"
+        for event in events:
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            # 見やすくフォーマット
+            start_formatted = start[:16].replace('T', ' ')
+            res += f"- {start_formatted} : {event['summary']}\n"
+        return res
+    except Exception as e:
+        return f"予定の取得に失敗しました: {e}"
+
+def create_calendar_event(service, title, start_time, end_time):
+    if not service: return False
+    try:
+        event = {
+            'summary': title,
+            'start': {'dateTime': start_time, 'timeZone': 'Asia/Tokyo'},
+            'end': {'dateTime': end_time, 'timeZone': 'Asia/Tokyo'},
+        }
+        service.events().insert(calendarId='primary', body=event).execute()
+        return True
+    except Exception as e:
+        return False
+
+# ==========================================
 # 🖥️ 4. メイン画面の表示
 # ==========================================
 
 # ------------------------------------------
-# ⚡ モード：AI Console
+# 🤖 モード：AI Console (HUD & Voice機能 ＋ カレンダー連携統合版)
 # ------------------------------------------
 if page == "AI Console":
     chat_sub_mode = st.radio("DISPLAY STYLE", ["HUD Mode", "Chat Mode"], horizontal=True, label_visibility="collapsed")
@@ -351,20 +418,47 @@ if page == "AI Console":
     if "chat_history" not in st.session_state: st.session_state.chat_history = []
     if "ai_voice_base64" not in st.session_state: st.session_state.ai_voice_base64 = None
     if "just_generated_audio" not in st.session_state: st.session_state.just_generated_audio = False
+    if "pending_event" not in st.session_state: st.session_state.pending_event = None # 👈 カレンダー用に追加
 
     core_height = 450 if chat_sub_mode == "HUD Mode" else 220
     v_data = st.session_state.ai_voice_base64 if st.session_state.ai_voice_base64 else ""
     autoplay_attr = "autoplay" if st.session_state.just_generated_audio else ""
     st.session_state.just_generated_audio = False 
     
+    # コアの描画
     core_html = MASTER_CORE_TEMPLATE.replace("H_VAL", str(core_height)).replace("MAX_Wpx", "400").replace("V_DATA", v_data).replace("A_PLAY", autoplay_attr)
     st.components.v1.html(core_html, height=core_height + 20)
 
+    # 🚨 追加：カレンダー追加の「確認ボタン」UI（コアの下に表示）
+    if st.session_state.pending_event:
+        pe = st.session_state.pending_event
+        st.warning(f"📅 以下の予定をカレンダーに登録しますか？\n\n**{pe['title']}**\n開始: {pe['start']}\n終了: {pe['end']}")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ 登録する (Approve)", use_container_width=True):
+                with st.spinner("カレンダーに登録中..."):
+                    cal_json = st.session_state.global_api_keys.get("google_calendar", "")
+                    cal_service = get_calendar_service(cal_json)
+                    success = create_calendar_event(cal_service, pe['title'], pe['start'], pe['end'])
+                    if success:
+                        st.session_state.chat_history.append({"role": "assistant", "avatar": "🤖", "content": f"📅 「{pe['title']}」をカレンダーに登録しました！"})
+                    else:
+                        st.session_state.chat_history.append({"role": "assistant", "avatar": "🤖", "content": "❌ カレンダーの登録に失敗しました。VaultのJSON設定を確認してください。"})
+                st.session_state.pending_event = None
+                st.rerun()
+        with c2:
+            if st.button("❌ キャンセル (Reject)", use_container_width=True):
+                st.session_state.chat_history.append({"role": "assistant", "avatar": "🤖", "content": "登録をキャンセルしました。"})
+                st.session_state.pending_event = None
+                st.rerun()
+
+    # チャットモード時のログ表示
     if chat_sub_mode == "Chat Mode":
         for m in st.session_state.chat_history:
             with st.chat_message(m["role"], avatar=m["avatar"]):
                 st.markdown(m["content"])
     
+    # マイクボタンのCSS
     st.markdown("""
         <style>
         iframe[title*='mic'] { mix-blend-mode: multiply !important; opacity: 0.7; transition: all 0.3s ease-in-out; } 
@@ -373,27 +467,65 @@ if page == "AI Console":
         </style>
     """, unsafe_allow_html=True)
     
+    # マイクボタンの配置
     col1, col2, col3 = st.columns([5, 3, 5]) 
     with col2:
         spoken_text = speech_to_text(language='ja', start_prompt="🎙️ PUSH TO TALK", stop_prompt="🛑 TAP TO SEND", use_container_width=True, just_once=True, key='STT')
 
-    if spoken_text:
-        st.session_state.chat_history.append({"role": "user", "avatar": "👤", "content": spoken_text})
-        st.rerun()
+    # 予定確認中は誤作動を防ぐため入力を一時停止
+    if not st.session_state.pending_event:
+        if spoken_text:
+            st.session_state.chat_history.append({"role": "user", "avatar": "👤", "content": spoken_text})
+            st.rerun()
 
-    if prompt := st.chat_input("コマンドを入力してください、ボス", key="console_input"):
-        st.session_state.chat_history.append({"role": "user", "avatar": "👤", "content": prompt})
-        st.rerun()
+        if prompt := st.chat_input("コマンドを入力してください、ボス", key="console_input"):
+            st.session_state.chat_history.append({"role": "user", "avatar": "👤", "content": prompt})
+            st.rerun()
 
-    if st.session_state.chat_history and st.session_state.chat_history[-1]["role"] == "user":
+    # 🧠 AIの応答生成 ＋ 音声合成 ＋ カレンダーコマンド検知
+    if st.session_state.chat_history and st.session_state.chat_history[-1]["role"] == "user" and not st.session_state.pending_event:
         last_prompt = st.session_state.chat_history[-1]["content"]
         with st.chat_message("assistant", avatar="🤖"):
             with st.spinner(" "):
+                # 金庫からGeminiキーを自動取得
+                gemini_key = st.session_state.global_api_keys.get("gemini", "")
+                if gemini_key:
+                    genai.configure(api_key=gemini_key)
+                
+                # 💡 マスターAIのプロンプト
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                system_instruction = f"""
+                あなたは総合システム「THE FORGE」全体を統括するメインの相棒AI（マスターAI）です。
+                単なるカレンダー秘書ではなく、ボスの右腕としてあらゆる相談、技術的な質問、ブレインストーミング、日常の会話に高度な知性で対応してください。
+
+                【現在の状況】
+                現在時刻: {now_str}
+
+                【カレンダー登録時のシステムコマンド（絶対ルール）】
+                会話の流れでユーザーから「〇〇の予定を追加して」「アポを入れといて」と明確に頼まれた場合【のみ】、システムを動かすために返答の最後に以下の隠しコマンドを出力してください。普段の会話では絶対に出力しないでください。
+                形式: [CALENDAR_ADD: 予定のタイトル | YYYY-MM-DDTHH:MM:00 | YYYY-MM-DDTHH:MM:00]
+                例: [CALENDAR_ADD: 会議 | 2026-03-27T15:00:00 | 2026-03-27T16:00:00]
+                ※時間は必ずISO形式（Tで繋ぐ）で、終了時間が不明な場合は開始から1時間後に設定してください。
+                """
+                
                 model = genai.GenerativeModel(model_name='gemini-2.5-flash')
-                response = model.generate_content(last_prompt)
+                # 履歴を含めたプロンプト構成
+                history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.chat_history[:-1]])
+                full_prompt = system_instruction + "\n\n【会話履歴】\n" + history_text + "\n\nボス: " + last_prompt
+
+                response = model.generate_content(full_prompt)
                 ai_text = response.text
+                
+                # 💡 カレンダーコマンドの検知と除去
+                match = re.search(r'\[CALENDAR_ADD:\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\]', ai_text)
+                if match:
+                    title, start, end = match.groups()
+                    st.session_state.pending_event = {"title": title.strip(), "start": start.strip(), "end": end.strip()}
+                    ai_text = ai_text.replace(match.group(0), "").strip()
+                
                 st.markdown(ai_text)
                 
+                # 🎙️ 音声合成（gTTS）の復元
                 clean_text = ai_text.replace("*", "").replace("#", "").replace("`", "").replace("_", "")
                 tts = gTTS(text=clean_text, lang='ja')
                 audio_fp = io.BytesIO()
@@ -405,10 +537,10 @@ if page == "AI Console":
                 st.rerun()
 
 # ------------------------------------------
-# ❖ モード：Forge Lab (サイバー・ダッシュボード仕様)
+# ❖ モード：Forge Lab (自己修復・自律エージェント仕様)
 # ------------------------------------------
 elif page == "Forge Lab":
-    # 💎 UIデザイン用CSS（エラーにならないよう、ここに移動しました！）
+    # 💎 UIデザイン用CSS
     st.markdown("""
         <style>
         [data-testid="stVerticalBlockBorderWrapper"] {
@@ -430,8 +562,12 @@ elif page == "Forge Lab":
         </style>
     """, unsafe_allow_html=True)
 
+    # 🚨 自己修復トリガーの初期化
+    if "auto_fix_prompt" not in st.session_state:
+        st.session_state.auto_fix_prompt = ""
+
     if "forge_workspaces" not in st.session_state:
-        st.session_state.forge_workspaces = {"First Project": {"chat": [], "code": ""}}
+        st.session_state.forge_workspaces = {"First Project": {"chat": [], "code": "", "retries": 0}}
     if "current_forge_ws" not in st.session_state:
         st.session_state.current_forge_ws = None 
 
@@ -459,7 +595,7 @@ elif page == "Forge Lab":
                                 new_ws_name = st.text_input("Project Name", key="new_ws_name", label_visibility="collapsed", placeholder="New Project Name...")
                                 if st.button("INITIALIZE ⚡", key="create_ws", use_container_width=True):
                                     if new_ws_name and new_ws_name not in st.session_state.forge_workspaces:
-                                        st.session_state.forge_workspaces[new_ws_name] = {"chat": [], "code": ""}
+                                        st.session_state.forge_workspaces[new_ws_name] = {"chat": [], "code": "", "retries": 0}
                                         st.session_state.current_forge_ws = new_ws_name
                                         st.rerun()
                         else:
@@ -482,6 +618,8 @@ elif page == "Forge Lab":
     else:
         ws_name = st.session_state.current_forge_ws
         ws_data = st.session_state.forge_workspaces[ws_name]
+        if "retries" not in ws_data:
+            ws_data["retries"] = 0
         
         if st.button("⬅ RETURN TO DASHBOARD"):
             st.session_state.current_forge_ws = None
@@ -497,7 +635,6 @@ elif page == "Forge Lab":
             st.markdown("<style>iframe[title*='mic'] { mix-blend-mode: multiply; opacity: 0.8; margin-top: 10px; }</style>", unsafe_allow_html=True)
             spoken_text = speech_to_text(language='ja', start_prompt="🎙️ 音声で命令する", stop_prompt="🛑 録音停止＆送信", use_container_width=True, key='Forge_STT')
 
-        # 幅の拡張 [3 : 7]
         col_log, col_preview = st.columns([3, 7])
         
         with col_log:
@@ -514,18 +651,33 @@ elif page == "Forge Lab":
                 if not ws_data["chat"]:
                     st.info("命令を入力してください。")
                 for m in ws_data["chat"]:
-                    with st.chat_message(m["role"], avatar="👤" if m["role"]=="user" else "🤖"):
+                    with st.chat_message(m["role"], avatar="👤" if m["role"]=="user" else "🤖" if m["role"]=="assistant" else "⚠️"):
                         st.markdown(m["content"])
 
         with col_preview:
             st.markdown("<p style='font-weight:bold; color:#718096;'>[ THE FORGE / PREVIEW ]</p>", unsafe_allow_html=True)
-            if ws_data["code"]:
+            
+            # 🚨 自己修復中の場合は実行をスキップしてメッセージを出す
+            if st.session_state.auto_fix_prompt:
+                st.warning("⚙️ システムエラーを検知しました。AIが自律的に別のアプローチを模索・修復しています...")
+            elif ws_data["code"]:
                 st.download_button(label="💾 CODE EXPORT (.py)", data=ws_data["code"], file_name=f"{ws_name}.py", mime="text/plain", use_container_width=True)
                 with st.container(border=True):
                     try:
-                        exec(ws_data["code"])
+                        # コードの実行テスト
+                        exec(ws_data["code"], globals())
+                        ws_data["retries"] = 0 # 成功したらリセット！
                     except Exception as e:
                         st.error(f"実行エラー:\n{e}")
+                        
+                        # 🚨 自己修復トリガーの発動
+                        if ws_data["retries"] < 3:
+                            ws_data["retries"] += 1
+                            st.session_state.auto_fix_prompt = f"実行時に以下のエラーが発生しました。外部ライブラリがない場合は標準機能やGemini APIで代替するなど、アプローチを変えてエラーが出ない完全なコードに修正して！\n\n【エラー内容】\n{e}"
+                            st.rerun() # リロードして自己修復モードへ移行
+                        else:
+                            st.error("❌ 自己修復が上限（3回）に達しました。ボスの手動指示が必要です。")
+                            
                 with st.expander("📝 SOURCE CODE"):
                     st.code(ws_data["code"], language="python")
             else:
@@ -533,17 +685,53 @@ elif page == "Forge Lab":
 
         # 実行ロジック
         trigger_prompt = forge_prompt if submitted else spoken_text if spoken_text else None
+        
+        # 自己修復プロンプトの割り込み処理
+        is_auto_fix = False
+        if st.session_state.auto_fix_prompt:
+            trigger_prompt = st.session_state.auto_fix_prompt
+            st.session_state.auto_fix_prompt = "" # 消費してリセット
+            is_auto_fix = True
+
         if trigger_prompt:
-            ws_data["chat"].append({"role": "user", "avatar": "👤", "content": trigger_prompt})
-            with st.spinner("Building Application..."):
+            if is_auto_fix:
+                ws_data["chat"].append({"role": "system", "avatar": "⚠️", "content": f"⚙️ AUTO-HEALING INITIATED:\n{trigger_prompt}"})
+                sys_msg = "Auto-Healing in progress... 別のアプローチでコードを再構築中..."
+            else:
+                ws_data["chat"].append({"role": "user", "avatar": "👤", "content": trigger_prompt})
+                ws_data["retries"] = 0 # 手動入力があったらリセット
+                sys_msg = "Building Application..."
+
+            with st.spinner(sys_msg):
                 try:
                     history_text = "【履歴】\n" + "\n".join([f"{msg['role']}: {msg['content']}" for msg in ws_data["chat"][:-1]])
+                    
+                    # 🚨 修正：AIの脳みそを【独立型・汎用アプリ生成仕様（ルートB）】にアップデート
                     system_instruction = f"""
                     あなたはStreamlitアプリを作成する天才エンジニア。
-                    省略禁止。st.sidebar使用禁止。st.session_stateを活用すること。
-                    コードブロックの後に、次の拡張アイデアを3つ提案すること。
+                    
+                    【絶対遵守のレイアウト保護ルール】
+                    1. `st.sidebar` と `st.set_page_config` は【絶対に使用禁止】（親アプリが崩壊します）。
+                    2. 🚨 `st.chat_input` もレイアウトが細く潰れるバグを引き起こすため【絶対に使用禁止】。チャットUIが必要な場合は、必ず `st.text_input` と `st.button`（または `st.form`）で代用すること。
+                    
+                    【独立型アプリのAPI・認証ルール（超重要）】
+                    1. 生成するアプリは、どこでも誰でも動かせる「完全独立型」でなければなりません。
+                    2. Gemini API (`google.generativeai`) を使用する場合は、必ずアプリの最上部（または `st.expander` 内）に `st.text_input("Gemini API Key", type="password")` を用いて「APIキー入力欄」を作成してください。
+                    3. ユーザーがAPIキーを入力するまでは、AIを呼び出すメイン機能を表示せず、`st.info` 等でキーの入力を促す安全な設計にしてください。
+                    4. キーが入力されたら `genai.configure(api_key=入力されたキー)` を実行してAIを起動してください。
+                    
+                    【無料のハイクオリティ音声機能ルール】
+                    1. 有料のOpenAIライブラリは一切不要です。
+                    2. 🎙️ 音声入力(STT): `from streamlit_mic_recorder import speech_to_text` をインポートし、`text = speech_to_text(language='ja', key='mic')` を使う。
+                    3. 🗣️ 音声合成(TTS): `from gtts import gTTS` を使い、生成した音声を `st.audio` などで再生する。
+                    
+                    【その他のルール】
+                    1. コードは `# ...` などの省略をせず、1行目から最後まで完全に出力すること。
+                    2. コードブロックの後に「💡 次の拡張アイデア：」を3つ提案すること。
+                    
                     {history_text}
                     """
+                    
                     model = genai.GenerativeModel('gemini-2.5-flash')
                     response = model.generate_content(system_instruction + "\n現在の指示: " + trigger_prompt)
                     ai_text = response.text
@@ -551,7 +739,7 @@ elif page == "Forge Lab":
                     code_match = re.search(r'```python\n(.*?)\n```', ai_text, re.DOTALL)
                     if code_match:
                         ws_data["code"] = code_match.group(1)
-                        reply_text = ai_text.replace(code_match.group(0), "").strip() or "構築が完了しました。"
+                        reply_text = ai_text.replace(code_match.group(0), "").strip() or "構築（修復）が完了しました。"
                     else:
                         reply_text = "コード生成に失敗しました。\n" + ai_text
                         
@@ -753,11 +941,230 @@ elif page == "Dashboard" or page == "📊 ダッシュボード":
     st.info("ここに全体のグラフや、相棒の稼働状況などの分析画面を追加します！（次回実装！）")
 
 # ------------------------------------------
-# 🗝️ モード：秘密の保管庫
+# 🔐 モード：Secure Vault (親切マニュアル・Gmail復旧機能付き)
 # ------------------------------------------
-elif page == "Secure Vault" or page == "🗝️ 秘密の保管庫":
-    st.title("🗝️ 秘密の保管庫")
-    st.warning("⚠️ 新しいAPIキー（Slack, n8nなど）を登録・管理する厳重管理エリアを作ります。（次回実装！）")
+elif page == "Secure Vault":
+    # 💎 UIデザイン用CSS
+    st.markdown("""
+        <style>
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            background: rgba(255, 255, 255, 0.4) !important;
+            backdrop-filter: blur(10px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.9) !important;
+            border-radius: 15px !important;
+            box-shadow: 6px 6px 15px rgba(163, 177, 198, 0.4), -6px -6px 15px rgba(255, 255, 255, 0.9) !important;
+        }
+        .cyber-title { color: #2b6cb0; font-weight: 800; letter-spacing: 2px; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(255,255,255,0.8); }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<h2 class='cyber-title'>🔐 SECURE VAULT</h2>", unsafe_allow_html=True)
+    st.caption("AI相棒や各種システムを動かすための「鍵」と「連絡網」を保管する極秘エリアです。")
+
+    VAULT_FILE = "vault_data.json"
+
+    def hash_password(password):
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    if "vault_unlocked" not in st.session_state:
+        st.session_state.vault_unlocked = False
+    if "reset_mode" not in st.session_state:
+        st.session_state.reset_mode = False
+    if "sent_otp" not in st.session_state:
+        st.session_state.sent_otp = None
+
+    vault_data = {}
+    if os.path.exists(VAULT_FILE):
+        with open(VAULT_FILE, "r", encoding="utf-8") as f:
+            vault_data = json.load(f)
+
+    # ==========================================
+    # 🚪 ステージ1：認証（ロック画面 ＆ パスワードリセット）
+    # ==========================================
+    if not st.session_state.vault_unlocked:
+        col1, col2, col3 = st.columns([2, 5, 2])
+        with col2:
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align:center;'>🔑 SYSTEM LOCKED</h3>", unsafe_allow_html=True)
+                
+                if "master_password_hash" not in vault_data:
+                    st.info("👋 初回セットアップ：あなた専用の「マスターパスワード」を作成してください。")
+                    new_pass = st.text_input("新しいマスターパスワード", type="password", key="new_pass")
+                    new_pass_confirm = st.text_input("確認のためもう一度入力", type="password", key="new_pass_confirm")
+                    
+                    if st.button("金庫を初期化する ⚡", use_container_width=True):
+                        if new_pass and new_pass == new_pass_confirm:
+                            vault_data["master_password_hash"] = hash_password(new_pass)
+                            vault_data["api_keys"] = {
+                                "gemini": "", "google_calendar": "", "slack": "", "line": "",
+                                "my_email": "", "my_email_app_password": ""
+                            }
+                            with open(VAULT_FILE, "w", encoding="utf-8") as f:
+                                json.dump(vault_data, f, indent=4)
+                            st.session_state.vault_unlocked = True
+                            st.success("金庫の初期化に成功しました！まずは内部で各種設定を行ってください。")
+                            st.rerun()
+                        else:
+                            st.error("パスワードが一致しないか、入力されていません。")
+                
+                elif st.session_state.reset_mode:
+                    st.warning("⚠️ パスワード復旧プロセスを開始します。")
+                    my_email = vault_data.get("api_keys", {}).get("my_email", "")
+                    my_email_pass = vault_data.get("api_keys", {}).get("my_email_app_password", "")
+                    
+                    if not my_email or not my_email_pass:
+                        st.error("❌ 金庫内にGmailの連携設定がないため、復旧メールを送信できません。")
+                        if st.button("⬅️ ロック画面に戻る"):
+                            st.session_state.reset_mode = False
+                            st.rerun()
+                    else:
+                        if st.session_state.sent_otp is None:
+                            st.info(f"登録されているアドレス ({my_email}) 宛に、6桁の認証コードを送信します。")
+                            if st.button("📩 認証コードを送信する", use_container_width=True):
+                                otp = str(random.randint(100000, 999999))
+                                try:
+                                    msg = MIMEText(f"ボス、パスワードリセットの要請を受信しました。\n\n認証コード: 【 {otp} 】\n\nこのコードをアプリに入力して、新しいパスワードを設定してください。")
+                                    msg["Subject"] = "【THE FORGE】パスワードリセット認証コード"
+                                    msg["From"] = my_email
+                                    msg["To"] = my_email
+                                    
+                                    server = smtplib.SMTP("smtp.gmail.com", 587)
+                                    server.starttls()
+                                    server.login(my_email, my_email_pass)
+                                    server.send_message(msg)
+                                    server.quit()
+                                    
+                                    st.session_state.sent_otp = otp
+                                    st.success("認証コードを送信しました！メールをご確認ください。")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"メール送信に失敗しました: {e}")
+                        else:
+                            st.info("メールに届いた6桁の認証コードと、新しいパスワードを入力してください。")
+                            entered_otp = st.text_input("認証コード (6桁)")
+                            reset_new_pass = st.text_input("新しいパスワード", type="password")
+                            reset_confirm_pass = st.text_input("新しいパスワード(確認)", type="password")
+                            
+                            if st.button("🔐 パスワードを再設定する", use_container_width=True):
+                                if entered_otp == st.session_state.sent_otp:
+                                    if reset_new_pass and reset_new_pass == reset_confirm_pass:
+                                        vault_data["master_password_hash"] = hash_password(reset_new_pass)
+                                        with open(VAULT_FILE, "w", encoding="utf-8") as f:
+                                            json.dump(vault_data, f, indent=4)
+                                        st.session_state.reset_mode = False
+                                        st.session_state.sent_otp = None
+                                        st.success("パスワードの再設定が完了しました！新しいパスワードでログインしてください。")
+                                        st.rerun()
+                                    else:
+                                        st.error("新しいパスワードが一致しません。")
+                                else:
+                                    st.error("認証コードが間違っています。")
+                            
+                            if st.button("キャンセル"):
+                                st.session_state.reset_mode = False
+                                st.session_state.sent_otp = None
+                                st.rerun()
+
+                else:
+                    st.warning("⚠️ このエリアはボス（管理者）の承認が必要です。")
+                    enter_pass = st.text_input("マスターパスワードを入力", type="password", key="enter_pass")
+                    
+                    if st.button("UNLOCK 🔓", use_container_width=True):
+                        if hash_password(enter_pass) == vault_data["master_password_hash"]:
+                            st.session_state.vault_unlocked = True
+                            st.success("認証完了。金庫を開きます。")
+                            st.rerun()
+                        else:
+                            st.error("アクセス拒否：パスワードが違います。")
+                            
+                    st.markdown("---")
+                    if st.button("パスワードを忘れた場合 (メールで復旧)", use_container_width=True):
+                        st.session_state.reset_mode = True
+                        st.rerun()
+
+    # ==========================================
+    # 🔓 ステージ2：金庫の内部（API ＆ Email設定 ＋ マニュアル）
+    # ==========================================
+    if st.session_state.vault_unlocked:
+        if st.button("🔒 金庫をロックして退出"):
+            st.session_state.vault_unlocked = False
+            st.rerun()
+
+        st.markdown("#### ⚙️ CORE API & COMMUNICATION CONFIGURATION")
+        st.info("ここに入力されたキーはシステム全体で安全に共有されます。取得方法が分からない場合は「ℹ️ 取得手順」を開いてください。")
+        
+        with st.form("vault_keys_form"):
+            keys = vault_data.get("api_keys", {})
+            
+            # 1. Email
+            st.markdown("##### 📧 Email System (パスワード復旧・通知用)")
+            new_email = st.text_input("自分のGmailアドレス", value=keys.get("my_email", ""))
+            new_email_pass = st.text_input("Gmail アプリパスワード (16桁)", value=keys.get("my_email_app_password", ""), type="password")
+            with st.expander("ℹ️ Gmailアプリパスワードの取得手順"):
+                st.markdown("""
+                1. Googleアカウントの管理画面を開く。
+                2. 左側のメニューから「セキュリティ」を選択。
+                3. 「Google へのログイン」セクションで**「2段階認証プロセス」**をオンにする。
+                4. 画面上部の検索窓で**「アプリパスワード」**と検索する。
+                5. アプリ名を「AI相棒」などにして「作成」を押し、表示された**16桁の英字**をここにコピペしてください。
+                """)
+            
+            # 2. Gemini
+            st.markdown("##### 🧠 AI Core (Gemini)")
+            new_gemini = st.text_input("Gemini API Key", value=keys.get("gemini", ""), type="password")
+            with st.expander("ℹ️ Gemini API Keyの取得手順"):
+                st.markdown("""
+                1. [Google AI Studio](https://aistudio.google.com/) にアクセスし、Googleアカウントでログイン。
+                2. 左メニューの **「Get API key」** をクリック。
+                3. **「Create API key」** ボタンを押して新しいプロジェクトでキーを発行。
+                4. 生成された `AIza...` から始まる文字列をコピーしてここに貼り付けてください。（完全無料です）
+                """)
+            
+            # 3. Calendar
+            st.markdown("##### 📅 Schedule (Google Calendar)")
+            new_calendar = st.text_input("Google Calendar 認証情報", value=keys.get("google_calendar", ""), type="password")
+            with st.expander("ℹ️ Google Calendar 連携の準備について"):
+                st.markdown("""
+                *※カレンダー連携は高度な設定が必要なため、現在は準備枠のみです。*
+                1. Google Cloud Console でプロジェクトを作成。
+                2. 「Google Calendar API」を有効化。
+                3. 「サービスアカウント」を作成し、JSON形式の鍵をダウンロードして使用します。
+                """)
+            
+            # 4. Slack & LINE
+            st.markdown("##### 💬 Communication (Slack & LINE)")
+            new_slack = st.text_input("Slack Bot Token", value=keys.get("slack", ""), type="password")
+            with st.expander("ℹ️ Slack Bot Tokenの取得手順"):
+                st.markdown("""
+                1. [Slack API](https://api.slack.com/apps) ページへアクセスし、「Create New App」を押す。
+                2. 「OAuth & Permissions」メニューを開く。
+                3. Scopes（権限）で `chat:write` などを追加し、ワークスペースにインストール。
+                4. `xoxb-` から始まる **Bot User OAuth Token** をここに貼り付けます。
+                """)
+
+            new_line = st.text_input("LINE Messaging API Token", value=keys.get("line", ""), type="password")
+            with st.expander("ℹ️ LINE Tokenの取得手順"):
+                st.markdown("""
+                1. [LINE Developers](https://developers.line.biz/ja/) にログイン。
+                2. 新規プロバイダーを作成し、「Messaging API」チャネルを作成。
+                3. 「Messaging API設定」タブの一番下にある **チャネルアクセストークン（ロングターム）** を発行し、ここに貼り付けます。
+                """)
+            
+            st.markdown("---")
+            submitted = st.form_submit_button("💾 変更を保存してシステムに適用", use_container_width=True)
+            
+            if submitted:
+                vault_data["api_keys"] = {
+                    "my_email": new_email, "my_email_app_password": new_email_pass,
+                    "gemini": new_gemini, "google_calendar": new_calendar,
+                    "slack": new_slack, "line": new_line
+                }
+                
+                with open(VAULT_FILE, "w", encoding="utf-8") as f:
+                    json.dump(vault_data, f, indent=4)
+                
+                st.session_state.global_api_keys = vault_data["api_keys"]
+                st.success("設定を安全に保存し、システム全体に同期しました！")
 
 # ------------------------------------------
 # 🧠 モード：Core Upgrade (自己進化プロトコル)
