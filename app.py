@@ -12,7 +12,7 @@ import pypdf
 import os
 import json  # 👈 これを追加！
 
-st.set_page_config(page_title="相棒AI ダッシュボード", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AIbou", page_icon="❖", layout="wide")
 
 # ==========================================
 # 🔐 1. ログインシステム
