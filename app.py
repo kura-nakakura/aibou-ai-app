@@ -9,7 +9,8 @@ import io
 import re
 from streamlit_mic_recorder import speech_to_text
 import pypdf
-import os  # 👈 これを追加！
+import os
+import json  # 👈 これを追加！
 
 st.set_page_config(page_title="相棒AI ダッシュボード", page_icon="🤖", layout="wide")
 
