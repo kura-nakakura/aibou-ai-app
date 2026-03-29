@@ -21,17 +21,41 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import datetime
 
+# === ☁️ クラウドDB ＆ 暗号化エンジン (Supabase) ===
+from supabase import create_client, Client
+from cryptography.fernet import Fernet
+
+try:
+    supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    hasher = hashlib.sha256(st.secrets["MASTER_ENCRYPTION_KEY"].encode('utf-8')).digest()
+    cipher_suite = Fernet(base64.urlsafe_b64encode(hasher))
+    DB_CONNECTED = True
+except Exception as e:
+    DB_CONNECTED = False
+
+def load_vault():
+    if not DB_CONNECTED: return {}
+    try:
+        res = supabase.table("vault_data").select("encrypted_keys").eq("id", 1).execute()
+        if res.data and res.data[0].get("encrypted_keys"):
+            decrypted = cipher_suite.decrypt(res.data[0]["encrypted_keys"].encode('utf-8'))
+            return json.loads(decrypted.decode('utf-8'))
+    except: pass
+    return {}
+
+def save_vault(data):
+    if not DB_CONNECTED: return False
+    try:
+        encrypted = cipher_suite.encrypt(json.dumps(data).encode('utf-8')).decode('utf-8')
+        supabase.table("vault_data").upsert({"id": 1, "encrypted_keys": encrypted}).execute()
+        return True
+    except: return False
+
 # === システム起動時の「金庫の鍵」自動読み込み ===
 if "global_api_keys" not in st.session_state:
     st.session_state.global_api_keys = {}
-    vault_file = "vault_data.json"
-    if os.path.exists(vault_file):
-        try:
-            with open(vault_file, "r", encoding="utf-8") as f:
-                vd = json.load(f)
-                st.session_state.global_api_keys = vd.get("api_keys", {})
-        except:
-            pass
+    vd = load_vault()
+    st.session_state.global_api_keys = vd.get("api_keys", {})
 
 st.set_page_config(page_title="AIbou", page_icon="❖", layout="wide")
 
@@ -1151,11 +1175,7 @@ elif page == "Dashboard" or page == "DASHBOARD":
     st.markdown("<h2 class='cyber-title'>📊 SYSTEM DASHBOARD</h2>", unsafe_allow_html=True)
     
     # --- データ読み込み ---
-    VAULT_FILE = "vault_data.json"
-    vault_data = {}
-    if os.path.exists(VAULT_FILE):
-        with open(VAULT_FILE, "r", encoding="utf-8") as f:
-            vault_data = json.load(f)
+    vault_data = load_vault()
     
     my_email = vault_data.get("api_keys", {}).get("my_email", "")
     gcal_json_str = vault_data.get("api_keys", {}).get("google_calendar", "")
@@ -1597,10 +1617,12 @@ elif page == "Settings" or page == "⚙️ SETTINGS":
 
         # ================================
         elif setting_mode == "🔐 Secure Vault":
-            st.markdown("#### 🔐 SECURE VAULT")
-            st.caption("AI相棒や各種システムを動かすための「鍵」と「連絡網」を保管する極秘エリアです。")
+            st.markdown("#### 🔐 SECURE VAULT (Cloud Sync)")
+            st.caption("AI相棒や各種システムを動かすための「鍵」と「連絡網」を保管する極秘エリアです。データはクラウドに暗号化保存されます。")
 
-            VAULT_FILE = "vault_data.json"
+            if not DB_CONNECTED:
+                st.error("⚠️ データベースの接続設定（Secrets）が完了していません。")
+                st.stop()
 
             def hash_password(password):
                 return hashlib.sha256(password.encode()).hexdigest()
@@ -1612,10 +1634,8 @@ elif page == "Settings" or page == "⚙️ SETTINGS":
             if "sent_otp" not in st.session_state:
                 st.session_state.sent_otp = None
 
-            vault_data = {}
-            if os.path.exists(VAULT_FILE):
-                with open(VAULT_FILE, "r", encoding="utf-8") as f:
-                    vault_data = json.load(f)
+            # クラウドからロード
+            vault_data = load_vault()
 
             # 🚪 ステージ1：認証（ロック画面 ＆ パスワードリセット）
             if not st.session_state.vault_unlocked:
@@ -1637,8 +1657,7 @@ elif page == "Settings" or page == "⚙️ SETTINGS":
                                         "my_email": "", "my_email_app_password": "",
                                         "gh_token": "", "gh_owner": "", "gh_repo": ""
                                     }
-                                    with open(VAULT_FILE, "w", encoding="utf-8") as f:
-                                        json.dump(vault_data, f, indent=4)
+                                   save_vault(vault_data) # クラウドへ保存
                                     st.session_state.vault_unlocked = True
                                     st.success("金庫の初期化に成功しました！まずは内部で各種設定を行ってください。")
                                     st.rerun()
@@ -1727,7 +1746,7 @@ elif page == "Settings" or page == "⚙️ SETTINGS":
                     st.rerun()
 
                 st.markdown("#### ⚙️ CORE API & COMMUNICATION CONFIGURATION")
-                st.info("ここに入力されたキーはシステム全体で安全に共有されます。")
+                st.info("ここに入力されたキーはシステム全体で安全に共有され、クラウドに暗号化保存されます。")
                 
                 with st.form("vault_keys_form"):
                     keys = vault_data.get("api_keys", {})
@@ -1825,11 +1844,12 @@ elif page == "Settings" or page == "⚙️ SETTINGS":
                             "gh_token": new_gh_token, "gh_owner": new_gh_owner, "gh_repo": new_gh_repo
                         }
                         
-                        with open(VAULT_FILE, "w", encoding="utf-8") as f:
-                            json.dump(vault_data, f, indent=4)
-                        
-                        st.session_state.global_api_keys = vault_data["api_keys"]
-                        st.success("設定を安全に保存し、システム全体に同期しました！")
+                        if save_vault(vault_data):
+                            st.session_state.global_api_keys = vault_data["api_keys"]
+                            st.success("✅ 設定を安全に保存し、クラウドデータベースへ同期しました！")
+                            st.balloons()
+                        else:
+                            st.error("❌ 保存に失敗しました。データベースの接続設定を確認してください。")
 
         # ================================
         elif setting_mode == "📖 取扱説明書":
