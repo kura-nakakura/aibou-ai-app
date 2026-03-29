@@ -49,7 +49,9 @@ def save_vault(data):
         encrypted = cipher_suite.encrypt(json.dumps(data).encode('utf-8')).decode('utf-8')
         supabase.table("vault_data").upsert({"id": 1, "encrypted_keys": encrypted}).execute()
         return True
-    except: return False
+    except Exception as e:
+        st.error(f"🚨 【DB書き込み詳細エラー】: {e}")
+        return False
 
 # === システム起動時の「金庫の鍵」自動読み込み ===
 if "global_api_keys" not in st.session_state:
