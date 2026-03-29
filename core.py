@@ -1657,7 +1657,7 @@ elif page == "Settings" or page == "⚙️ SETTINGS":
                                         "my_email": "", "my_email_app_password": "",
                                         "gh_token": "", "gh_owner": "", "gh_repo": ""
                                     }
-                                   save_vault(vault_data) # クラウドへ保存
+                                    save_vault(vault_data) # クラウドへ保存
                                     st.session_state.vault_unlocked = True
                                     st.success("金庫の初期化に成功しました！まずは内部で各種設定を行ってください。")
                                     st.rerun()
