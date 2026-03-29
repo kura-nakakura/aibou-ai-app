@@ -187,27 +187,39 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 # ==========================================
-# 🧠 3. バックグラウンド接続
+# 🧠 3. バックグラウンド接続 (Fail-Safe 実装済)
 # ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
+# 🚨 新機能：スプレッドシートがエラーの時にアプリを落とさない「ダミー生成器」
+class DummySheet:
+    def get_all_values(self):
+        return [
+            ['タスクID', '目標', 'タスク内容', 'ステータス', 'ログ', 'ボスの回答'],
+            ['ERR-001', 'System', '⚠️ スプレッドシート連携エラー（SecretsのGOOGLE_CREDENTIALSの記述が崩れています）', '未着手', '設定を確認してください。', '']
+        ]
+    def update_cell(self, row, col, val):
+        pass
+
 @st.cache_resource
 def get_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    if "GOOGLE_CREDENTIALS" in st.secrets:
+    if "GOOGLE_CREDENTIALS" in st.secrets and st.secrets["GOOGLE_CREDENTIALS"].strip():
         creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    else:
+    elif os.path.exists('credentials.json'):
         creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+    else:
+        return DummySheet()
     client = gspread.authorize(creds)
     return client.open("AibouAgent").worksheet("Agent_Brain")
 
 try:
     sheet = get_sheet()
 except Exception as e:
-    st.error(f"データベース接続エラー: {e}")
-    st.stop()
+    sheet = DummySheet()
+    st.sidebar.error("⚠️ スプレッドシート接続エラー：一部機能が制限されています。")
 
 
 # 🚨【超重要】AI Console と Forge Lab のコアを完全に共通化する設計図
