@@ -38,19 +38,22 @@ def load_vault():
     try:
         res = supabase.table("vault_data").select("encrypted_keys").eq("id", 1).execute()
         if res.data and res.data[0].get("encrypted_keys"):
-            decrypted = cipher_suite.decrypt(res.data[0]["encrypted_keys"].encode('utf-8'))
+            enc_data = res.data[0]["encrypted_keys"]
+            if enc_data == '': return {} # 初期状態
+            decrypted = cipher_suite.decrypt(enc_data.encode('utf-8'))
             return json.loads(decrypted.decode('utf-8'))
-    except: pass
+    except Exception as e:
+        st.error(f"🚨 【DB読み込みエラー】: {e}")
     return {}
 
 def save_vault(data):
     if not DB_CONNECTED: return False
     try:
         encrypted = cipher_suite.encrypt(json.dumps(data).encode('utf-8')).decode('utf-8')
-        supabase.table("vault_data").upsert({"id": 1, "encrypted_keys": encrypted}).execute()
+        res = supabase.table("vault_data").upsert({"id": 1, "encrypted_keys": encrypted}).execute()
         return True
     except Exception as e:
-        st.error(f"🚨 【DB書き込み詳細エラー】: {e}")
+        st.error(f"🚨 【DB書き込みエラー】: {e}")
         return False
 
 # === システム起動時の「金庫の鍵」自動読み込み ===
@@ -1671,10 +1674,14 @@ elif page == "Settings" or page == "⚙️ SETTINGS":
                                         "my_email": "", "my_email_app_password": "",
                                         "gh_token": "", "gh_owner": "", "gh_repo": ""
                                     }
-                                    save_vault(vault_data) # クラウドへ保存
-                                    st.session_state.vault_unlocked = True
-                                    st.success("金庫の初期化に成功しました！まずは内部で各種設定を行ってください。")
-                                    st.rerun()
+                                    
+                                    # 🚨 修正：保存に成功した時だけロック解除＆リロードする
+                                    if save_vault(vault_data):
+                                        st.session_state.vault_unlocked = True
+                                        st.success("金庫の初期化に成功しました！まずは内部で各種設定を行ってください。")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ クラウドへの初期化データの保存に失敗しました。上の赤いエラーを確認してください。")
                                 else:
                                     st.error("パスワードが一致しないか、入力されていません。")
                         
