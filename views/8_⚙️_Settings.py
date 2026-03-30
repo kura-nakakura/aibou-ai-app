@@ -1,0 +1,332 @@
+st.markdown("""
+    <style>
+    .cyber-title { color: #2b6cb0; font-weight: 800; letter-spacing: 2px; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(255,255,255,0.8); }
+    .setting-menu label { cursor: pointer !important; }
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background: rgba(255, 255, 255, 0.4) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.9) !important;
+        border-radius: 15px !important;
+        box-shadow: 6px 6px 15px rgba(163, 177, 198, 0.4), -6px -6px 15px rgba(255, 255, 255, 0.9) !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown("<h2 class='cyber-title'>⚙️ SYSTEM SETTINGS</h2>", unsafe_allow_html=True)
+
+# 画面を左（メニュー）と右（コンテンツ）に分割
+col_menu, col_content = st.columns([2, 8], gap="large")
+
+with col_menu:
+    st.markdown("<div style='font-weight:bold; color:#718096; margin-bottom:10px;'>[ MENU ]</div>", unsafe_allow_html=True)
+    setting_mode = st.radio("設定メニュー", [
+        "🛠️ 基本設定",
+        "🧠 コア設定",
+        "🕰️ システム復元", 
+        "🔐 Secure Vault", 
+        "📖 取扱説明書", 
+        "🚪 ログアウト"
+    ], label_visibility="collapsed")
+
+with col_content:
+    # ================================
+    if setting_mode == "🛠️ 基本設定":
+        st.markdown("#### 🛠️ 基本設定 (General)")
+        st.info("言語設定の切り替えや、メイン画面の背景変更、ログイン画面のパスワード変更機能をここに追加します（今後実装予定）。")
+
+    # ================================
+    elif setting_mode == "🧠 コア設定":
+        st.markdown("#### 🧠 コア設定 (Core)")
+        st.info("コアの脈動、色、音声フィルターなどの設定パネルにアクセスする機能をここに追加します。")
+
+    # ================================
+    elif setting_mode == "🕰️ システム復元":
+        st.markdown("#### 🕰️ SYSTEM TIME MACHINE (過去5回分)")
+        st.caption("/// 進化（OVERRIDE）前の安全な状態に復元します ///")
+        
+        os.makedirs("backups", exist_ok=True)
+        backup_files = sorted([f for f in os.listdir("backups") if f.endswith(".py")], reverse=True)
+        
+        if not backup_files:
+            st.info("現在、バックアップ履歴はありません。「EVOLUTION」で進化を実行すると自動的に保存されます。")
+        else:
+            selected_backup = st.selectbox("復元するバージョンを選択:", backup_files)
+            with st.expander(f"👁️ プレビュー : {selected_backup}", expanded=False):
+                try:
+                    with open(f"backups/{selected_backup}", "r", encoding="utf-8") as f:
+                        backup_code = f.read()
+                    st.code(backup_code, language="python")
+                except Exception as e:
+                    st.error(f"読み込みエラー: {e}")
+            
+            st.warning("⚠️ 復元を実行すると、現在の `core.py` はこのバックアップの状態で上書きされます。")
+            if st.button("⏪ この時代に復元する", use_container_width=True, type="primary"):
+                try:
+                    with open("core.py", "w", encoding="utf-8") as f:
+                        f.write(backup_code)
+                    st.success("✅ SYSTEM RESTORED. 再起動しています...")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"復元エラー: {e}")
+
+    # ================================
+    elif setting_mode == "🔐 Secure Vault":
+        st.markdown("#### 🔐 SECURE VAULT (Cloud Sync)")
+        st.caption("AI相棒や各種システムを動かすための「鍵」と「連絡網」を保管する極秘エリアです。データはクラウドに暗号化保存されます。")
+
+        if not DB_CONNECTED:
+            st.error("⚠️ データベースの接続設定（Secrets）が完了していません。")
+            st.stop()
+
+        def hash_password(password):
+            return hashlib.sha256(password.encode()).hexdigest()
+
+        if "vault_unlocked" not in st.session_state:
+            st.session_state.vault_unlocked = False
+        if "reset_mode" not in st.session_state:
+            st.session_state.reset_mode = False
+        if "sent_otp" not in st.session_state:
+            st.session_state.sent_otp = None
+
+        # クラウドからロード
+        vault_data = load_vault()
+
+        # 🚪 ステージ1：認証（ロック画面 ＆ パスワードリセット）
+        if not st.session_state.vault_unlocked:
+            col1, col2, col3 = st.columns([1, 8, 1])
+            with col2:
+                with st.container(border=True):
+                    st.markdown("<h3 style='text-align:center;'>🔑 SYSTEM LOCKED</h3>", unsafe_allow_html=True)
+                    
+                    if "master_password_hash" not in vault_data:
+                        st.info("👋 初回セットアップ：あなた専用の「マスターパスワード」を作成してください。")
+                        new_pass = st.text_input("新しいマスターパスワード", type="password", key="new_pass")
+                        new_pass_confirm = st.text_input("確認のためもう一度入力", type="password", key="new_pass_confirm")
+                        
+                        if st.button("金庫を初期化する ⚡", use_container_width=True):
+                            if new_pass and new_pass == new_pass_confirm:
+                                vault_data["master_password_hash"] = hash_password(new_pass)
+                                vault_data["api_keys"] = {
+                                    "gemini": "", "google_calendar": "", "slack": "", "line": "",
+                                    "my_email": "", "my_email_app_password": "",
+                                    "gh_token": "", "gh_owner": "", "gh_repo": ""
+                                }
+                                
+                                # 🚨 修正：保存に成功した時だけロック解除＆リロードする
+                                if save_vault(vault_data):
+                                    st.session_state.vault_unlocked = True
+                                    st.success("金庫の初期化に成功しました！まずは内部で各種設定を行ってください。")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ クラウドへの初期化データの保存に失敗しました。上の赤いエラーを確認してください。")
+                            else:
+                                st.error("パスワードが一致しないか、入力されていません。")
+                    
+                    elif st.session_state.reset_mode:
+                        st.warning("⚠️ パスワード復旧プロセスを開始します。")
+                        my_email = vault_data.get("api_keys", {}).get("my_email", "")
+                        my_email_pass = vault_data.get("api_keys", {}).get("my_email_app_password", "")
+                        
+                        if not my_email or not my_email_pass:
+                            st.error("❌ 金庫内にGmailの連携設定がないため、復旧メールを送信できません。")
+                            if st.button("⬅️ ロック画面に戻る"):
+                                st.session_state.reset_mode = False
+                                st.rerun()
+                        else:
+                            if st.session_state.sent_otp is None:
+                                st.info(f"登録されているアドレス ({my_email}) 宛に、6桁の認証コードを送信します。")
+                                if st.button("📩 認証コードを送信する", use_container_width=True):
+                                    otp = str(random.randint(100000, 999999))
+                                    try:
+                                        msg = MIMEText(f"ボス、パスワードリセットの要請を受信しました。\n\n認証コード: 【 {otp} 】\n\nこのコードをアプリに入力して、新しいパスワードを設定してください。")
+                                        msg["Subject"] = "【THE FORGE】パスワードリセット認証コード"
+                                        msg["From"] = my_email
+                                        msg["To"] = my_email
+                                        
+                                        server = smtplib.SMTP("smtp.gmail.com", 587)
+                                        server.starttls()
+                                        server.login(my_email, my_email_pass)
+                                        server.send_message(msg)
+                                        server.quit()
+                                        
+                                        st.session_state.sent_otp = otp
+                                        st.success("認証コードを送信しました！メールをご確認ください。")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"メール送信に失敗しました: {e}")
+                            else:
+                                st.info("メールに届いた6桁の認証コードと、新しいパスワードを入力してください。")
+                                entered_otp = st.text_input("認証コード (6桁)")
+                                reset_new_pass = st.text_input("新しいパスワード", type="password")
+                                reset_confirm_pass = st.text_input("新しいパスワード(確認)", type="password")
+                                
+                                if st.button("🔐 パスワードを再設定する", use_container_width=True):
+                                    if entered_otp == st.session_state.sent_otp:
+                                        if reset_new_pass and reset_new_pass == reset_confirm_pass:
+                                            vault_data["master_password_hash"] = hash_password(reset_new_pass)
+                                            save_vault(vault_data)
+                                            st.session_state.reset_mode = False
+                                            st.session_state.sent_otp = None
+                                            st.success("パスワードの再設定が完了しました！新しいパスワードでログインしてください。")
+                                            st.rerun()
+                                        else:
+                                            st.error("新しいパスワードが一致しません。")
+                                    else:
+                                        st.error("認証コードが間違っています。")
+                                
+                                if st.button("キャンセル"):
+                                    st.session_state.reset_mode = False
+                                    st.session_state.sent_otp = None
+                                    st.rerun()
+
+                    else:
+                        st.warning("⚠️ このエリアはボス（管理者）の承認が必要です。")
+                        enter_pass = st.text_input("マスターパスワードを入力", type="password", key="enter_pass")
+                        
+                        if st.button("UNLOCK 🔓", use_container_width=True):
+                            if hash_password(enter_pass) == vault_data["master_password_hash"]:
+                                st.session_state.vault_unlocked = True
+                                st.success("認証完了。金庫を開きます。")
+                                st.rerun()
+                            else:
+                                st.error("アクセス拒否：パスワードが違います。")
+                        
+                        st.markdown("---")
+                        if st.button("パスワードを忘れた場合 (メールで復旧)", use_container_width=True):
+                            st.session_state.reset_mode = True
+                            st.rerun()
+
+        # 🔓 ステージ2：金庫の内部
+        if st.session_state.vault_unlocked:
+            if st.button("🔒 金庫をロックして退出"):
+                st.session_state.vault_unlocked = False
+                st.rerun()
+
+            st.markdown("#### ⚙️ CORE API & COMMUNICATION CONFIGURATION")
+            st.info("ここに入力されたキーはシステム全体で安全に共有され、クラウドに暗号化保存されます。")
+            
+            with st.form("vault_keys_form"):
+                keys = vault_data.get("api_keys", {})
+                
+                st.markdown("##### 📧 Email System (パスワード復旧・通知用)")
+                new_email = st.text_input("自分のGmailアドレス", value=keys.get("my_email", ""))
+                new_email_pass = st.text_input("Gmail アプリパスワード (16桁)", value=keys.get("my_email_app_password", ""), type="password")
+                with st.expander("ℹ️ Gmailアプリパスワードの取得手順（超詳細）"):
+                    st.markdown("""
+                    1. スマホやPCのブラウザで [Googleアカウント管理画面](https://myaccount.google.com/) にアクセスしてログインします。
+                    2. 左側のメニューから **「セキュリティ」** をクリックします。
+                    3. 少し下にスクロールし、「Google へのログイン」の中にある **「2段階認証プロセス」** をクリックしてオンにします（既にオンなら次へ）。
+                    4. 画面上部の検索窓（虫眼鏡マーク）で **「アプリパスワード」** と入力して検索・選択します。
+                    5. アプリ名に「THE FORGE」など好きな名前を入力して **「作成」** ボタンを押します。
+                    6. 画面に黄色の背景で表示される **16桁の英字（空白なしでそのまま）** をコピーして、上のパスワード欄に貼り付けてください。
+                    """)
+                
+                st.markdown("##### 🧠 AI Core (Gemini)")
+                new_gemini = st.text_input("Gemini API Key", value=keys.get("gemini", ""), type="password")
+                with st.expander("ℹ️ Gemini API Keyの取得手順（完全無料）"):
+                    st.markdown("""
+                    1. [Google AI Studio](https://aistudio.google.com/) にアクセスし、普段使っているGoogleアカウントでログインします。
+                    2. 規約の同意画面が出たらチェックを入れて進みます。
+                    3. 画面左上のメニュー（または左側ナビゲーション）にある **「Get API key」** という青い鍵マークのボタンをクリックします。
+                    4. **「Create API key」** ボタンをクリックします。
+                    5. 「Create API key in new project」を選択するとキーが生成されます。
+                    6. 生成された **`AIza...`** から始まる非常に長い文字列をコピーして、上の欄に貼り付けてください。
+                    """)
+                
+                st.markdown("##### 📅 Schedule (Google Calendar)")
+                new_calendar = st.text_input("Google Calendar JSON (サービスアカウント)", value=keys.get("google_calendar", ""), type="password")
+                with st.expander("ℹ️ Google Calendar 連携の準備について（上級者向け）"):
+                    st.markdown("""
+                    *※カレンダーへの書き込みにはGoogle Cloudの「サービスアカウント」が必要です。*
+                    1. [Google Cloud Console](https://console.cloud.google.com/) にアクセスしてログインします。
+                    2. 左上の「プロジェクトの選択」から **「新しいプロジェクト」** を作成します。
+                    3. 左メニュー「APIとサービス」＞「ライブラリ」へ進み、検索窓で **「Google Calendar API」** を検索して **「有効にする」** を押します。
+                    4. 次に「APIとサービス」＞「認証情報」へ進み、画面上の「＋認証情報を作成」から **「サービスアカウント」** を選びます。
+                    5. アカウント名（例: ai-calendar）を入力して「完了」まで進みます。
+                    6. 作成されたサービスアカウント（xxxx@yyy.iam.gserviceaccount.com）をクリックし、「キー」タブを開きます。
+                    7. 「鍵を追加」＞「新しい鍵を作成」＞ **「JSON」** を選んで作成すると、ファイルがダウンロードされます。
+                    8. メモ帳などでダウンロードしたJSONファイルを開き、**中身のテキストをすべて**コピーして上の欄に貼り付けます。
+                    9. **【最重要】** 普段使っているGoogleカレンダーを開き、右上の歯車＞設定＞特定のカレンダーの設定＞「特定のユーザーとの共有」に、**先ほどのサービスアカウントのメールアドレス**を追加し、権限を **「予定の変更権限」** に設定してください。
+                    """)
+                
+                st.markdown("##### 💬 Communication (Slack & LINE)")
+                new_slack = st.text_input("Slack Bot Token", value=keys.get("slack", ""), type="password")
+                with st.expander("ℹ️ Slack Bot Tokenの取得手順"):
+                    st.markdown("""
+                    1. [Slack API (Your Apps)](https://api.slack.com/apps) にアクセスし、**「Create New App」** ＞ 「From scratch」を選択します。
+                    2. アプリ名（例: THE FORGE）を入力し、導入したい自分のワークスペースを選択して「Create App」を押します。
+                    3. 左メニューの **「OAuth & Permissions」** をクリックして少し下にスクロールします。
+                    4. 「Scopes」セクションの「Bot Token Scopes」で **「Add an OAuth Scope」** を押し、**`chat:write`** を追加します。
+                    5. 画面一番上に戻り、**「Install to Workspace」** ボタンを押して許可（Allow）します。
+                    6. 画面に表示される **`xoxb-`** から始まる「Bot User OAuth Token」をコピーして、上の欄に貼り付けます。
+                    """)
+
+                new_line = st.text_input("LINE Messaging API Token", value=keys.get("line", ""), type="password")
+                with st.expander("ℹ️ LINE Tokenの取得手順"):
+                    st.markdown("""
+                    1. [LINE Developers](https://developers.line.biz/ja/) にアクセスし、自分のLINEアカウントでログインします。
+                    2. 「コンソール」を開き、新しく「プロバイダー」を作成します（名前は自分の名前などでOK）。
+                    3. 作成したプロバイダーを開き、**「Messaging API」** チャネルを新規作成します。
+                    4. 必須項目（アプリ名、説明など）を適当に入力して作成を完了させます。
+                    5. 作成したチャネルを開き、**「Messaging API設定」** タブをクリックします。
+                    6. 一番下までスクロールし、「チャネルアクセストークン」の **「発行」** ボタンを押します。
+                    7. 表示された非常に長い文字列をコピーして、上の欄に貼り付けてください。
+                    """)
+                
+                st.markdown("##### 🚀 Cloud Deploy (GitHub)")
+                new_gh_token = st.text_input("GitHub Personal Access Token", value=keys.get("gh_token", ""), type="password")
+                new_gh_owner = st.text_input("GitHub Username", value=keys.get("gh_owner", ""), placeholder="例: YamadaTaro")
+                new_gh_repo = st.text_input("Repository Name", value=keys.get("gh_repo", ""), placeholder="例: aibou_app")
+                with st.expander("ℹ️ GitHubトークンの取得・設定手順（自動デプロイ用）"):
+                    st.markdown("""
+                    1. [GitHubのトークン設定画面](https://github.com/settings/tokens) にアクセスしてログインします。
+                    2. 画面右上の **「Generate new token」** を押し、**「Generate new token (classic)」** を選びます。
+                    3. 「Note（名前）」に「THE FORGE OS Deploy」など分かりやすい名前を入力します。
+                    4. 「Expiration（期限）」は **「No expiration（無期限）」** を選ぶと、後で更新する手間が省けます（セキュリティ警告が出ますがそのまま進んでOKです）。
+                    5. 「Select scopes（権限）」の一覧から、一番上にある **「repo」**（リポジトリの全権限）のチェックボックスにチェックを入れます。
+                    6. 画面一番下緑色の **「Generate token」** を押します。
+                    7. **`ghp_`** から始まるトークンが表示されるので、それをコピーして一番上の欄（Token）に貼り付けてください。
+                    8. 「GitHub Username」にはボスのユーザー名（例: minami-taro）を入力します。
+                    9. 「Repository Name」には、Streamlit Cloudと連携しているこのアプリのリポジトリ名（例: aibouai_app）を入力してください。
+                    """)
+                
+                st.markdown("---")
+                submitted = st.form_submit_button("💾 クラウドに暗号化して保存", type="primary", use_container_width=True)
+                
+                if submitted:
+                    vault_data["api_keys"] = {
+                        "my_email": new_email, "my_email_app_password": new_email_pass,
+                        "gemini": new_gemini, "google_calendar": new_calendar,
+                        "slack": new_slack, "line": new_line,
+                        "gh_token": new_gh_token, "gh_owner": new_gh_owner, "gh_repo": new_gh_repo
+                    }
+                    
+                    if save_vault(vault_data):
+                        st.session_state.global_api_keys = vault_data["api_keys"]
+                        st.success("✅ 設定を安全に保存し、クラウドデータベースへ同期しました！")
+                        st.balloons()
+                    else:
+                        st.error("❌ 保存に失敗しました。データベースの接続設定を確認してください。")
+
+    # ================================
+    elif setting_mode == "📖 取扱説明書":
+        st.markdown("#### 📖 MANUAL")
+        st.info("システムの使い方は今後ここに詳しく記載します。各種APIの取得方法は以下を開いてください。")
+        with st.expander("ℹ️ Gmailアプリパスワードの取得手順"):
+            st.markdown("1. [Googleアカウント管理画面](https://myaccount.google.com/) にアクセス。\n2. 「セキュリティ」>「2段階認証プロセス」をオン。\n3. 「アプリパスワード」を検索し作成。16桁の英字をコピー。")
+        with st.expander("ℹ️ Gemini API Keyの取得手順"):
+            st.markdown("1. [Google AI Studio](https://aistudio.google.com/) にアクセス。\n2. 「Get API key」>「Create API key」をクリックして生成。")
+        with st.expander("ℹ️ Google Calendar 連携の準備について"):
+            st.markdown("1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成。\n2. 「Google Calendar API」を有効化し「サービスアカウント」を作成。\n3. JSONキーをダウンロードし中身をコピペ。")
+        with st.expander("ℹ️ Slack Bot Token / LINE Tokenの取得手順"):
+            st.markdown("Slack: [Slack API](https://api.slack.com/apps) でアプリを作成し「OAuth & Permissions」から `xoxb-` トークンを取得。\nLINE: [LINE Developers](https://developers.line.biz/ja/) でMessaging APIを作成し、一番下の「チャネルアクセストークン」を発行。")
+        with st.expander("ℹ️ GitHubトークンの取得手順"):
+            st.markdown("1. [GitHubのトークン設定画面](https://github.com/settings/tokens) にアクセス。\n2. 「Generate new token (classic)」を選ぶ。\n3. 「No expiration」にし「repo」にチェックを入れて生成。")
+
+    # ================================
+    elif setting_mode == "🚪 ログアウト":
+        st.markdown("#### 🚪 LOGOUT")
+        st.warning("システムをロックしてログイン画面に戻ります。")
+        if st.button("LOGOUT 🔒", type="primary"):
+            st.session_state.logged_in = False
+            st.rerun()
