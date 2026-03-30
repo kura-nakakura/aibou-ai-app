@@ -16,17 +16,17 @@ try:
 except ImportError:
     st.error("⚠️ `python-pptx` ライブラリがインストールされていません。requirements.txt を確認してください。")
 
-# 💎 UIデザイン用CSS (ダーク＆ホログラム・白ネオンUI)
+# 💎 UIデザイン用CSS (ホログラム・2x2グリッドUI)
 st.markdown("""
     <style>
-    /* 1. 全体をダーク＆サイバーパンクな雰囲気に (ボス絶賛の配色を維持) */
+    /* 1. 全体をダーク＆サイバーパンクな雰囲気に */
     [data-testid="stAppViewContainer"] {
         background-color: #030b14 !important; /* 深い漆黒 */
-        background-image: radial-gradient(circle at 50% 120%, rgba(0, 150, 255, 0.15), transparent) !important; /* 下部からのシアン光彩 */
+        background-image: radial-gradient(circle at 50% 120%, rgba(0, 150, 255, 0.15), transparent) !important;
         color: #e2e8f0 !important;
     }
 
-    /* 2. ⬡と❖のシンボルを光らせる (ボス絶賛のデザインを維持) */
+    /* 2. ⬡と❖のシンボルを光らせる (ボスのお気に入りデザイン) */
     .saas-title {
         color: #ffffff;
         font-weight: 900;
@@ -51,14 +51,14 @@ st.markdown("""
         margin-bottom: 40px;
     }
 
-    /* 3. 【究極修正】4つのボタンを「ホログラムカード」に変貌させる */
+    /* 3. 4つのボタンを「ホログラムカード」に変貌させる */
     .mode-card-container div.stButton > button {
-        height: 180px !important; /* カードを大きく */
-        background-color: rgba(10, 20, 40, 0.7) !important; /* ボス絶賛の白飛び防止ダーク背景 */
+        height: 180px !important; /* 2x2用に高さを調整 */
+        background-color: rgba(10, 20, 40, 0.6) !important; /* 文字が読めるダークな半透明背景 */
         backdrop-filter: blur(10px) !important; 
-        border: 1px solid rgba(255, 255, 255, 0.1) !important; /* 普段は静かな枠線 */
+        border: 1px solid rgba(255, 255, 255, 0.2) !important; /* 普段は静かな枠線 */
         border-radius: 20px !important;
-        color: #ffffff !important; /* ボスの要望：普段は変わらず真白文字 */
+        color: #ffffff !important; /* 普段から文字は真っ白 */
         font-family: 'Helvetica Neue', monospace !important;
         transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
         box-shadow: 0 5px 15px rgba(0,0,0,0.5) !important;
@@ -68,26 +68,30 @@ st.markdown("""
         align-items: center !important;
     }
 
-    /* ホバー時のエフェクト (ボスの要望：白いネオンの反応！) */
+    /* ボタン内のテキストデザイン */
+    .mode-card-container div.stButton > button p {
+        font-size: 24px !important;
+        font-weight: 900 !important;
+        letter-spacing: 4px !important;
+        margin: 0 !important;
+        white-space: pre-wrap !important; /* \n の改行を反映させる */
+        color: #ffffff !important; /* 普段から文字は真っ白 */
+    }
+
+    /* 🔥 ホバー時のエフェクト (ボスの要望：触れた時だけ白いネオンが反応！) */
     .mode-card-container div.stButton > button:hover {
         transform: translateY(-8px) scale(1.02) !important;
         background-color: rgba(20, 35, 60, 0.8) !important;
         border-color: #ffffff !important; /* 枠線が白く光る */
-        box-shadow: 0 0 20px rgba(255, 255, 255, 0.4), inset 0 0 15px rgba(0, 243, 255, 0.2) !important; /* 光彩エフェクト */
-        color: #ffffff !important;
-        text-shadow: 0 0 10px #ffffff, 0 0 20px rgba(255, 255, 255, 0.8) !important; /* 文字自体が真っ白なネオン発光 */
-    }
-
-    /* ボタン内のテキストデザイン */
-    .mode-card-container div.stButton > button p {
-        font-size: 24px !important; /* テキストを大きく */
-        font-weight: 900 !important;
-        letter-spacing: 4px !important;
-        margin: 0 !important;
-        white-space: pre-wrap !important; /* 改行を反映 */
+        box-shadow: 0 0 25px rgba(255, 255, 255, 0.6), inset 0 0 15px rgba(0, 243, 255, 0.3) !important; /* 白とシアンの光彩エフェクト */
     }
     
-    /* 下部の光るプラットフォーム (ボス絶賛のシアン光彩を維持) */
+    /* ホバー時の文字の発光 */
+    .mode-card-container div.stButton > button:hover p {
+        text-shadow: 0 0 10px #ffffff, 0 0 20px #00f3ff !important; /* 文字自体が白＆シアンのネオン発光 */
+    }
+    
+    /* 下部の光るプラットフォーム（プロジェクター） */
     .hologram-platform {
         position: fixed;
         bottom: -80px;
@@ -121,31 +125,42 @@ if "just_generated_audio" not in st.session_state: st.session_state.just_generat
 if "selected_forge_mode" not in st.session_state: st.session_state.selected_forge_mode = None
 
 # ==========================================
-# 🚪 ステージ1：ホログラムカード選択画面 (Boss's Design: 横4列)
+# 🚪 ステージ1：ホログラムカード選択画面 (2x2 Grid)
 # ==========================================
 if st.session_state.current_forge_ws is None and st.session_state.selected_forge_mode is None:
     st.markdown('<div class="central-logo">⬡</div>', unsafe_allow_html=True)
-    st.markdown("<h2 class='saas-title'>FORGE STUDIO</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 class='saas-title'>❖ FORGE STUDIO ❖</h2>", unsafe_allow_html=True)
     st.markdown("<p class='central-logo-sub'>SELECT SYSTEM ENGINE</p>", unsafe_allow_html=True)
     
-    # 下部の光るプラットフォーム
     st.markdown('<div class="hologram-platform"></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="mode-card-container">', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4, gap="large")
-    with c1:
-        if st.button("APP\nSTUDIO", use_container_width=True): 
-            st.session_state.selected_forge_mode = "APP"; st.rerun()
-    with c2:
-        if st.button("IMAGE\nGENERATOR", use_container_width=True): 
-            st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
-    with c3:
-        if st.button("VIDEO\nPRODUCTION", use_container_width=True): 
-            st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
-    with c4:
-        if st.button("SLIDE\nDECK", use_container_width=True): 
-            st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    # 🌟 2x2のグリッド配置（左右に余白を設けて中央に寄せる）
+    col_spacer_left, col_main, col_spacer_right = st.columns([1.5, 7, 1.5])
+    
+    with col_main:
+        st.markdown('<div class="mode-card-container">', unsafe_allow_html=True)
+        
+        # 1行目
+        r1c1, r1c2 = st.columns(2, gap="large")
+        with r1c1:
+            if st.button("APP\nSTUDIO", use_container_width=True): 
+                st.session_state.selected_forge_mode = "APP"; st.rerun()
+        with r1c2:
+            if st.button("IMAGE\nGENERATOR", use_container_width=True): 
+                st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
+                
+        st.markdown("<br>", unsafe_allow_html=True) # 上下の隙間
+        
+        # 2行目
+        r2c1, r2c2 = st.columns(2, gap="large")
+        with r2c1:
+            if st.button("VIDEO\nPRODUCTION", use_container_width=True): 
+                st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
+        with r2c2:
+            if st.button("SLIDE\nDECK", use_container_width=True): 
+                st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
+                
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
 # 🚪 ステージ2：モード別プロジェクト管理画面
@@ -165,7 +180,6 @@ elif st.session_state.current_forge_ws is None and st.session_state.selected_for
     
     col_create, col_list = st.columns([4, 6], gap="large")
     
-    # --- 左側：新規作成 ---
     with col_create:
         st.markdown("<p style='font-weight:bold; color:#a0aec0; font-size:12px;'>[ INITIALIZE NEW PROJECT ]</p>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -181,7 +195,6 @@ elif st.session_state.current_forge_ws is None and st.session_state.selected_for
                 elif not new_ws_name:
                     st.error("Please enter a project name.")
 
-    # --- 右側：既存プロジェクト一覧 ---
     with col_list:
         st.markdown("<p style='font-weight:bold; color:#a0aec0; font-size:12px;'>[ ACTIVE WORKSPACES ]</p>", unsafe_allow_html=True)
         mode_workspaces = {k: v for k, v in st.session_state.forge_workspaces.items() if v.get("type") == mode}
@@ -208,7 +221,7 @@ elif st.session_state.current_forge_ws is None and st.session_state.selected_for
                                 st.rerun()
 
 # ==========================================
-# 🖥| ステージ3：ワークスペース内部画面
+# 🖥️ ステージ3：ワークスペース内部画面
 # ==========================================
 else:
     ws_name = st.session_state.current_forge_ws
@@ -228,14 +241,13 @@ else:
 
     st.markdown("---")
 
-    # --- 左サイドバー（命令パネル） ---
     with st.sidebar:
         st.markdown(f"<div style='text-align:center; font-weight:800; color:#00f3ff; margin-bottom:10px;'>[ {ws_name} ]</div>", unsafe_allow_html=True)
         with st.form("forge_sidebar_form", clear_on_submit=True):
             placeholder_text = "Type your prompt here..."
             if ws_type == "APP": placeholder_text = "例：シンプルな計算機アプリ"
             elif ws_type == "IMAGE": placeholder_text = "例：サイバーパンクな都市"
-            elif ws_type == "VIDEO": placeholder_text = "例：コーヒー豆が弾ける動画"
+            elif ws_type == "VIDEO": placeholder_text = "例：コーヒーが弾ける動画"
             elif ws_type == "SLIDE": placeholder_text = "例：AIの未来について5枚"
             
             forge_prompt = st.text_area("PROMPT", placeholder=placeholder_text, height=150, label_visibility="collapsed")
@@ -246,7 +258,6 @@ else:
 
     col_log, col_preview = st.columns([3, 7])
     
-    # --- 左側：AIとのチャット履歴 ---
     with col_log:
         st.markdown("<p style='font-weight:bold; color:#a0aec0; font-size:12px;'>[ SYSTEM CONSOLE ]</p>", unsafe_allow_html=True)
         core_height = 200 
@@ -264,14 +275,12 @@ else:
                 with st.chat_message(m["role"], avatar="👤" if m["role"]=="user" else "🤖"):
                     st.markdown(m["content"])
 
-    # --- 右側：各モードごとのプレビュー画面 ---
     with col_preview:
         st.markdown("<p style='font-weight:bold; color:#a0aec0; font-size:12px;'>[ CANVAS PREVIEW ]</p>", unsafe_allow_html=True)
                 
         if st.session_state.auto_fix_prompt:
             st.warning("⚙️ RECOVERY PROTOCOL INITIATED: AI is fixing the code...")
             
-        # 💻 モード：APP (完全復元)
         elif ws_type == "APP":
             if ws_data["code"]:
                 st.download_button(label="[ DOWNLOAD .py ]", data=ws_data["code"], file_name=f"{ws_name.replace(' ', '_')}.py", mime="text/plain", use_container_width=True)
@@ -283,7 +292,7 @@ else:
                         st.error(f"RUNTIME ERROR:\n{e}")
                         if ws_data["retries"] < 3:
                             ws_data["retries"] += 1
-                            st.session_state.auto_fix_prompt = f"実行時に以下のエラーが発生しました。エラーが出ない完全なコードに修正して！\n\n【エラー内容】\n{e}"
+                            st.session_state.auto_fix_prompt = f"実行時にエラーが発生しました。修正して！\n\n【エラー内容】\n{e}"
                             st.rerun()
                         else:
                             st.error("❌ 自己修復が上限に達しました。")
@@ -295,7 +304,6 @@ else:
             else:
                 st.info("Canvas is empty.")
                 
-        # 🎨 モード：IMAGE
         elif ws_type == "IMAGE":
             if ws_data["media"]:
                 image_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(ws_data['media'])}?width=800&height=450&nologo=true"
@@ -309,10 +317,9 @@ else:
             else:
                 st.info("Canvas is empty.")
                 
-        # 🎬 モード：VIDEO
         elif ws_type == "VIDEO":
             if ws_data["code"]:
-                st.info("🔌 API Integration Pending: ここに動画生成APIを接続し、生成されたMP4を表示します。")
+                st.info("🔌 API Integration Pending: ここに動画生成APIを接続しMP4を表示します。")
                 st.success("✅ スクリプトとビデオプロンプトが準備完了しました。")
                 
                 with st.expander("📝 STORYBOARD & PROMPT", expanded=True):
@@ -324,7 +331,6 @@ else:
             else:
                 st.info("Canvas is empty.")
                 
-        # 📊 モード：SLIDE
         elif ws_type == "SLIDE":
             if ws_data["code"]:
                 st.success("✅ プレゼン構成が完了しました。下のボタンから PowerPoint をダウンロードできます！")
@@ -349,16 +355,17 @@ else:
                     prs.save(pptx_io)
                     pptx_io.seek(0)
                     
+                    # 🚨 修正箇所：引数 data=pptx_io を明示的に指定！
                     st.download_button(
                         label="[ DOWNLOAD .pptx ]",
-                        pptx_io,
+                        data=pptx_io,
                         file_name=f"{ws_name.replace(' ', '_')}.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                         type="primary",
                         use_container_width=True
                     )
                 except Exception as e:
-                    st.error(f"パワポの生成に失敗しました（AIの出力形式エラー）: {e}")
+                    st.error(f"パワポの生成に失敗しました: {e}")
                     st.code(ws_data["code"])
                 
                 with st.expander("⚙️ SLIDE DATA (JSON)"):
