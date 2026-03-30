@@ -6,43 +6,35 @@ import base64
 from gtts import gTTS
 from streamlit_mic_recorder import speech_to_text
 import google.generativeai as genai
-import os
-import datetime
 
-# 🚨 パワポ生成用のライブラリ
-try:
-    from pptx import Presentation
-    from pptx.util import Pt
-except ImportError:
-    st.error("⚠️ `python-pptx` ライブラリがインストールされていません。ターミナルで `pip install python-pptx` を実行してください。")
-
-# 💎 UIデザイン用CSS (SaaS風の洗練されたダークスレート＆ネイビー基調・絵文字排除)
+# 💎 UIデザイン用CSS
 st.markdown("""
     <style>
     [data-testid="stVerticalBlockBorderWrapper"] {
-        background: rgba(255, 255, 255, 0.8) !important;
+        background: rgba(255, 255, 255, 0.4) !important;
         backdrop-filter: blur(10px) !important;
-        border: 1px solid #e2e8f0 !important;
-        border-radius: 12px !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
-        transition: all 0.2s ease !important;
+        border: 1px solid rgba(255, 255, 255, 0.9) !important;
+        border-radius: 15px !important;
+        box-shadow: 6px 6px 15px rgba(163, 177, 198, 0.4), -6px -6px 15px rgba(255, 255, 255, 0.9) !important;
+        transition: all 0.3s ease !important;
     }
     [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
-        border-color: #1a365d !important;
+        transform: translateY(-3px);
+        box-shadow: 10px 10px 20px rgba(163, 177, 198, 0.5), -10px -10px 20px rgba(255, 255, 255, 1), 0 0 15px rgba(0, 243, 255, 0.3) !important;
+        border-color: rgba(0, 243, 255, 0.8) !important;
     }
-    .saas-title { color: #1a202c; font-weight: 800; letter-spacing: 2px; margin-bottom: 20px; font-family: 'Helvetica Neue', sans-serif; }
-    .status-dot { color: #38a169; font-size: 10px; margin-right: 5px; animation: blink 2s infinite; }
-    .badge { background: #1a365d; color: white; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: bold; letter-spacing: 1px; }
+    .cyber-title { color: #2b6cb0; font-weight: 800; letter-spacing: 2px; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(255,255,255,0.8); }
+    .status-dot { color: #00e676; font-size: 10px; margin-right: 5px; animation: blink 2s infinite; }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     
     /* プレゼン用スライドのCSS */
     .slide-card {
         background: white; border-radius: 10px; padding: 30px; margin-bottom: 20px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 5px solid #2b6cb0;
-        min-height: 200px; color: #2d3748;
+        min-height: 200px;
     }
+    /* タブのデザイン強化 */
+    button[data-baseweb="tab"] { font-size: 16px !important; font-weight: bold !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -54,56 +46,70 @@ if "ai_voice_base64" not in st.session_state: st.session_state.ai_voice_base64 =
 if "just_generated_audio" not in st.session_state: st.session_state.just_generated_audio = False
 
 # ==========================================
-# 🚪 ダッシュボード画面（左右分割 SaaS UI）
+# 🚪 ダッシュボード画面（4つの専用タブ仕様！）
 # ==========================================
 if st.session_state.current_forge_ws is None:
-    st.markdown("<h2 class='saas-title'>FORGE STUDIO</h2>", unsafe_allow_html=True)
-    st.caption("SELECT OR CREATE A CREATIVE WORKSPACE")
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<h2 class='cyber-title'>❖ FORGE LAB WORKSPACES</h2>", unsafe_allow_html=True)
+    st.caption("/// プロジェクトのモードを選択し、専用のAIラボを立ち上げてください ///")
     
-    col_create, col_list = st.columns([3.5, 6.5], gap="large")
+    # 🌟 ボス考案の「横4つタブUI」
+    tab_app, tab_img, tab_vid, tab_slide = st.tabs([
+        "💻 APP (アプリ開発)", 
+        "🎨 IMAGE (画像生成)", 
+        "🎬 VIDEO (動画コンテ)", 
+        "📊 SLIDE (プレゼン資料)"
+    ])
     
-    # --- 左側：新規作成パネル ---
-    with col_create:
-        st.markdown("<p style='font-weight:bold; color:#4a5568; font-size:14px;'>[ INITIALIZE PROJECT ]</p>", unsafe_allow_html=True)
-        with st.container(border=True):
-            new_ws_type = st.selectbox("ENGINE", ["APP STUDIO", "IMAGE GENERATION", "VIDEO PRODUCTION", "SLIDE DECK"], label_visibility="collapsed")
-            new_ws_name = st.text_input("PROJECT NAME", label_visibility="collapsed", placeholder="Enter project name...")
+    mode_configs = [
+        ("💻 APP", tab_app, "新しいアプリ開発プロジェクト名..."),
+        ("🎨 IMAGE", tab_img, "新しい画像生成プロジェクト名..."),
+        ("🎬 VIDEO", tab_vid, "新しい動画コンテプロジェクト名..."),
+        ("📊 SLIDE", tab_slide, "新しいプレゼン作成プロジェクト名...")
+    ]
+    
+    for mode_name, tab, placeholder in mode_configs:
+        with tab:
+            mode_key = mode_name.split(" ")[1] # "APP", "IMAGE", "VIDEO", "SLIDE"
             
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("CREATE WORKSPACE", type="primary", use_container_width=True):
-                if new_ws_name and new_ws_name not in st.session_state.forge_workspaces:
-                    st.session_state.forge_workspaces[new_ws_name] = {
-                        "type": new_ws_type, "chat": [], "code": "", "media": "", "retries": 0
-                    }
-                    st.session_state.current_forge_ws = new_ws_name
-                    st.rerun()
-                elif not new_ws_name:
-                    st.error("プロジェクト名を入力してください。")
-
-    # --- 右側：プロジェクト一覧 ---
-    with col_list:
-        st.markdown("<p style='font-weight:bold; color:#4a5568; font-size:14px;'>[ ACTIVE WORKSPACES ]</p>", unsafe_allow_html=True)
-        if not st.session_state.forge_workspaces:
-            st.info("現在進行中のプロジェクトはありません。左のパネルから作成してください。")
-        else:
-            cols = st.columns(2)
-            for idx, (ws_name, ws_data) in enumerate(st.session_state.forge_workspaces.items()):
-                with cols[idx % 2]:
-                    with st.container(border=True):
-                        st.markdown(f"<span class='badge'>{ws_data['type']}</span>", unsafe_allow_html=True)
-                        st.markdown(f"<h4 style='color:#2d3748; font-weight:800; margin-top:10px;'>{ws_name}</h4>", unsafe_allow_html=True)
-                        st.markdown(f"<p style='font-size: 11px; color: #718096;'><span class='status-dot'>●</span>ONLINE | Generations: {len(ws_data['chat'])}</p>", unsafe_allow_html=True)
-                        
-                        c_btn1, c_btn2 = st.columns([7, 3])
-                        with c_btn1:
-                            if st.button("ENTER", key=f"open_{ws_name}", use_container_width=True):
-                                st.session_state.current_forge_ws = ws_name
-                                st.rerun()
-                        with c_btn2:
-                            if st.button("DEL", key=f"del_{ws_name}", use_container_width=True):
-                                del st.session_state.forge_workspaces[ws_name]
-                                st.rerun()
+            # このタブのモードに一致するプロジェクトだけを抽出
+            mode_workspaces = {k: v for k, v in st.session_state.forge_workspaces.items() if mode_key in v.get("type", "")}
+            
+            # --- ⬡ 新規作成エリア ---
+            with st.container(border=True):
+                st.markdown(f"<h4 style='color:#00f3ff; font-weight:800;'>⬡ CREATE NEW {mode_key} PROJECT</h4>", unsafe_allow_html=True)
+                c1, c2 = st.columns([7, 3])
+                with c1:
+                    new_ws_name = st.text_input("Project Name", key=f"new_ws_{mode_key}", label_visibility="collapsed", placeholder=placeholder)
+                with c2:
+                    if st.button("INITIALIZE ⚡", key=f"create_{mode_key}", use_container_width=True):
+                        if new_ws_name and new_ws_name not in st.session_state.forge_workspaces:
+                            st.session_state.forge_workspaces[new_ws_name] = {
+                                "type": mode_name, "chat": [], "code": "", "media": "", "retries": 0
+                            }
+                            st.session_state.current_forge_ws = new_ws_name
+                            st.rerun()
+            
+            # --- ❖ 既存プロジェクト一覧 ---
+            if mode_workspaces:
+                st.markdown("---")
+                cols = st.columns(3)
+                for idx, (ws_name, ws_data) in enumerate(mode_workspaces.items()):
+                    with cols[idx % 3]:
+                        with st.container(border=True):
+                            st.markdown(f"<h4 style='color:#1a202c; font-weight:bold;'>{mode_name.split()[0]} {ws_name}</h4>", unsafe_allow_html=True)
+                            st.markdown(f"<p style='font-size: 12px; color: #718096;'><span class='status-dot'>●</span>ONLINE | Logs: {len(ws_data['chat'])}</p>", unsafe_allow_html=True)
+                            
+                            c_btn1, c_btn2 = st.columns([7, 3])
+                            with c_btn1:
+                                if st.button("ACCESS ➔", key=f"open_ws_{ws_name}", use_container_width=True):
+                                    st.session_state.current_forge_ws = ws_name
+                                    st.rerun()
+                            with c_btn2:
+                                if st.button("DEL", key=f"del_ws_{ws_name}", use_container_width=True):
+                                    del st.session_state.forge_workspaces[ws_name]
+                                    st.rerun()
+            else:
+                st.info(f"現在進行中の {mode_key} プロジェクトはありません。「CREATE NEW」から立ち上げてください。")
 
 # ==========================================
 # 🖥️ ワークスペース内部画面
@@ -111,67 +117,65 @@ if st.session_state.current_forge_ws is None:
 else:
     ws_name = st.session_state.current_forge_ws
     ws_data = st.session_state.forge_workspaces[ws_name]
-    ws_type = ws_data.get("type", "APP STUDIO")
+    ws_type = ws_data.get("type", "💻 APP")
     
     if "retries" not in ws_data: ws_data["retries"] = 0
     if "media" not in ws_data: ws_data["media"] = ""
     
-    col_back, col_title = st.columns([2, 8])
-    with col_back:
-        if st.button("← BACK TO STUDIO", use_container_width=True):
-            st.session_state.current_forge_ws = None
-            st.rerun()
-    with col_title:
-        st.markdown(f"<h3 style='color:#1a202c; font-weight:800; margin-top:-5px;'>{ws_name} <span style='font-size:14px; color:#718096; font-weight:normal;'>| {ws_type}</span></h3>", unsafe_allow_html=True)
-
-    st.markdown("---")
+    if st.button("⬅ RETURN TO DASHBOARD"):
+        st.session_state.current_forge_ws = None
+        st.rerun()
+        
+    st.markdown(f"<h2 class='cyber-title'>{ws_type.split(' ')[0]} PROJECT : {ws_name} <span style='font-size:16px; color:#718096;'>({ws_type})</span></h2>", unsafe_allow_html=True)
 
     # --- 左サイドバー（命令パネル） ---
     with st.sidebar:
-        st.markdown(f"<div style='text-align:center; font-weight:800; color:#1a365d; margin-bottom:10px;'>[ {ws_name} ]</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center; font-weight:800; color:#2b6cb0; margin-bottom:10px;'>[ {ws_type.split(' ')[0]} {ws_name} ]</div>", unsafe_allow_html=True)
         with st.form("forge_sidebar_form", clear_on_submit=True):
-            placeholder_text = "Type your prompt here..."
-            if "APP" in ws_type: placeholder_text = "例：シンプルな計算機アプリを作って"
+            placeholder_text = "命令を入力..."
+            if "APP" in ws_type: placeholder_text = "例：ポモドーロタイマーを作って"
             elif "IMAGE" in ws_type: placeholder_text = "例：サイバーパンクな都市を飛ぶ空飛ぶ車の画像"
             elif "VIDEO" in ws_type: placeholder_text = "例：コーヒー豆が弾けるようなシネマティックな動画"
             elif "SLIDE" in ws_type: placeholder_text = "例：AIの未来についての5枚のプレゼン資料"
             
-            forge_prompt = st.text_area("PROMPT", placeholder=placeholder_text, height=150, label_visibility="collapsed")
-            submitted = st.form_submit_button("GENERATE", use_container_width=True, type="primary")
+            forge_prompt = st.text_area("命令", placeholder=placeholder_text, height=150, label_visibility="collapsed")
+            submitted = st.form_submit_button("DEPLOY COMMAND ⚡", use_container_width=True)
         
         st.markdown("<style>iframe[title*='mic'] { mix-blend-mode: multiply; opacity: 0.8; margin-top: 10px; }</style>", unsafe_allow_html=True)
-        spoken_text = speech_to_text(language='ja', start_prompt="🎙️ PUSH TO TALK", stop_prompt="🛑 SEND", use_container_width=True, just_once=True, key='Forge_STT')
+        # 🚨 無限ループバグ修正：just_once=True を追加！
+        spoken_text = speech_to_text(language='ja', start_prompt="🎙️ 音声で命令する", stop_prompt="🛑 録音停止＆送信", use_container_width=True, just_once=True, key='Forge_STT')
 
     col_log, col_preview = st.columns([3, 7])
     
-    # --- 左側：AIチャット（コンソール） ---
+    # --- 左側：AIとのチャット履歴 ---
     with col_log:
-        st.markdown("<p style='font-weight:bold; color:#718096; font-size:12px;'>[ CONSOLE ]</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-weight:bold; color:#718096;'>[ COMMAND TERMINAL ]</p>", unsafe_allow_html=True)
         core_height = 200 
         v_data = st.session_state.ai_voice_base64 if st.session_state.ai_voice_base64 else ""
         autoplay = "autoplay" if st.session_state.just_generated_audio else ""
         st.session_state.just_generated_audio = False 
 
-        core_html = MASTER_CORE_TEMPLATE.replace("H_VAL", str(core_height)).replace("MAX_Wpx", "200").replace("V_DATA", v_data).replace("A_PLAY", autoplay).replace("#00f3ff", "#1a365d").replace("#0064ff", "#2b6cb0")
+        core_html = MASTER_CORE_TEMPLATE.replace("H_VAL", str(core_height)).replace("MAX_Wpx", "200").replace("V_DATA", v_data).replace("A_PLAY", autoplay)
         st.components.v1.html(core_html, height=core_height + 10)
 
         with st.container(height=400, border=False):
             if not ws_data["chat"]:
-                st.info("Waiting for input...")
+                st.info("右のサイドバーからAIに命令を出してください。")
             for m in ws_data["chat"]:
-                with st.chat_message(m["role"], avatar="👤" if m["role"]=="user" else "🤖"):
+                with st.chat_message(m["role"], avatar="👤" if m["role"]=="user" else "🤖" if m["role"]=="assistant" else "⚠️"):
                     st.markdown(m["content"])
 
     # --- 右側：各モードごとのプレビュー画面 ---
     with col_preview:
-        st.markdown("<p style='font-weight:bold; color:#718096; font-size:12px;'>[ CANVAS ]</p>", unsafe_allow_html=True)
-                
-        # 💻 モード：APP (完全復活)
-        if "APP" in ws_type:
-            if st.session_state.auto_fix_prompt:
-                st.warning("⚙️ システムエラーを検知しました。AIが自律的に修復しています...")
-            elif ws_data["code"]:
-                st.download_button(label="[ DOWNLOAD .py ]", data=ws_data["code"], file_name=f"{ws_name.replace(' ', '_')}.py", mime="text/plain", use_container_width=True)
+        st.markdown("<p style='font-weight:bold; color:#718096;'>[ THE FORGE / PREVIEW ]</p>", unsafe_allow_html=True)
+        
+        if st.session_state.auto_fix_prompt:
+            st.warning("⚙️ システムエラーを検知しました。AIが自律的に別のアプローチを模索・修復しています...")
+            
+        # 💻 モード：APP
+        elif "APP" in ws_type:
+            if ws_data["code"]:
+                st.download_button(label="💾 CODE EXPORT (.py)", data=ws_data["code"], file_name=f"{ws_name}.py", mime="text/plain", use_container_width=True)
                 with st.container(border=True):
                     try:
                         exec(ws_data["code"], globals())
@@ -184,91 +188,63 @@ else:
                             st.rerun()
                         else:
                             st.error("❌ 自己修復が上限（3回）に達しました。ボスの手動指示が必要です。")
-                with st.expander("📝 SOURCE CODE EDITOR"):
-                    edited_code = st.text_area("Python Code", value=ws_data["code"], height=300)
-                    if st.button("UPDATE CODE"):
+                with st.expander("📝 SOURCE CODE (手動編集も可能)"):
+                    # 💡 ボスの要望：手動で編集・修正できる機能を追加！
+                    edited_code = st.text_area("ソースコード", value=ws_data["code"], height=300)
+                    if st.button("手動変更を適用", type="primary"):
                         ws_data["code"] = edited_code
                         st.rerun()
             else:
-                st.info("Canvas is empty. Enter a prompt to generate an application.")
+                st.info("System Online. Waiting for APP building commands...")
                 
         # 🎨 モード：IMAGE
         elif "IMAGE" in ws_type:
             if ws_data["media"]:
-                image_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(ws_data['media'])}?width=800&height=450&nologo=true"
-                st.image(image_url, use_container_width=True)
+                image_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(ws_data['media'])}?width=800&height=600&nologo=true"
+                st.image(image_url, caption=f"AI Prompt: {ws_data['media']}", use_container_width=True)
                 
-                with st.expander("⚙️ PROMPT TUNING"):
-                    edited_media = st.text_area("Prompt (English)", value=ws_data["media"], height=100)
-                    if st.button("UPDATE IMAGE"):
+                with st.expander("📝 英語プロンプトの確認・手動編集"):
+                    edited_media = st.text_area("プロンプト", value=ws_data["media"], height=100)
+                    if st.button("手動変更を適用", type="primary"):
                         ws_data["media"] = edited_media
                         st.rerun()
             else:
-                st.info("Canvas is empty. Enter a prompt to generate an image.")
+                st.info("System Online. どんな画像を生成しますか？")
                 
         # 🎬 モード：VIDEO
         elif "VIDEO" in ws_type:
             if ws_data["code"]:
-                st.info("🔌 API Integration Pending: ここにRunwayやLumaの動画生成APIを接続し、生成されたMP4を表示します。")
-                st.success("✅ スクリプトとビデオプロンプトが準備完了しました。")
+                st.video("https://www.w3schools.com/html/mov_bbb.mp4") # ダミー動画プレビュー
+                st.success("✅ 動画プロンプトと絵コンテの生成が完了しました！")
                 
-                with st.expander("📝 SCRIPT & PROMPT EDITOR", expanded=True):
-                    edited_code = st.text_area("Markdown Editor", value=ws_data["code"], height=300)
-                    if st.button("UPDATE SCRIPT"):
+                with st.expander("📝 絵コンテ・プロンプトの確認・手動編集", expanded=True):
+                    edited_code = st.text_area("Markdownエディタ", value=ws_data["code"], height=300)
+                    if st.button("手動変更を適用", type="primary"):
                         ws_data["code"] = edited_code
                         st.rerun()
                 st.markdown(ws_data["code"])
             else:
-                st.info("Canvas is empty. Enter a prompt to generate video script.")
+                st.info("System Online. どんな動画の絵コンテ・プロンプトを作成しますか？")
                 
         # 📊 モード：SLIDE
         elif "SLIDE" in ws_type:
             if ws_data["code"]:
-                st.success("✅ プレゼン構成が完了しました。下のボタンからPowerPoint (.pptx) をダウンロードできます！")
+                slides = ws_data["code"].split("---")
+                for i, slide in enumerate(slides):
+                    if slide.strip():
+                        st.markdown(f"<div class='slide-card'>{slide}</div>", unsafe_allow_html=True)
+                        st.caption(f"Slide {i+1}")
                 
-                try:
-                    prs = Presentation()
-                    slides_data = json.loads(ws_data["code"])
-                    
-                    for slide_info in slides_data:
-                        slide_layout = prs.slide_layouts[1]
-                        slide = prs.slides.add_slide(slide_layout)
-                        title = slide.shapes.title
-                        content = slide.placeholders[1]
-                        
-                        title.text = slide_info.get("title", "No Title")
-                        tf = content.text_frame
-                        for bullet in slide_info.get("bullets", []):
-                            p = tf.add_paragraph()
-                            p.text = bullet
-                            p.font.size = Pt(24)
-                            
-                    pptx_io = io.BytesIO()
-                    prs.save(pptx_io)
-                    pptx_io.seek(0)
-                    
-                    st.download_button(
-                        label="[ DOWNLOAD .pptx ]",
-                        data=pptx_io,
-                        file_name=f"{ws_name.replace(' ', '_')}.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        type="primary",
-                        use_container_width=True
-                    )
-                except Exception as e:
-                    st.error(f"パワポの生成に失敗しました（AIの出力形式エラー）: {e}")
-                    st.code(ws_data["code"])
-                
-                with st.expander("⚙️ SLIDE DATA (JSON)"):
-                    edited_code = st.text_area("JSON Editor", value=ws_data["code"], height=300)
-                    if st.button("UPDATE SLIDES"):
+                with st.expander("📝 スライド構成の確認・手動編集"):
+                    edited_code = st.text_area("Markdownエディタ（--- で区切るとスライドが分かれます）", value=ws_data["code"], height=300)
+                    if st.button("手動変更を適用", type="primary"):
                         ws_data["code"] = edited_code
                         st.rerun()
             else:
-                st.info("Canvas is empty. Enter a presentation topic.")
+                st.info("System Online. プレゼンのテーマやターゲット層を教えてください。")
 
     # ==========================================
-    # AI実行ロジック（4つの脳みそ）
+    # AI実行ロジック（4つの脳みそ切り替え）
     # ==========================================
     trigger_prompt = forge_prompt if submitted else spoken_text if spoken_text else None
     
