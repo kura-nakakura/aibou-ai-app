@@ -7,59 +7,110 @@ from gtts import gTTS
 from streamlit_mic_recorder import speech_to_text
 import google.generativeai as genai
 import os
+import streamlit as st
 
-# 🚨 パワポ生成用のライブラリ
+# 🚨 パワポ生成用のライブラリ ( requirements.txt に python-pptx を追加済みと仮定 )
 try:
     from pptx import Presentation
     from pptx.util import Pt
 except ImportError:
-    st.error("⚠️ `python-pptx` ライブラリがインストールされていません。ターミナルで `pip install python-pptx` を実行してください。")
+    st.error("⚠️ `python-pptx` ライブラリがインストールされていません。requirements.txt を確認してください。")
 
-# 💎 UIデザイン用CSS (ダーク＆サイバーパンク・カードUI)
+# 💎 UIデザイン用CSS (ダーク＆サイバーパンク・ホログラフィックUI)
 st.markdown("""
     <style>
-    /* ベースのコンテナデザイン */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        background: rgba(15, 23, 42, 0.6) !important;
-        backdrop-filter: blur(12px) !important;
-        border: 1px solid #2d3748 !important;
-        border-radius: 15px !important;
-        transition: all 0.3s ease !important;
+    /* 1. 全体をダーク＆サイバーパンクな雰囲気に */
+    [data-testid="stAppViewContainer"] {
+        background-color: #000a1f !important; /* 漆黒の背景 */
+        background-image: radial-gradient(circle at 50% 120%, rgba(0, 150, 255, 0.1), transparent) !important; /* 下部からの青い光彩 */
+        color: #e2e8f0 !important;
+    }
+
+    /* 2. ⬡と❖のシンボルを光らせる */
+    .saas-title {
+        color: #00f3ff;
+        font-weight: 900;
+        letter-spacing: 4px;
+        margin-bottom: 5px;
+        text-shadow: 0 0 10px rgba(0, 243, 255, 0.4);
+        text-align: center;
     }
     
-    /* 🌟 ボス考案：巨大ホログラムカードボタンのデザイン */
+    /* 中央のロゴ（ image_5.png の地球ホログラムをテキストで代用 ）*/
+    .central-logo {
+        text-align: center;
+        font-size: 80px;
+        color: #00f3ff;
+        text-shadow: 0 0 20px rgba(0, 243, 255, 0.8), 0 0 30px rgba(0, 150, 255, 0.5);
+        margin: 50px 0;
+    }
+    .central-logo-sub {
+        text-align: center;
+        color: #718096;
+        font-size: 14px;
+        letter-spacing: 2px;
+        margin-top: -30px;
+        margin-bottom: 50px;
+    }
+
+    /* 3. 【究極修正】4つのボタンを「ホログラムカード」に変貌させる */
     .mode-card-container div.stButton > button {
-        height: 220px !important;
-        background: linear-gradient(145deg, #0f172a, #1e293b) !important;
-        border: 1px solid #4a5568 !important;
-        border-radius: 20px !important;
+        height: 250px !important; /* カードを大きく */
+        background-color: rgba(0, 150, 255, 0.05) !important; /* 半透明の青 */
+        backdrop-filter: blur(15px) !important; /* グラスモーフィズム */
+        border: 2px solid rgba(0, 243, 255, 0.4) !important; /* 青いネオンボーダー */
+        border-radius: 15px !important;
         color: #e2e8f0 !important;
         font-family: 'Helvetica Neue', monospace !important;
-        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+        transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+        box-shadow: 0 0 15px rgba(0, 243, 255, 0.3) !important; /* 光彩エフェクト */
         display: flex !important;
         flex-direction: column !important;
         justify-content: center !important;
         align-items: center !important;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.5) !important;
-    }
-    .mode-card-container div.stButton > button:hover {
-        transform: translateY(-10px) scale(1.02) !important;
-        border-color: #00f3ff !important;
-        box-shadow: 0 0 25px rgba(0, 243, 255, 0.3), inset 0 0 15px rgba(0, 243, 255, 0.1) !important;
-        color: #00f3ff !important;
-    }
-    .mode-card-container div.stButton > button p {
-        font-size: 22px !important;
-        font-weight: 900 !important;
-        letter-spacing: 3px !important;
-        margin: 0 !important;
+        text-align: center;
+        padding: 20px;
     }
     
-    .saas-title { color: #00f3ff; font-weight: 900; letter-spacing: 4px; margin-bottom: 5px; text-shadow: 0 0 10px rgba(0,243,255,0.4); text-align: center; }
-    .saas-subtitle { color: #718096; font-size: 14px; text-align: center; letter-spacing: 2px; margin-bottom: 40px; }
-    .status-dot { color: #00f3ff; font-size: 10px; margin-right: 5px; animation: blink 2s infinite; }
-    .badge { background: transparent; border: 1px solid #00f3ff; color: #00f3ff; padding: 4px 10px; border-radius: 5px; font-size: 10px; font-weight: bold; letter-spacing: 2px; }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    /* st.button のテキスト内の改行を反映させる */
+    .mode-card-container div.stButton > button span {
+        white-space: pre-wrap !important;
+    }
+
+    /* ホバー時のエフェクト (浮かび上がる、光る) */
+    .mode-card-container div.stButton > button:hover {
+        transform: translateY(-15px) scale(1.03) !important; /* 浮かび上がる */
+        border-color: #00f3ff !important;
+        box-shadow: 0 0 35px rgba(0, 243, 255, 0.6), inset 0 0 15px rgba(0, 243, 255, 0.2) !important; /* 光彩を強化 */
+        color: #00f3ff !important;
+    }
+
+    /* ボタン内のテキストデザイン */
+    .mode-card-container div.stButton > button {
+        font-size: 26px !important; /* テキストを大きく */
+        font-weight: 900 !important;
+        letter-spacing: 4px !important;
+        color: inherit !important;
+    }
+    
+    /* 下部の光るプラットフォーム（ image_5.png の下部 ）*/
+    .hologram-platform {
+        position: fixed;
+        bottom: -50px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 300px;
+        height: 100px;
+        background: radial-gradient(circle at 50% 50%, rgba(0, 150, 255, 0.3), transparent);
+        border-radius: 50%;
+        box-shadow: 0 0 30px rgba(0, 243, 255, 0.5), 0 0 50px rgba(0, 150, 255, 0.3);
+        filter: blur(10px);
+    }
+    
+    /* 他の st.markdown テキスト視認性 */
+    div[data-testid="stAppViewContainer"] st.markdown > p {
+        color: #e2e8f0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -69,26 +120,41 @@ if "forge_workspaces" not in st.session_state: st.session_state.forge_workspaces
 if "current_forge_ws" not in st.session_state: st.session_state.current_forge_ws = None 
 if "ai_voice_base64" not in st.session_state: st.session_state.ai_voice_base64 = None
 if "just_generated_audio" not in st.session_state: st.session_state.just_generated_audio = False
-# 新機能：選択されたモードを記憶
 if "selected_forge_mode" not in st.session_state: st.session_state.selected_forge_mode = None
 
 # ==========================================
-# 🚪 ステージ1：ホログラムカード選択画面 (Boss's Design)
+# 🚪 ステージ1：ホログラムカード選択画面 (究極修正)
 # ==========================================
 if st.session_state.current_forge_ws is None and st.session_state.selected_forge_mode is None:
-    st.markdown("<h2 class='saas-title'>[ FORGE STUDIO ]</h2>", unsafe_allow_html=True)
-    st.markdown("<p class='saas-subtitle'>SELECT SYSTEM ENGINE</p>", unsafe_allow_html=True)
+    # 🌟 ロゴ（ image_5.png の地球ホログラムをテキストで代用 ）
+    st.markdown('<div class="central-logo">⬡</div>', unsafe_allow_html=True)
+    st.markdown("<h2 class='saas-title'>❖ FORGE STUDIO ❖</h2>", unsafe_allow_html=True)
+    st.markdown("<p class='central-logo-sub'>SELECT SYSTEM ENGINE</p>", unsafe_allow_html=True)
     
+    # 下部の光るプラットフォーム
+    st.markdown('<div class="hologram-platform"></div>', unsafe_allow_html=True)
+
     st.markdown('<div class="mode-card-container">', unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4, gap="large")
     with c1:
-        if st.button("APP\nSTUDIO", use_container_width=True): st.session_state.selected_forge_mode = "APP"; st.rerun()
+        if st.button("APP\nSTUDIO", use_container_width=True, key="app_button"):
+            st.session_state.selected_forge_mode = "APP"
+            st.rerun()
+            
     with c2:
-        if st.button("IMAGE\nGENERATION", use_container_width=True): st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
+        if st.button("IMAGE\nGENERATION", use_container_width=True, key="image_button"):
+            st.session_state.selected_forge_mode = "IMAGE"
+            st.rerun()
+            
     with c3:
-        if st.button("VIDEO\nPRODUCTION", use_container_width=True): st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
+        if st.button("VIDEO\nPRODUCTION", use_container_width=True, key="video_button"):
+            st.session_state.selected_forge_mode = "VIDEO"
+            st.rerun()
+            
     with c4:
-        if st.button("SLIDE\nDECK", use_container_width=True): st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
+        if st.button("SLIDE\nDECK", use_container_width=True, key="slide_button"):
+            st.session_state.selected_forge_mode = "SLIDE"
+            st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
