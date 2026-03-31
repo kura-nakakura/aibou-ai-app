@@ -16,6 +16,45 @@ try:
 except ImportError:
     st.error("⚠️ `python-pptx` ライブラリがインストールされていません。requirements.txt を確認してください。")
 
+/* 🚀 新機能：ホバー時に下部に表示される説明エリア */
+    .desc-display-area {
+        height: 80px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        margin-top: 40px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: rgba(10, 20, 40, 0.4);
+        transition: all 0.3s ease;
+        text-align: center;
+        padding: 0 20px;
+    }
+    .default-desc { color: #718096; font-weight: bold; letter-spacing: 2px; }
+    .app-desc, .img-desc, .vid-desc, .slide-desc {
+        display: none;
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: bold;
+        letter-spacing: 1px;
+        line-height: 1.5;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.5), 0 0 20px rgba(0, 243, 255, 0.3);
+    }
+
+    /* いずれかのボタンがホバーされたらデフォルトテキストを消し、枠を光らせる */
+    [data-testid="stVerticalBlock"]:has(button:hover) .default-desc { display: none; }
+    [data-testid="stVerticalBlock"]:has(button:hover) .desc-display-area {
+        border-color: #ffffff;
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.4), inset 0 0 10px rgba(0, 243, 255, 0.2);
+        background: rgba(20, 35, 60, 0.8);
+    }
+
+    /* 各ボタンのホバーに連動して対応する説明を表示する魔法のCSS */
+    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-app) button:hover) .app-desc { display: block; }
+    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-img) button:hover) .img-desc { display: block; }
+    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-vid) button:hover) .vid-desc { display: block; }
+    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-slide) button:hover) .slide-desc { display: block; }
+
 # 💎 UIデザイン用CSS (ボタンの白飛び解消 ＆ 白ネオン反応)
 st.markdown("""
     <style>
@@ -113,7 +152,7 @@ if "just_generated_audio" not in st.session_state: st.session_state.just_generat
 if "selected_forge_mode" not in st.session_state: st.session_state.selected_forge_mode = None
 
 # ==========================================
-# 🚪 ステージ1：ホログラムカード選択画面 (横4列維持)
+# 🚪 ステージ1：ホログラムカード選択画面 (横4列 ＋ ホバー説明機能)
 # ==========================================
 if st.session_state.current_forge_ws is None and st.session_state.selected_forge_mode is None:
     st.markdown('<div class="central-logo">⬡</div>', unsafe_allow_html=True)
@@ -122,21 +161,35 @@ if st.session_state.current_forge_ws is None and st.session_state.selected_forge
     
     st.markdown('<div class="hologram-platform"></div>', unsafe_allow_html=True)
 
-    # ボスのベースレイアウト（横4列）
+    # 4つのボタンと、それをCSSで検知するための「見えないマーカー」を設置
     c1, c2, c3, c4 = st.columns(4, gap="large")
     with c1:
+        st.markdown('<div class="hover-target-app" style="display:none;"></div>', unsafe_allow_html=True)
         if st.button("APP STUDIO", use_container_width=True): 
             st.session_state.selected_forge_mode = "APP"; st.rerun()
     with c2:
+        st.markdown('<div class="hover-target-img" style="display:none;"></div>', unsafe_allow_html=True)
         if st.button("IMAGE GENERATOR", use_container_width=True): 
             st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
     with c3:
+        st.markdown('<div class="hover-target-vid" style="display:none;"></div>', unsafe_allow_html=True)
         if st.button("VIDEO PRODUCTION", use_container_width=True): 
             st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
     with c4:
+        st.markdown('<div class="hover-target-slide" style="display:none;"></div>', unsafe_allow_html=True)
         if st.button("SLIDE DECK", use_container_width=True): 
             st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
 
+    # 🚀 4つのボタンの下に表示される動的説明エリア
+    st.markdown("""
+        <div class="desc-display-area">
+            <span class="default-desc">HOVER OVER AN ENGINE TO VIEW SPECIFICATIONS</span>
+            <span class="app-desc">🤖 <b>[ APP STUDIO ]</b><br>ボスの指示から、美しくバグのないアプリケーションのUIとロジックを自律的に構築します。</span>
+            <span class="img-desc">🎨 <b>[ IMAGE GENERATOR ]</b><br>画像生成AIのための完璧な英語プロンプトを構築し、最高の1枚を引き出します。</span>
+            <span class="vid-desc">🎬 <b>[ VIDEO PRODUCTION ]</b><br>最先端動画生成AIに向けた、プロ品質の絵コンテとカメラワーク指定を作成します。</span>
+            <span class="slide-desc">📊 <b>[ SLIDE DECK ]</b><br>論理的なプレゼン構成を考案し、説得力のあるスライド資料(.pptx)を即座に出力します。</span>
+        </div>
+    """, unsafe_allow_html=True)
 # ==========================================
 # 🚪 ステージ2：モード別プロジェクト管理画面
 # ==========================================
