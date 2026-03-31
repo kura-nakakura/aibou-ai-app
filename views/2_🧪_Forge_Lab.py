@@ -133,7 +133,7 @@ st.markdown("""
     /* どこかのボタンがホバーされたら、デフォルト文字を消して枠をシアンに光らせる */
     .stApp:has(button:hover) .default-desc { opacity: 0 !important; transform: translateY(-10px) !important; }
     .stApp:has([data-testid="stHorizontalBlock"] button:hover) .desc-display-area {
-        border-color: #00f3ff !important;
+        border-color: #ffffff !important;
         box-shadow: 0 0 20px rgba(0, 243, 255, 0.4), inset 0 0 10px rgba(0, 243, 255, 0.2) !important;
         background: rgba(15, 30, 50, 0.8) !important;
     }
