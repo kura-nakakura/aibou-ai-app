@@ -16,7 +16,7 @@ try:
 except ImportError:
     st.error("⚠️ `python-pptx` ライブラリがインストールされていません。requirements.txt を確認してください。")
 
-# 💎 UIデザイン用CSS (ホバー説明ポップアップの完全動作版)
+# 💎 UIデザイン用CSS
 st.markdown("""
     <style>
     /* 1. 全体をダーク＆サイバーパンクな雰囲気に */
@@ -78,7 +78,7 @@ st.markdown("""
         text-shadow: 0 0 10px #ffffff, 0 0 20px #ffffff !important;
     }
     
-    /* 🚀 5. 【完全修正版】ホバー時に下部に表示される説明エリア */
+    /* 🚀 5. ホバー時に下部に表示される説明エリア */
     .desc-display-area {
         position: relative;
         height: 150px;
@@ -153,22 +153,22 @@ st.markdown("""
         z-index: -1;
     }
     
-    /* 🌟 サブ画面＆プロジェクトカードのコンテナ（すりガラス仕様） */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        background: rgba(255, 255, 255, 0.03) !important; /* ほんのり白みがかった半透明 */
-        backdrop-filter: blur(16px) !important; /* すりガラスのぼかし効果 */
-        -webkit-backdrop-filter: blur(16px) !important;
-        border: 1px solid rgba(255, 255, 255, 0.15) !important; /* 輪郭をクッキリさせる白い半透明枠 */
-        border-radius: 16px !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important; /* 影を落として浮遊感を出す */
+    /* 🌟【完全修正】サブ画面＆プロジェクトカードのコンテナ（すりガラス仕様） */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: rgba(255, 255, 255, 0.05) !important; /* ほんのり白みがかった半透明 */
+        backdrop-filter: blur(12px) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important; /* 輪郭をクッキリさせる白い半透明枠！ */
+        border-radius: 15px !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important; /* 影を落として浮遊感を出す */
         transition: all 0.3s ease !important;
     }
 
-    /* プロジェクトカードにマウスを乗せた時のホバーエフェクト */
-    [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        background: rgba(255, 255, 255, 0.05) !important;
-        border-color: rgba(0, 243, 255, 0.5) !important; /* 枠がシアンに発光 */
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 15px rgba(0, 243, 255, 0.2) !important;
+    /* 🌟 プロジェクトカードにマウスを乗せた時のホバーエフェクト */
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        background-color: rgba(255, 255, 255, 0.08) !important;
+        border-color: #00f3ff !important; /* 枠がシアンに発光 */
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 0 15px rgba(0, 243, 255, 0.3) !important;
         transform: translateY(-3px) !important; /* 少しだけ上に浮く */
     }
     </style>
@@ -183,7 +183,7 @@ if "just_generated_audio" not in st.session_state: st.session_state.just_generat
 if "selected_forge_mode" not in st.session_state: st.session_state.selected_forge_mode = None
 
 # ==========================================
-# 🚪 ステージ1：ホログラムカード選択画面 (横4列 ＋ ホバー機能)
+# 🚪 ステージ1：ホログラムカード選択画面
 # ==========================================
 if st.session_state.current_forge_ws is None and st.session_state.selected_forge_mode is None:
     st.markdown('<div class="central-logo">⬡</div>', unsafe_allow_html=True)
@@ -206,7 +206,6 @@ if st.session_state.current_forge_ws is None and st.session_state.selected_forge
         if st.button("SLIDE DECK", use_container_width=True): 
             st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
 
-    # 🚀 ここが復活！フワッと切り替わる説明エリア
     st.markdown("""
         <div class="desc-display-area">
             <div class="desc-text default-desc">HOVER OVER AN ENGINE TO VIEW SPECIFICATIONS</div>
