@@ -153,23 +153,24 @@ st.markdown("""
         z-index: -1;
     }
     
-    /* 🌟【完全修正】サブ画面＆プロジェクトカードのコンテナ（すりガラス仕様） */
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: rgba(255, 255, 255, 0.05) !important; /* ほんのり白みがかった半透明 */
-        backdrop-filter: blur(12px) !important;
-        -webkit-backdrop-filter: blur(12px) !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important; /* 輪郭をクッキリさせる白い半透明枠！ */
+    /* 🌟 【完全修正】プロジェクトカード（枠付きコンテナ）を「サイバーなすりガラス」に！ */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background: linear-gradient(135deg, rgba(0, 243, 255, 0.05), rgba(15, 23, 42, 0.4)) !important;
+        backdrop-filter: blur(20px) !important;
+        -webkit-backdrop-filter: blur(20px) !important;
+        border: 1px solid rgba(0, 243, 255, 0.4) !important; /* シアンの枠線でクッキリと！ */
+        border-top: 1px solid rgba(0, 243, 255, 0.8) !important; /* 上部だけ強く光らせる */
         border-radius: 15px !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important; /* 影を落として浮遊感を出す */
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(0, 243, 255, 0.1) !important;
         transition: all 0.3s ease !important;
     }
 
     /* 🌟 プロジェクトカードにマウスを乗せた時のホバーエフェクト */
-    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-        background-color: rgba(255, 255, 255, 0.08) !important;
-        border-color: #00f3ff !important; /* 枠がシアンに発光 */
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 0 15px rgba(0, 243, 255, 0.3) !important;
-        transform: translateY(-3px) !important; /* 少しだけ上に浮く */
+    [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        background: linear-gradient(135deg, rgba(0, 243, 255, 0.1), rgba(15, 23, 42, 0.6)) !important;
+        border: 1px solid rgba(0, 243, 255, 0.8) !important; /* ホバーで枠線が強くシアンに光る */
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 15px rgba(0, 243, 255, 0.4), inset 0 0 20px rgba(0, 243, 255, 0.2) !important;
+        transform: translateY(-5px) !important; /* 少しだけ上にフワッと浮く */
     }
     </style>
 """, unsafe_allow_html=True)
