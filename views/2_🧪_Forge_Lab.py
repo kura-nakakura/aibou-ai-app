@@ -26,13 +26,13 @@ st.markdown("""
         color: #e2e8f0 !important;
     }
 
-    /* 2. ⬡と❖のシンボルを光らせる */
+    /* 2. ⬡と❖のシンボルを光らせる (🌟ボスのお気に入りデザインに完全復元🌟) */
     .saas-title {
         color: #ffffff;
         font-weight: 900;
         letter-spacing: 6px;
         margin-bottom: 5px;
-        text-shadow: 0 0 15px rgba(255, 255, 255, 0.8), 0 0 30px rgba(0, 243, 255, 0.6);
+        text-shadow: 0 0 15px rgba(0, 243, 255, 0.6), 0 0 30px rgba(0, 150, 255, 0.4); /* シアンの美しい光彩 */
         text-align: center;
     }
     .central-logo {
