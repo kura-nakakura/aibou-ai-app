@@ -153,30 +153,23 @@ st.markdown("""
         z-index: -1;
     }
     
-    /* 🌟 【完全版】プロジェクトカード（背景から完全に独立した立体ソリッドカード） */
-    /* Streamlitのコンテナ要素を確実にとらえるための強力な指定 */
-    div[data-testid="stVerticalBlockBorderWrapper"]:has(h4) {
-        background-color: #111827 !important; /* 漆黒(#030b14)からクッキリ浮き出るソリッドなダークグレー */
-        background-image: none !important; /* 余計なグラデーションを消去してソリッドに */
-        border: 1px solid #374151 !important; /* 上品で確実に見える枠線 */
-        border-radius: 16px !important;
-        padding: 16px !important;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8) !important; /* 濃い影で「物体」として浮かせる */
-        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+    /* 🌟 サブ画面＆プロジェクトカードのコンテナ（ソリッドで独立したカード仕様） */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #0d1726 !important; /* 漆黒に沈まない、ソリッドなダークネイビー */
+        background-image: none !important; /* 透かしを完全にオフ */
+        backdrop-filter: none !important; 
+        border: 1px solid rgba(255, 255, 255, 0.15) !important; /* 上品でハッキリした細い枠線 */
+        border-radius: 12px !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6) !important; /* 影を落として「物体」として浮かせる */
+        transition: all 0.3s ease !important;
     }
 
     /* 🌟 プロジェクトカードにマウスを乗せた時のホバーエフェクト */
-    div[data-testid="stVerticalBlockBorderWrapper"]:has(h4):hover {
-        background-color: #1f2937 !important; /* ホバーでカード自体が明るく反応 */
-        border-color: #00f3ff !important; /* 枠線がサイバーなシアンネオンに！ */
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 243, 255, 0.3) !important;
-        transform: translateY(-5px) !important; /* フワッと上に浮く */
-    }
-    
-    /* カード内のテキストも見やすく調整 */
-    div[data-testid="stVerticalBlockBorderWrapper"]:has(h4) h4 {
-        color: #f3f4f6 !important;
-        letter-spacing: 1px !important;
+    [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        background-color: #121f33 !important; /* ホバーで少しだけ明るく */
+        border-color: rgba(0, 243, 255, 0.4) !important; /* 枠線がうっすらシアンに光る */
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.8), 0 0 15px rgba(0, 243, 255, 0.1) !important;
+        transform: translateY(-2px) !important; /* 少しだけ上に浮く */
     }
     </style>
 """, unsafe_allow_html=True)
