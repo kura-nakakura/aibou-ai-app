@@ -16,49 +16,9 @@ try:
 except ImportError:
     st.error("⚠️ `python-pptx` ライブラリがインストールされていません。requirements.txt を確認してください。")
 
-# 💎 UIデザイン用CSS (ボタンの白飛び解消 ＆ 白ネオン反応)
+# 💎 UIデザイン用CSS (ロゴ復元 ＆ 白ネオン ＆ 説明ポップアップ完全動作版)
 st.markdown("""
     <style>
-    /* 🚀 新機能：ホバー時に下部に表示される説明エリア */
-    .desc-display-area {
-        height: 80px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 12px;
-        margin-top: 40px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        background: rgba(10, 20, 40, 0.4);
-        transition: all 0.3s ease;
-        text-align: center;
-        padding: 0 20px;
-    }
-    .default-desc { color: #718096; font-weight: bold; letter-spacing: 2px; }
-    .app-desc, .img-desc, .vid-desc, .slide-desc {
-        display: none;
-        color: #ffffff;
-        font-size: 14px;
-        font-weight: bold;
-        letter-spacing: 1px;
-        line-height: 1.5;
-        text-shadow: 0 0 10px rgba(255, 255, 255, 0.5), 0 0 20px rgba(0, 243, 255, 0.3);
-    }
-
-    /* いずれかのボタンがホバーされたらデフォルトテキストを消し、枠を光らせる */
-    [data-testid="stVerticalBlock"]:has(button:hover) .default-desc { display: none; }
-    [data-testid="stVerticalBlock"]:has(button:hover) .desc-display-area {
-        border-color: #ffffff;
-        box-shadow: 0 0 20px rgba(255, 255, 255, 0.4), inset 0 0 10px rgba(0, 243, 255, 0.2);
-        background: rgba(20, 35, 60, 0.8);
-    }
-
-    /* 各ボタンのホバーに連動して対応する説明を表示する魔法のCSS */
-    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-app) button:hover) .app-desc { display: block; }
-    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-img) button:hover) .img-desc { display: block; }
-    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-vid) button:hover) .vid-desc { display: block; }
-    [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-slide) button:hover) .slide-desc { display: block; }
-
-
     /* 1. 全体をダーク＆サイバーパンクな雰囲気に */
     [data-testid="stAppViewContainer"] {
         background-color: #030b14 !important;
@@ -66,16 +26,7 @@ st.markdown("""
         color: #e2e8f0 !important;
     }
 
-    /* 🌟 2. ボス指定の完全再現: シアンのロゴ */
-    .central-logo {
-        text-align: center;
-        font-size: 70px;
-        color: #00f3ff !important; /* 絶対に白にしない。完全なシアン */
-        text-shadow: 0 0 15px rgba(0, 243, 255, 0.8), 0 0 30px rgba(0, 150, 255, 0.5) !important;
-        margin: 30px 0 10px 0;
-    }
-
-    /* 🌟 3. ボス指定の完全再現: タイトル(白文字 + シアン光彩) */
+    /* 2. ⬡と❖のシンボルを光らせる (ボスのお気に入りデザイン) */
     .saas-title {
         color: #ffffff !important;
         font-weight: 900;
@@ -83,6 +34,13 @@ st.markdown("""
         margin-bottom: 5px;
         text-shadow: 0 0 10px rgba(0, 243, 255, 0.6), 0 0 20px rgba(0, 150, 255, 0.4) !important;
         text-align: center;
+    }
+    .central-logo {
+        text-align: center;
+        font-size: 70px;
+        color: #00f3ff !important;
+        text-shadow: 0 0 15px rgba(0, 243, 255, 0.8), 0 0 30px rgba(0, 150, 255, 0.5) !important;
+        margin: 30px 0 10px 0;
     }
     .central-logo-sub {
         text-align: center;
@@ -93,32 +51,72 @@ st.markdown("""
         margin-bottom: 40px;
     }
 
-    /* 🚀 3. 【修正】ボタンの白飛びを解消し、ダークサイバー仕様に変更 */
+    /* 3. ボタンのダークサイバー仕様 (白飛び解消) */
     div.stButton > button {
-        background-color: rgba(15, 23, 42, 0.8) !important; /* ボタンの背景をダークにして文字を見せる */
-        border: 1px solid rgba(255, 255, 255, 0.3) !important; /* 普段は静かな白い枠線 */
+        background-color: rgba(15, 23, 42, 0.8) !important; 
+        border: 1px solid rgba(255, 255, 255, 0.2) !important; 
         border-radius: 12px !important;
-        color: #ffffff !important; /* 文字は真っ白 */
         transition: all 0.3s ease !important;
         padding: 10px !important;
+        height: 60px !important;
     }
     div.stButton > button p {
         color: #ffffff !important;
         font-weight: 800 !important;
         letter-spacing: 2px !important;
+        margin: 0 !important;
     }
 
-    /* 🔥 4. ホバー時のエフェクト (ボスの要望：白いネオンの反応！) */
+    /* 4. ホバー時の白いネオン発光エフェクト */
     div.stButton > button:hover {
         background-color: rgba(30, 41, 59, 0.9) !important;
-        border-color: #ffffff !important; /* 枠線が白く発光 */
+        border-color: #ffffff !important;
         box-shadow: 0 0 20px rgba(255, 255, 255, 0.6), inset 0 0 10px rgba(255, 255, 255, 0.2) !important;
-        transform: translateY(-3px) !important; /* 少しだけ浮く */
+        transform: translateY(-3px) !important;
     }
     div.stButton > button:hover p {
-        text-shadow: 0 0 10px #ffffff, 0 0 20px #ffffff !important; /* 文字が真っ白なネオンに */
+        text-shadow: 0 0 10px #ffffff, 0 0 20px #ffffff !important;
     }
     
+    /* 🚀 5. 【完全修正】ホバー時に下部に表示される説明エリア */
+    .desc-display-area {
+        min-height: 80px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        margin-top: 30px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background: rgba(10, 20, 40, 0.4);
+        transition: all 0.3s ease;
+        text-align: center;
+        padding: 15px;
+    }
+    .default-desc { color: #718096; font-weight: bold; letter-spacing: 2px; }
+    .app-desc, .img-desc, .vid-desc, .slide-desc {
+        display: none; /* 普段は隠しておく */
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: bold;
+        letter-spacing: 1px;
+        line-height: 1.5;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    }
+
+    /* 🎯 魔法のCSS：Streamlitのカラムの順番（1～4番目）でホバーを直接検知する！ */
+    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1) button:hover) .app-desc { display: block !important; }
+    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) button:hover) .img-desc { display: block !important; }
+    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(3) button:hover) .vid-desc { display: block !important; }
+    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(4) button:hover) .slide-desc { display: block !important; }
+
+    /* どこかのボタンがホバーされたら、枠を光らせてデフォルト文字を消す */
+    body:has([data-testid="stHorizontalBlock"] button:hover) .default-desc { display: none !important; }
+    body:has([data-testid="stHorizontalBlock"] button:hover) .desc-display-area {
+        border-color: #00f3ff !important;
+        box-shadow: 0 0 20px rgba(0, 243, 255, 0.4), inset 0 0 10px rgba(0, 243, 255, 0.2) !important;
+        background: rgba(15, 30, 50, 0.8) !important;
+    }
+
     /* 下部の光るプラットフォーム */
     .hologram-platform {
         position: fixed;
@@ -162,33 +160,25 @@ if st.session_state.current_forge_ws is None and st.session_state.selected_forge
     
     st.markdown('<div class="hologram-platform"></div>', unsafe_allow_html=True)
 
-    # 4つのボタンと、それをCSSで検知するための「見えないマーカー」を設置
+    # 4つのボタンを配置
     c1, c2, c3, c4 = st.columns(4, gap="large")
     with c1:
-        st.markdown('<div class="hover-target-app" style="display:none;"></div>', unsafe_allow_html=True)
-        if st.button("APP STUDIO", use_container_width=True): 
-            st.session_state.selected_forge_mode = "APP"; st.rerun()
+        if st.button("APP STUDIO", use_container_width=True): st.session_state.selected_forge_mode = "APP"; st.rerun()
     with c2:
-        st.markdown('<div class="hover-target-img" style="display:none;"></div>', unsafe_allow_html=True)
-        if st.button("IMAGE GENERATOR", use_container_width=True): 
-            st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
+        if st.button("IMAGE GENERATOR", use_container_width=True): st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
     with c3:
-        st.markdown('<div class="hover-target-vid" style="display:none;"></div>', unsafe_allow_html=True)
-        if st.button("VIDEO PRODUCTION", use_container_width=True): 
-            st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
+        if st.button("VIDEO PRODUCTION", use_container_width=True): st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
     with c4:
-        st.markdown('<div class="hover-target-slide" style="display:none;"></div>', unsafe_allow_html=True)
-        if st.button("SLIDE DECK", use_container_width=True): 
-            st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
+        if st.button("SLIDE DECK", use_container_width=True): st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
 
-    # 🚀 4つのボタンの下に表示される動的説明エリア
+    # 🚀 ボタンの下に表示される動的説明エリア
     st.markdown("""
         <div class="desc-display-area">
             <span class="default-desc">HOVER OVER AN ENGINE TO VIEW SPECIFICATIONS</span>
-            <span class="app-desc">🤖 <b>[ APP STUDIO ]</b><br>ボスの指示から、美しくバグのないアプリケーションのUIとロジックを自律的に構築します。</span>
-            <span class="img-desc">🎨 <b>[ IMAGE GENERATOR ]</b><br>画像生成AIのための完璧な英語プロンプトを構築し、最高の1枚を引き出します。</span>
-            <span class="vid-desc">🎬 <b>[ VIDEO PRODUCTION ]</b><br>最先端動画生成AIに向けた、プロ品質の絵コンテとカメラワーク指定を作成します。</span>
-            <span class="slide-desc">📊 <b>[ SLIDE DECK ]</b><br>論理的なプレゼン構成を考案し、説得力のあるスライド資料(.pptx)を即座に出力します。</span>
+            <span class="app-desc">🤖 <b style="color:#00f3ff;">[ APP STUDIO ]</b><br>ボスの指示から、美しくバグのないアプリケーションのUIとロジックを自律的に構築・プレビューします。</span>
+            <span class="img-desc">🎨 <b style="color:#00f3ff;">[ IMAGE GENERATOR ]</b><br>画像生成AIのための完璧な英語プロンプトを構築し、照明や画角を計算した最高の1枚を引き出します。</span>
+            <span class="vid-desc">🎬 <b style="color:#00f3ff;">[ VIDEO PRODUCTION ]</b><br>SoraやVeo等の最先端動画生成AIに向けた、プロ品質の絵コンテとカメラワーク指定を作成します。</span>
+            <span class="slide-desc">📊 <b style="color:#00f3ff;">[ SLIDE DECK ]</b><br>論理的なプレゼン構成を考案し、説得力のあるスライド資料(.pptx)を即座に出力します。</span>
         </div>
     """, unsafe_allow_html=True)
 
