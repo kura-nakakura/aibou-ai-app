@@ -153,21 +153,30 @@ st.markdown("""
         z-index: -1;
     }
     
-    /* 🌟 プロジェクトカード（背景から完全に独立した立体ソリッドカード） */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #111827 !important; /* 背景の漆黒（#030b14）からクッキリ浮き出るソリッドカラー */
-        border: 1px solid #374151 !important; /* 確実に見える上品な枠線 */
+    /* 🌟 【完全版】プロジェクトカード（背景から完全に独立した立体ソリッドカード） */
+    /* Streamlitのコンテナ要素を確実にとらえるための強力な指定 */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(h4) {
+        background-color: #111827 !important; /* 漆黒(#030b14)からクッキリ浮き出るソリッドなダークグレー */
+        background-image: none !important; /* 余計なグラデーションを消去してソリッドに */
+        border: 1px solid #374151 !important; /* 上品で確実に見える枠線 */
         border-radius: 16px !important;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8) !important; /* 濃い影を落として「物体」として浮かせる */
-        transition: all 0.3s ease !important;
+        padding: 16px !important;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8) !important; /* 濃い影で「物体」として浮かせる */
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
     }
 
     /* 🌟 プロジェクトカードにマウスを乗せた時のホバーエフェクト */
-    [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        background-color: #1f2937 !important; /* ホバーでカード自体が少し明るく反応 */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(h4):hover {
+        background-color: #1f2937 !important; /* ホバーでカード自体が明るく反応 */
         border-color: #00f3ff !important; /* 枠線がサイバーなシアンネオンに！ */
         box-shadow: 0 15px 35px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 243, 255, 0.3) !important;
         transform: translateY(-5px) !important; /* フワッと上に浮く */
+    }
+    
+    /* カード内のテキストも見やすく調整 */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(h4) h4 {
+        color: #f3f4f6 !important;
+        letter-spacing: 1px !important;
     }
     </style>
 """, unsafe_allow_html=True)
