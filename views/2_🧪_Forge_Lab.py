@@ -153,24 +153,22 @@ st.markdown("""
         z-index: -1;
     }
     
-    /* 🌟 【完全修正】プロジェクトカード（枠付きコンテナ）を「サイバーなすりガラス」に！ */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        background: linear-gradient(135deg, rgba(0, 243, 255, 0.05), rgba(15, 23, 42, 0.4)) !important;
-        backdrop-filter: blur(20px) !important;
-        -webkit-backdrop-filter: blur(20px) !important;
-        border: 1px solid rgba(0, 243, 255, 0.4) !important; /* シアンの枠線でクッキリと！ */
-        border-top: 1px solid rgba(0, 243, 255, 0.8) !important; /* 上部だけ強く光らせる */
-        border-radius: 15px !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(0, 243, 255, 0.1) !important;
+    /* 🌟 プロジェクトカード（コンテナ）をクッキリした独立カードに！ */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #101c2e !important; /* 背景の漆黒から完全に独立して浮き出るネイビー */
+        border: 1px solid rgba(0, 243, 255, 0.5) !important; /* シアンの枠線をハッキリ見せる */
+        border-radius: 16px !important;
+        padding: 15px !important; /* カードの内側にしっかり余白を持たせる */
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6), inset 0 0 15px rgba(0, 243, 255, 0.05) !important;
         transition: all 0.3s ease !important;
     }
 
     /* 🌟 プロジェクトカードにマウスを乗せた時のホバーエフェクト */
-    [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        background: linear-gradient(135deg, rgba(0, 243, 255, 0.1), rgba(15, 23, 42, 0.6)) !important;
-        border: 1px solid rgba(0, 243, 255, 0.8) !important; /* ホバーで枠線が強くシアンに光る */
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 15px rgba(0, 243, 255, 0.4), inset 0 0 20px rgba(0, 243, 255, 0.2) !important;
-        transform: translateY(-5px) !important; /* 少しだけ上にフワッと浮く */
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        background-color: #17273e !important; /* マウスを乗せるとカードが少し明るく反応 */
+        border-color: #00f3ff !important; /* 枠線がネオンシアンに強く光る */
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(0, 243, 255, 0.4) !important;
+        transform: translateY(-4px) !important; /* 少しフワッと浮く */
     }
     </style>
 """, unsafe_allow_html=True)
