@@ -16,7 +16,10 @@ try:
 except ImportError:
     st.error("⚠️ `python-pptx` ライブラリがインストールされていません。requirements.txt を確認してください。")
 
-/* 🚀 新機能：ホバー時に下部に表示される説明エリア */
+# 💎 UIデザイン用CSS (ボタンの白飛び解消 ＆ 白ネオン反応)
+st.markdown("""
+    <style>
+    /* 🚀 新機能：ホバー時に下部に表示される説明エリア */
     .desc-display-area {
         height: 80px;
         border: 1px solid rgba(255, 255, 255, 0.1);
@@ -55,9 +58,7 @@ except ImportError:
     [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-vid) button:hover) .vid-desc { display: block; }
     [data-testid="stVerticalBlock"]:has([data-testid="column"]:has(.hover-target-slide) button:hover) .slide-desc { display: block; }
 
-# 💎 UIデザイン用CSS (ボタンの白飛び解消 ＆ 白ネオン反応)
-st.markdown("""
-    <style>
+
     /* 1. 全体をダーク＆サイバーパンクな雰囲気に */
     [data-testid="stAppViewContainer"] {
         background-color: #030b14 !important;
@@ -190,6 +191,7 @@ if st.session_state.current_forge_ws is None and st.session_state.selected_forge
             <span class="slide-desc">📊 <b>[ SLIDE DECK ]</b><br>論理的なプレゼン構成を考案し、説得力のあるスライド資料(.pptx)を即座に出力します。</span>
         </div>
     """, unsafe_allow_html=True)
+
 # ==========================================
 # 🚪 ステージ2：モード別プロジェクト管理画面
 # ==========================================
