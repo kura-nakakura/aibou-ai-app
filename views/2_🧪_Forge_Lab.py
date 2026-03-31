@@ -145,7 +145,7 @@ st.markdown("""
         left: 50%;
         transform: translateX(-50%);
         width: 600px;
-        height: 150px;
+        height: 500px;
         background: radial-gradient(ellipse at 50% 50%, rgba(0, 243, 255, 0.15), transparent 70%);
         border-radius: 50%;
         box-shadow: 0 0 50px rgba(0, 243, 255, 0.2);
