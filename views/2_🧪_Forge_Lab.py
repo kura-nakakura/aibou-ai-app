@@ -78,7 +78,7 @@ st.markdown("""
         text-shadow: 0 0 10px #ffffff, 0 0 20px #ffffff !important;
     }
     
-    /* 🚀 5. ホバー時に下部に表示される説明エリア */
+    /* 5. ホバー時に下部に表示される説明エリア */
     .desc-display-area {
         position: relative;
         height: 150px;
@@ -93,7 +93,6 @@ st.markdown("""
         overflow: hidden;
     }
     
-    /* 文字がフワッと切り替わる設定 */
     .desc-text {
         position: absolute;
         width: 100%;
@@ -117,7 +116,7 @@ st.markdown("""
         letter-spacing: 2px;
     }
 
-    /* 🎯 魔法のCSS：Streamlitのカラムの順番でホバーを「確実」に検知する！ */
+    /* 魔法のCSS：Streamlitのカラムの順番でホバーを「確実」に検知する */
     .stApp:has([data-testid="column"]:nth-of-type(1) button:hover) .app-desc,
     .stApp:has([data-testid="stColumn"]:nth-of-type(1) button:hover) .app-desc { opacity: 1 !important; transform: translateY(0) !important; }
     
@@ -130,7 +129,6 @@ st.markdown("""
     .stApp:has([data-testid="column"]:nth-of-type(4) button:hover) .slide-desc,
     .stApp:has([data-testid="stColumn"]:nth-of-type(4) button:hover) .slide-desc { opacity: 1 !important; transform: translateY(0) !important; }
 
-    /* どこかのボタンがホバーされたら、デフォルト文字を消して枠をシアンに光らせる */
     .stApp:has(button:hover) .default-desc { opacity: 0 !important; transform: translateY(-10px) !important; }
     .stApp:has([data-testid="stHorizontalBlock"] button:hover) .desc-display-area {
         border-color: #ffffff !important;
@@ -153,24 +151,21 @@ st.markdown("""
         z-index: -1;
     }
     
-    /* 🌟 サブ画面＆プロジェクトカードのコンテナ（ハッキリ見えるソリッドカード仕様） */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #1e293b !important; /* 漆黒から確実に浮き出る、少し明るめのスレートネイビー */
-        background-image: none !important;
-        backdrop-filter: none !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important; /* 輪郭をハッキリさせる白い枠線 */
-        border-radius: 12px !important;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8) !important; /* 強い影で立体感を出す */
-        padding: 5px !important; /* カード内の余白調整 */
+    /* 🌟 【絶対解決版】プロジェクトカード（強烈なセレクタ＋ハッキリ見える色） */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #1e293b !important; /* ← 絶対に漆黒から浮き出るスレートグレー！ */
+        border: 2px solid rgba(0, 243, 255, 0.5) !important; /* ← 確実に見える2pxのシアン枠！ */
+        border-radius: 16px !important;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.8) !important; /* 濃い影で浮かせる */
         transition: all 0.3s ease !important;
     }
 
     /* 🌟 プロジェクトカードにマウスを乗せた時のホバーエフェクト */
-    [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        background-color: #334155 !important; /* ホバーでさらに一段階明るくする */
-        border-color: #00f3ff !important; /* 枠線をシアンに発光させる */
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.9), 0 0 15px rgba(0, 243, 255, 0.3) !important;
-        transform: translateY(-4px) !important; /* フワッと浮く */
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        background-color: #334155 !important; /* ホバーでさらに一段階明るく！ */
+        border-color: #00f3ff !important; /* ネオンシアン発光 */
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 243, 255, 0.4) !important;
+        transform: translateY(-5px) !important;
     }
     </style>
 """, unsafe_allow_html=True)
