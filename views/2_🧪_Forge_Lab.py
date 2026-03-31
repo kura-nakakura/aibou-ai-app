@@ -153,12 +153,23 @@ st.markdown("""
         z-index: -1;
     }
     
-    /* サブ画面のコンテナ */
+    /* 🌟 サブ画面＆プロジェクトカードのコンテナ（すりガラス仕様） */
     [data-testid="stVerticalBlockBorderWrapper"] {
-        background: rgba(15, 23, 42, 0.6) !important;
-        backdrop-filter: blur(12px) !important;
-        border: 1px solid #2d3748 !important;
-        border-radius: 15px !important;
+        background: rgba(255, 255, 255, 0.03) !important; /* ほんのり白みがかった半透明 */
+        backdrop-filter: blur(16px) !important; /* すりガラスのぼかし効果 */
+        -webkit-backdrop-filter: blur(16px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important; /* 輪郭をクッキリさせる白い半透明枠 */
+        border-radius: 16px !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important; /* 影を落として浮遊感を出す */
+        transition: all 0.3s ease !important;
+    }
+
+    /* プロジェクトカードにマウスを乗せた時のホバーエフェクト */
+    [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        background: rgba(255, 255, 255, 0.05) !important;
+        border-color: rgba(0, 243, 255, 0.5) !important; /* 枠がシアンに発光 */
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 15px rgba(0, 243, 255, 0.2) !important;
+        transform: translateY(-3px) !important; /* 少しだけ上に浮く */
     }
     </style>
 """, unsafe_allow_html=True)
