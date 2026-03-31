@@ -81,7 +81,7 @@ st.markdown("""
     /* 🚀 5. 【完全修正版】ホバー時に下部に表示される説明エリア */
     .desc-display-area {
         position: relative;
-        height: 90px;
+        height: 400px;
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         margin-top: 30px;
@@ -145,7 +145,7 @@ st.markdown("""
         left: 50%;
         transform: translateX(-50%);
         width: 600px;
-        height: 500px;
+        height: 150px;
         background: radial-gradient(ellipse at 50% 50%, rgba(0, 243, 255, 0.15), transparent 70%);
         border-radius: 50%;
         box-shadow: 0 0 50px rgba(0, 243, 255, 0.2);
