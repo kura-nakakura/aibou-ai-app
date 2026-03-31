@@ -26,21 +26,23 @@ st.markdown("""
         color: #e2e8f0 !important;
     }
 
-    /* 2. ⬡と❖のシンボルを光らせる (🌟ボスのお気に入りデザインに完全復元🌟) */
-    .saas-title {
-        color: #ffffff;
-        font-weight: 900;
-        letter-spacing: 6px;
-        margin-bottom: 5px;
-        text-shadow: 0 0 15px rgba(0, 243, 255, 0.6), 0 0 30px rgba(0, 150, 255, 0.4); /* シアンの美しい光彩 */
-        text-align: center;
-    }
+    /* 🌟 2. ボス指定の完全再現: シアンのロゴ */
     .central-logo {
         text-align: center;
         font-size: 70px;
-        color: #ffffff;
-        text-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 0 0 40px rgba(0, 243, 255, 0.8);
+        color: #00f3ff !important; /* 絶対に白にしない。完全なシアン */
+        text-shadow: 0 0 15px rgba(0, 243, 255, 0.8), 0 0 30px rgba(0, 150, 255, 0.5) !important;
         margin: 30px 0 10px 0;
+    }
+
+    /* 🌟 3. ボス指定の完全再現: タイトル(白文字 + シアン光彩) */
+    .saas-title {
+        color: #ffffff !important;
+        font-weight: 900;
+        letter-spacing: 6px;
+        margin-bottom: 5px;
+        text-shadow: 0 0 10px rgba(0, 243, 255, 0.6), 0 0 20px rgba(0, 150, 255, 0.4) !important;
+        text-align: center;
     }
     .central-logo-sub {
         text-align: center;
