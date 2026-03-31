@@ -16,7 +16,7 @@ try:
 except ImportError:
     st.error("⚠️ `python-pptx` ライブラリがインストールされていません。requirements.txt を確認してください。")
 
-# 💎 UIデザイン用CSS (ロゴ復元 ＆ 白ネオン ＆ 説明ポップアップ完全動作版)
+# 💎 UIデザイン用CSS (ホバー説明ポップアップの完全動作版)
 st.markdown("""
     <style>
     /* 1. 全体をダーク＆サイバーパンクな雰囲気に */
@@ -26,7 +26,7 @@ st.markdown("""
         color: #e2e8f0 !important;
     }
 
-    /* 2. ⬡と❖のシンボルを光らせる (ボスのお気に入りデザイン) */
+    /* 2. ⬡と❖のシンボルを光らせる */
     .saas-title {
         color: #ffffff !important;
         font-weight: 900;
@@ -51,7 +51,7 @@ st.markdown("""
         margin-bottom: 40px;
     }
 
-    /* 3. ボタンのダークサイバー仕様 (白飛び解消) */
+    /* 3. ボタンのダークサイバー仕様 */
     div.stButton > button {
         background-color: rgba(15, 23, 42, 0.8) !important; 
         border: 1px solid rgba(255, 255, 255, 0.2) !important; 
@@ -78,9 +78,10 @@ st.markdown("""
         text-shadow: 0 0 10px #ffffff, 0 0 20px #ffffff !important;
     }
     
-    /* 🚀 5. 【完全修正】ホバー時に下部に表示される説明エリア */
+    /* 🚀 5. 【完全修正版】ホバー時に下部に表示される説明エリア */
     .desc-display-area {
-        min-height: 80px;
+        position: relative;
+        height: 90px;
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         margin-top: 30px;
@@ -89,29 +90,49 @@ st.markdown("""
         align-items: center;
         background: rgba(10, 20, 40, 0.4);
         transition: all 0.3s ease;
-        text-align: center;
-        padding: 15px;
+        overflow: hidden;
     }
-    .default-desc { color: #718096; font-weight: bold; letter-spacing: 2px; }
-    .app-desc, .img-desc, .vid-desc, .slide-desc {
-        display: none; /* 普段は隠しておく */
+    
+    /* 文字がフワッと切り替わる設定 */
+    .desc-text {
+        position: absolute;
+        width: 100%;
+        text-align: center;
+        opacity: 0;
+        transition: opacity 0.3s ease, transform 0.3s ease;
+        transform: translateY(10px);
         color: #ffffff;
         font-size: 14px;
         font-weight: bold;
         letter-spacing: 1px;
         line-height: 1.5;
         text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+        pointer-events: none;
+    }
+    
+    .default-desc {
+        opacity: 1;
+        transform: translateY(0);
+        color: #718096;
+        letter-spacing: 2px;
     }
 
-    /* 🎯 魔法のCSS：Streamlitのカラムの順番（1～4番目）でホバーを直接検知する！ */
-    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(1) button:hover) .app-desc { display: block !important; }
-    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(2) button:hover) .img-desc { display: block !important; }
-    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(3) button:hover) .vid-desc { display: block !important; }
-    body:has([data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(4) button:hover) .slide-desc { display: block !important; }
+    /* 🎯 魔法のCSS：Streamlitのカラムの順番でホバーを「確実」に検知する！ */
+    .stApp:has([data-testid="column"]:nth-of-type(1) button:hover) .app-desc,
+    .stApp:has([data-testid="stColumn"]:nth-of-type(1) button:hover) .app-desc { opacity: 1 !important; transform: translateY(0) !important; }
+    
+    .stApp:has([data-testid="column"]:nth-of-type(2) button:hover) .img-desc,
+    .stApp:has([data-testid="stColumn"]:nth-of-type(2) button:hover) .img-desc { opacity: 1 !important; transform: translateY(0) !important; }
+    
+    .stApp:has([data-testid="column"]:nth-of-type(3) button:hover) .vid-desc,
+    .stApp:has([data-testid="stColumn"]:nth-of-type(3) button:hover) .vid-desc { opacity: 1 !important; transform: translateY(0) !important; }
+    
+    .stApp:has([data-testid="column"]:nth-of-type(4) button:hover) .slide-desc,
+    .stApp:has([data-testid="stColumn"]:nth-of-type(4) button:hover) .slide-desc { opacity: 1 !important; transform: translateY(0) !important; }
 
-    /* どこかのボタンがホバーされたら、枠を光らせてデフォルト文字を消す */
-    body:has([data-testid="stHorizontalBlock"] button:hover) .default-desc { display: none !important; }
-    body:has([data-testid="stHorizontalBlock"] button:hover) .desc-display-area {
+    /* どこかのボタンがホバーされたら、デフォルト文字を消して枠をシアンに光らせる */
+    .stApp:has(button:hover) .default-desc { opacity: 0 !important; transform: translateY(-10px) !important; }
+    .stApp:has([data-testid="stHorizontalBlock"] button:hover) .desc-display-area {
         border-color: #00f3ff !important;
         box-shadow: 0 0 20px rgba(0, 243, 255, 0.4), inset 0 0 10px rgba(0, 243, 255, 0.2) !important;
         background: rgba(15, 30, 50, 0.8) !important;
@@ -151,7 +172,7 @@ if "just_generated_audio" not in st.session_state: st.session_state.just_generat
 if "selected_forge_mode" not in st.session_state: st.session_state.selected_forge_mode = None
 
 # ==========================================
-# 🚪 ステージ1：ホログラムカード選択画面 (横4列 ＋ ホバー説明機能)
+# 🚪 ステージ1：ホログラムカード選択画面 (横4列 ＋ ホバー機能)
 # ==========================================
 if st.session_state.current_forge_ws is None and st.session_state.selected_forge_mode is None:
     st.markdown('<div class="central-logo">⬡</div>', unsafe_allow_html=True)
@@ -160,25 +181,28 @@ if st.session_state.current_forge_ws is None and st.session_state.selected_forge
     
     st.markdown('<div class="hologram-platform"></div>', unsafe_allow_html=True)
 
-    # 4つのボタンを配置
     c1, c2, c3, c4 = st.columns(4, gap="large")
     with c1:
-        if st.button("APP STUDIO", use_container_width=True): st.session_state.selected_forge_mode = "APP"; st.rerun()
+        if st.button("APP STUDIO", use_container_width=True): 
+            st.session_state.selected_forge_mode = "APP"; st.rerun()
     with c2:
-        if st.button("IMAGE GENERATOR", use_container_width=True): st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
+        if st.button("IMAGE GENERATOR", use_container_width=True): 
+            st.session_state.selected_forge_mode = "IMAGE"; st.rerun()
     with c3:
-        if st.button("VIDEO PRODUCTION", use_container_width=True): st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
+        if st.button("VIDEO PRODUCTION", use_container_width=True): 
+            st.session_state.selected_forge_mode = "VIDEO"; st.rerun()
     with c4:
-        if st.button("SLIDE DECK", use_container_width=True): st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
+        if st.button("SLIDE DECK", use_container_width=True): 
+            st.session_state.selected_forge_mode = "SLIDE"; st.rerun()
 
-    # 🚀 ボタンの下に表示される動的説明エリア
+    # 🚀 ここが復活！フワッと切り替わる説明エリア
     st.markdown("""
         <div class="desc-display-area">
-            <span class="default-desc">HOVER OVER AN ENGINE TO VIEW SPECIFICATIONS</span>
-            <span class="app-desc">🤖 <b style="color:#00f3ff;">[ APP STUDIO ]</b><br>ボスの指示から、美しくバグのないアプリケーションのUIとロジックを自律的に構築・プレビューします。</span>
-            <span class="img-desc">🎨 <b style="color:#00f3ff;">[ IMAGE GENERATOR ]</b><br>画像生成AIのための完璧な英語プロンプトを構築し、照明や画角を計算した最高の1枚を引き出します。</span>
-            <span class="vid-desc">🎬 <b style="color:#00f3ff;">[ VIDEO PRODUCTION ]</b><br>SoraやVeo等の最先端動画生成AIに向けた、プロ品質の絵コンテとカメラワーク指定を作成します。</span>
-            <span class="slide-desc">📊 <b style="color:#00f3ff;">[ SLIDE DECK ]</b><br>論理的なプレゼン構成を考案し、説得力のあるスライド資料(.pptx)を即座に出力します。</span>
+            <div class="desc-text default-desc">HOVER OVER AN ENGINE TO VIEW SPECIFICATIONS</div>
+            <div class="desc-text app-desc">🤖 <b style="color:#00f3ff;">[ APP STUDIO ]</b><br>ボスの指示から、美しくバグのないアプリケーションのUIとロジックを自律的に構築・プレビューします。</div>
+            <div class="desc-text img-desc">🎨 <b style="color:#00f3ff;">[ IMAGE GENERATOR ]</b><br>画像生成AIのための完璧な英語プロンプトを構築し、照明や画角を計算した最高の1枚を引き出します。</div>
+            <div class="desc-text vid-desc">🎬 <b style="color:#00f3ff;">[ VIDEO PRODUCTION ]</b><br>SoraやVeo等の最先端動画生成AIに向けた、プロ品質の絵コンテとカメラワーク指定を作成します。</div>
+            <div class="desc-text slide-desc">📊 <b style="color:#00f3ff;">[ SLIDE DECK ]</b><br>論理的なプレゼン構成を考案し、説得力のあるスライド資料(.pptx)を即座に出力します。</div>
         </div>
     """, unsafe_allow_html=True)
 
