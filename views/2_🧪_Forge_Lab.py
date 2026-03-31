@@ -81,10 +81,10 @@ st.markdown("""
     /* 🚀 5. 【完全修正版】ホバー時に下部に表示される説明エリア */
     .desc-display-area {
         position: relative;
-        height: 90px;
+        height: 150px;
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
-        margin-top: 400px;
+        margin-top: 50px;
         display: flex;
         justify-content: center;
         align-items: center;
