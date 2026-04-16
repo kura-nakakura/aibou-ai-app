@@ -218,7 +218,7 @@ if st.session_state.current_forge_ws is None and st.session_state.selected_forge
 elif st.session_state.current_forge_ws is None and st.session_state.selected_forge_mode is not None:
     mode = st.session_state.selected_forge_mode
     
-    col_back, col_title = st.columns([2, 8])
+    col_back, col_title = st.columns([3, 7])
     with col_back:
         if st.button("← BACK TO ENGINES", use_container_width=True):
             st.session_state.selected_forge_mode = None
@@ -281,7 +281,7 @@ else:
     if "retries" not in ws_data: ws_data["retries"] = 0
     if "media" not in ws_data: ws_data["media"] = ""
     
-    col_back, col_title = st.columns([2, 8])
+    col_back, col_title = st.columns([3, 7])
     with col_back:
         if st.button("← BACK TO PROJECT LIST", use_container_width=True):
             st.session_state.current_forge_ws = None
