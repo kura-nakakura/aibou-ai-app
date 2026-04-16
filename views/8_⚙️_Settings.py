@@ -1,3 +1,10 @@
+import streamlit as st
+import os
+import hashlib
+import smtplib
+from email.mime.text import MIMEText
+import random
+
 st.markdown("""
     <style>
     .cyber-title { color: #2b6cb0; font-weight: 800; letter-spacing: 2px; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(255,255,255,0.8); }
@@ -74,9 +81,10 @@ with col_content:
         st.markdown("#### 🔐 SECURE VAULT (Cloud Sync)")
         st.caption("AI相棒や各種システムを動かすための「鍵」と「連絡網」を保管する極秘エリアです。データはクラウドに暗号化保存されます。")
 
-        if not DB_CONNECTED:
-            st.error("⚠️ データベースの接続設定（Secrets）が完了していません。")
-            st.stop()
+        if 'DB_CONNECTED' not in globals() or not DB_CONNECTED:
+             st.warning("データベース接続が確認できません。開発用のローカル金庫を使用します。")
+             def load_vault(): return st.session_state.get('local_vault', {})
+             def save_vault(data): st.session_state.local_vault = data; return True
 
         def hash_password(password):
             return hashlib.sha256(password.encode()).hexdigest()
@@ -107,7 +115,7 @@ with col_content:
                             if new_pass and new_pass == new_pass_confirm:
                                 vault_data["master_password_hash"] = hash_password(new_pass)
                                 vault_data["api_keys"] = {
-                                    "gemini": "", "google_calendar": "", "slack": "", "line": "",
+                                    "gemini": "", "DIFY_API_KEY": "", "google_calendar": "", "slack": "", "line": "",
                                     "my_email": "", "my_email_app_password": "",
                                     "gh_token": "", "gh_owner": "", "gh_repo": ""
                                 }
@@ -213,7 +221,7 @@ with col_content:
                 new_email_pass = st.text_input("Gmail アプリパスワード (16桁)", value=keys.get("my_email_app_password", ""), type="password")
                 with st.expander("ℹ️ Gmailアプリパスワードの取得手順（超詳細）"):
                     st.markdown("""
-                    1. スマホやPCのブラウザで [Googleアカウント管理画面](https://myaccount.google.com/) にアクセスしてログインします。
+                    1. [Googleアカウント管理画面](https://myaccount.google.com/) にアクセスしてログインします。
                     2. 左側のメニューから **「セキュリティ」** をクリックします。
                     3. 少し下にスクロールし、「Google へのログイン」の中にある **「2段階認証プロセス」** をクリックしてオンにします（既にオンなら次へ）。
                     4. 画面上部の検索窓（虫眼鏡マーク）で **「アプリパスワード」** と入力して検索・選択します。
@@ -221,6 +229,17 @@ with col_content:
                     6. 画面に黄色の背景で表示される **16桁の英字（空白なしでそのまま）** をコピーして、上のパスワード欄に貼り付けてください。
                     """)
                 
+                # 🌟🌟🌟 新規追加：Dify API Key の入力欄 🌟🌟🌟
+                st.markdown("##### 🧠 Dify AI Core (THE FORGE OS Brain)")
+                new_dify_key = st.text_input("Dify API Key (app-...)", value=keys.get("DIFY_API_KEY", ""), type="password")
+                with st.expander("ℹ️ Dify API Keyの取得手順"):
+                    st.markdown("""
+                    1. [Dify Cloud](https://dify.ai/) のStudioにアクセスし、「AIBOU_Core」のChatflowを開きます。
+                    2. 画面のメニューから **「APIアクセス（API Access）」** をクリックします。
+                    3. 右上の「APIキー（API Keys）」から **「新しいシークレットキーを作成」** を押します。
+                    4. 生成された **`app-`** から始まる文字列をコピーして、上の欄に貼り付けてください。
+                    """)
+
                 st.markdown("##### 🧠 AI Core (Gemini)")
                 new_gemini = st.text_input("Gemini API Key", value=keys.get("gemini", ""), type="password")
                 with st.expander("ℹ️ Gemini API Keyの取得手順（完全無料）"):
@@ -296,6 +315,7 @@ with col_content:
                 if submitted:
                     vault_data["api_keys"] = {
                         "my_email": new_email, "my_email_app_password": new_email_pass,
+                        "DIFY_API_KEY": new_dify_key, # 🌟 ここでDifyのキーを保存
                         "gemini": new_gemini, "google_calendar": new_calendar,
                         "slack": new_slack, "line": new_line,
                         "gh_token": new_gh_token, "gh_owner": new_gh_owner, "gh_repo": new_gh_repo
@@ -314,6 +334,8 @@ with col_content:
         st.info("システムの使い方は今後ここに詳しく記載します。各種APIの取得方法は以下を開いてください。")
         with st.expander("ℹ️ Gmailアプリパスワードの取得手順"):
             st.markdown("1. [Googleアカウント管理画面](https://myaccount.google.com/) にアクセス。\n2. 「セキュリティ」>「2段階認証プロセス」をオン。\n3. 「アプリパスワード」を検索し作成。16桁の英字をコピー。")
+        with st.expander("ℹ️ Dify API Keyの取得手順"):
+            st.markdown("1. [Dify Cloud](https://dify.ai/) にアクセス。\n2. StudioからChatflowを開き、APIアクセス画面で「新しいシークレットキーを作成」。")
         with st.expander("ℹ️ Gemini API Keyの取得手順"):
             st.markdown("1. [Google AI Studio](https://aistudio.google.com/) にアクセス。\n2. 「Get API key」>「Create API key」をクリックして生成。")
         with st.expander("ℹ️ Google Calendar 連携の準備について"):
