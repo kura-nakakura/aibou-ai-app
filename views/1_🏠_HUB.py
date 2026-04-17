@@ -1,74 +1,75 @@
 if "hub_view_mode" not in st.session_state: st.session_state.hub_view_mode = "CORE"
 
-# 💎 THE ORBITAL RINGS (Arc Reactor Theme)
+# ☀️ DAYLIGHT ORBITAL (Light Neumorphism + Arc Reactor)
 st.markdown("""
     <style>
-    /* 1. 全体を漆黒の宇宙空間（ダークテーマ）に強制上書き */
+    /* 1. 全体をクリーンなライトグレー（ネオモーフィズムベース）に */
     [data-testid="stAppViewContainer"], .stApp { 
-        background-color: #050a15 !important; 
-        background-image: radial-gradient(circle at 50% 50%, rgba(0, 243, 255, 0.05), #050a15 60%) !important;
+        background-color: #e0e5ec !important; 
+        background-image: none !important;
         overflow-y: hidden !important; 
     }
     
     .hub-title { 
-        text-align: center; color: #00f3ff; font-weight: 900;
-        letter-spacing: 15px; margin-bottom: 30px; font-family: 'Share Tech Mono', monospace;
-        text-shadow: 0 0 20px rgba(0, 243, 255, 0.4);
+        text-align: center; color: #4a5568; font-weight: 900;
+        letter-spacing: 12px; margin-bottom: 30px; font-family: 'Share Tech Mono', 'Segoe UI', sans-serif;
+        text-shadow: 2px 2px 5px rgba(255,255,255,0.7);
     }
 
-    /* 2. 透明なサイバーボタン */
+    /* 2. 透明感のあるネオモーフィズムボタン */
     div.stButton > button {
-        background: rgba(10, 20, 35, 0.6) !important; 
-        border: 1px solid rgba(0, 243, 255, 0.2) !important; 
-        border-radius: 8px !important; 
-        color: #a0aec0 !important; font-weight: 700 !important; letter-spacing: 2px !important;
-        transition: all 0.3s ease !important; padding: 10px !important; font-size: 13px !important;
+        background: #e0e5ec !important; 
+        border: none !important; 
+        border-radius: 12px !important; 
+        color: #4a5568 !important; font-weight: 700 !important; letter-spacing: 2px !important;
+        box-shadow: 5px 5px 10px #b8bcc2, -5px -5px 10px #ffffff !important;
+        transition: all 0.2s ease !important; padding: 10px !important; font-size: 13px !important;
     }
     div.stButton > button:hover {
-        background: rgba(0, 243, 255, 0.1) !important;
-        border-color: #00f3ff !important;
-        color: #ffffff !important;
-        box-shadow: 0 0 15px rgba(0, 243, 255, 0.4), inset 0 0 10px rgba(0, 243, 255, 0.2) !important;
-        transform: translateY(-2px);
+        box-shadow: inset 4px 4px 8px #b8bcc2, inset -4px -4px 8px #ffffff !important;
+        color: #00f3ff !important;
+        transform: translateY(1px);
     }
     
     .view-toggle button {
         border-radius: 20px !important; padding: 5px 15px !important; font-size: 11px !important;
-        background: transparent !important; color: #00f3ff !important;
-        border: 1px solid #00f3ff !important; width: auto !important; display: inline-block;
+        background: #e0e5ec !important; color: #4a5568 !important;
+        box-shadow: 3px 3px 6px #b8bcc2, -3px -3px 6px #ffffff !important;
     }
+    .view-toggle button:hover { color: #00f3ff !important; }
 
-    /* 🌟 3. 衛星軌道パネル（The Orbital Rings）のCSSハック */
+    /* 🌟 3. 衛星軌道パネル（ライト版） */
     [data-testid="stVerticalBlockBorderWrapper"] {
-        background: rgba(5, 12, 25, 0.7) !important;
-        backdrop-filter: blur(10px) !important;
-        border: 1px solid rgba(0, 243, 255, 0.2) !important;
-        transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+        background: #e0e5ec !important;
+        border: none !important;
+        box-shadow: 8px 8px 16px #b8bcc2, -8px -8px 16px #ffffff !important;
+        transition: all 0.3s ease !important;
         padding: 15px !important;
     }
     [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        border-color: #00f3ff !important;
-        box-shadow: 0 0 25px rgba(0, 243, 255, 0.3), inset 0 0 10px rgba(0, 243, 255, 0.1) !important;
-        transform: scale(1.03);
+        box-shadow: 12px 12px 20px #b8bcc2, -12px -12px 20px #ffffff !important;
     }
     
-    /* 左側のパネル（FACTORY, AGENCY）: 右側を大きくカーブさせてコアを包む */
+    /* 左側のパネル: 右側を大きくカーブさせてコアを包む */
     [data-testid="column"]:nth-of-type(1) [data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 15px 70px 70px 15px !important;
-        border-right: 3px solid rgba(0, 243, 255, 0.5) !important;
+        border-right: 3px solid #00f3ff !important;
     }
-    /* 右側のパネル（BRAIN, CORE）: 左側を大きくカーブさせてコアを包む */
+    /* 右側のパネル: 左側を大きくカーブさせてコアを包む */
     [data-testid="column"]:nth-of-type(3) [data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 70px 15px 15px 70px !important;
-        border-left: 3px solid rgba(0, 243, 255, 0.5) !important;
+        border-left: 3px solid #00f3ff !important;
     }
     
     .panel-header {
-        font-weight: 900; color: #ffffff; letter-spacing: 4px; font-size: 14px; 
-        margin-bottom: 15px; text-shadow: 0 0 10px rgba(255,255,255,0.5);
+        font-weight: 900; color: #2d3748; letter-spacing: 4px; font-size: 14px; 
+        margin-bottom: 15px; text-shadow: 1px 1px 2px #ffffff;
     }
     .panel-header-left { text-align: left; }
     .panel-header-right { text-align: right; }
+    
+    /* 入力欄（チャット）のライト化 */
+    [data-testid="stChatInput"] { background: transparent !important; border: none !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -129,7 +130,6 @@ with col_right:
         with st.container(border=True):
             st.markdown("<div class='panel-header panel-header-right'>BRAIN ❖</div>", unsafe_allow_html=True)
             if st.button("Data Vault ＜", use_container_width=True): st.session_state.current_mode = "Document Vault"; st.rerun()
-            # 🌟 新規追加: Miro Boardへの導線
             if st.button("Miro Board ＜", use_container_width=True): st.session_state.current_mode = "Dashboard"; st.rerun()
             
         st.markdown("<br>", unsafe_allow_html=True)
@@ -167,8 +167,8 @@ if st.session_state.pending_event:
 
 st.markdown("""
     <style>
-    iframe[title*='mic'] { mix-blend-mode: screen !important; opacity: 0.5; transition: all 0.3s ease-in-out; } 
-    iframe[title*='mic']:hover { opacity: 1.0; filter: drop-shadow(0px 5px 15px rgba(0, 243, 255, 0.8)); transform: translateY(-2px); } 
+    iframe[title*='mic'] { mix-blend-mode: multiply !important; opacity: 0.7; transition: all 0.3s ease-in-out; } 
+    iframe[title*='mic']:hover { opacity: 1.0; filter: drop-shadow(0px 5px 15px rgba(0, 243, 255, 0.4)); transform: translateY(-2px); } 
     [data-testid='stVerticalBlock'] > div:has(iframe[title*='mic']) { margin-bottom: -25px !important; position: relative; z-index: 50; }
     </style>
 """, unsafe_allow_html=True)
