@@ -38,27 +38,36 @@ st.markdown("""
     }
     .view-toggle button:hover { color: #00f3ff !important; }
 
-    /* 🌟 3. 衛星軌道パネル（ライト版） */
+    /* 🌟 3. 衛星軌道パネル（分厚いアクリル発光エッジ仕様） */
     [data-testid="stVerticalBlockBorderWrapper"] {
         background: #e0e5ec !important;
         border: none !important;
-        box-shadow: 8px 8px 16px #b8bcc2, -8px -8px 16px #ffffff !important;
         transition: all 0.3s ease !important;
         padding: 15px !important;
     }
-    [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        box-shadow: 12px 12px 20px #b8bcc2, -12px -12px 20px #ffffff !important;
-    }
     
-    /* 左側のパネル: 右側を大きくカーブさせてコアを包む */
+    /* 左側のパネル (FACTORY, AGENCY): 内側へ発光する分厚いシアンのフチ */
     [data-testid="column"]:nth-of-type(1) [data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 15px 70px 70px 15px !important;
-        border-right: 3px solid #00f3ff !important;
+        border-right: 6px solid rgba(0, 210, 255, 0.5) !important;
+        box-shadow: 8px 8px 16px #b8bcc2, -8px -8px 16px #ffffff, inset -4px 0px 12px rgba(0, 210, 255, 0.15) !important;
     }
-    /* 右側のパネル: 左側を大きくカーブさせてコアを包む */
+    [data-testid="column"]:nth-of-type(1) [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-right: 6px solid #00f3ff !important;
+        box-shadow: 12px 12px 20px #b8bcc2, -12px -12px 20px #ffffff, inset -8px 0px 20px rgba(0, 243, 255, 0.4) !important;
+        transform: translateY(-2px);
+    }
+    
+    /* 右側のパネル (BRAIN, CORE): 内側へ発光する分厚いシアンのフチ */
     [data-testid="column"]:nth-of-type(3) [data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 70px 15px 15px 70px !important;
-        border-left: 3px solid #00f3ff !important;
+        border-left: 6px solid rgba(0, 210, 255, 0.5) !important;
+        box-shadow: 8px 8px 16px #b8bcc2, -8px -8px 16px #ffffff, inset 4px 0px 12px rgba(0, 210, 255, 0.15) !important;
+    }
+    [data-testid="column"]:nth-of-type(3) [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        border-left: 6px solid #00f3ff !important;
+        box-shadow: 12px 12px 20px #b8bcc2, -12px -12px 20px #ffffff, inset 8px 0px 20px rgba(0, 243, 255, 0.4) !important;
+        transform: translateY(-2px);
     }
     
     .panel-header {
