@@ -4,10 +4,11 @@ import json
 import uuid
 import random
 
-# --- ライブラリのインポートチェック ---
+# --- 最新版 streamlit-flow のインポート ---
 try:
     from streamlit_flow import streamlit_flow
     from streamlit_flow.elements import StreamlitFlowNode, StreamlitFlowEdge
+    from streamlit_flow.state import StreamlitFlowState # ✨最新版の必須機能
     HAS_FLOW = True
 except ImportError:
     HAS_FLOW = False
@@ -51,15 +52,14 @@ st.markdown("""
 
 st.markdown("<h2 class='cyber-title'>🧠 SYSTEM DASHBOARD & MIRO</h2>", unsafe_allow_html=True)
 
-# タブの作成（機能の分離）
 tab_miro, tab_system = st.tabs(["🧠 Miro Board (思考キャンバス)", "📊 System Monitor (カレンダー等)"])
 
 # ====================================================
-# 🧠 TAB 1: MIRO BOARD
+# 🧠 TAB 1: MIRO BOARD (v1.0対応版)
 # ====================================================
 with tab_miro:
     if not HAS_FLOW:
-        st.error("⚠️ `streamlit-flow` がインストールされていません。ターミナルで `pip install streamlit-flow` を実行するか、GitHubの `requirements.txt` に追記してください。")
+        st.error("⚠️ `streamlit-flow` がインストールされていません。ターミナルで `pip install streamlit-flow-component` を実行するか、GitHubの `requirements.txt` に追記してください。")
     else:
         st.caption("ボスの思考とAIの分析データを視覚的に結びつける無限キャンバスです。ノードは自由にドラッグできます。")
         
@@ -71,18 +71,18 @@ with tab_miro:
             "fontSize": "14px", "textAlign": "center"
         }
 
-        # セッションステートの初期化
-        if 'miro_nodes' not in st.session_state:
-            st.session_state.miro_nodes = [
+        # ✨ 最新版の State 管理システムに修正 ✨
+        if 'miro_state' not in st.session_state:
+            initial_nodes = [
                 StreamlitFlowNode(id='core_node', pos=(50, 200), data={'content': '🧠 AIBOU Core'}, node_type='input', source_position='right', target_position='left', style=node_style),
                 StreamlitFlowNode(id='idea_1', pos=(350, 100), data={'content': '💡 アイデア: UI大改修'}, node_type='default', source_position='right', target_position='left', style=node_style),
                 StreamlitFlowNode(id='idea_2', pos=(350, 300), data={'content': '📊 プロジェクト分析'}, node_type='default', source_position='right', target_position='left', style=node_style)
             ]
-        if 'miro_edges' not in st.session_state:
-            st.session_state.miro_edges = [
+            initial_edges = [
                 StreamlitFlowEdge(id='edge_1', source='core_node', target='idea_1', animated=True, style={'stroke': '#00f3ff', 'strokeWidth': 2}),
                 StreamlitFlowEdge(id='edge_2', source='core_node', target='idea_2', animated=True, style={'stroke': '#00f3ff', 'strokeWidth': 2})
             ]
+            st.session_state.miro_state = StreamlitFlowState(initial_nodes, initial_edges)
 
         # 🎛️ ボード操作パネル
         col_add, col_connect, col_clear = st.columns([4, 4, 2], gap="medium")
@@ -95,13 +95,13 @@ with tab_miro:
                         new_id = f"node_{uuid.uuid4().hex[:6]}"
                         new_pos = (random.randint(400, 600), random.randint(50, 400))
                         new_node = StreamlitFlowNode(id=new_id, pos=new_pos, data={'content': new_node_text}, node_type='default', source_position='right', target_position='left', style=node_style)
-                        st.session_state.miro_nodes.append(new_node)
+                        st.session_state.miro_state.nodes.append(new_node)
                         st.rerun()
 
         with col_connect:
             with st.container(border=True):
                 st.markdown("##### 🔗 ノード同士を繋ぐ")
-                node_options = {n.id: n.data['content'] for n in st.session_state.miro_nodes}
+                node_options = {n.id: n.data['content'] for n in st.session_state.miro_state.nodes}
                 if len(node_options) >= 2:
                     c1, c2 = st.columns(2)
                     with c1:
@@ -112,9 +112,9 @@ with tab_miro:
                     if st.button("ワイヤーを結線する 🔗", use_container_width=True):
                         if source_id != target_id:
                             new_edge_id = f"edge_{source_id}_{target_id}"
-                            if not any(e.id == new_edge_id for e in st.session_state.miro_edges):
+                            if not any(e.id == new_edge_id for e in st.session_state.miro_state.edges):
                                 new_edge = StreamlitFlowEdge(id=new_edge_id, source=source_id, target=target_id, animated=True, style={'stroke': '#00f3ff', 'strokeWidth': 2})
-                                st.session_state.miro_edges.append(new_edge)
+                                st.session_state.miro_state.edges.append(new_edge)
                                 st.rerun()
                         else:
                             st.warning("同じノード同士は繋げません。")
@@ -124,29 +124,20 @@ with tab_miro:
         with col_clear:
             st.markdown("<br><br>", unsafe_allow_html=True)
             if st.button("🗑️ ボード初期化", use_container_width=True):
-                st.session_state.miro_nodes = [
-                    StreamlitFlowNode(id='core_node', pos=(50, 200), data={'content': '🧠 AIBOU Core'}, node_type='input', source_position='right', target_position='left', style=node_style)
-                ]
-                st.session_state.miro_edges = []
+                initial_nodes = [StreamlitFlowNode(id='core_node', pos=(50, 200), data={'content': '🧠 AIBOU Core'}, node_type='input', source_position='right', target_position='left', style=node_style)]
+                st.session_state.miro_state = StreamlitFlowState(initial_nodes, [])
                 st.rerun()
 
-        # 🗺️ 思考キャンバスの描画
+        # 🗺️ 思考キャンバスの描画 ✨最新版のシンプルな呼び出し方✨
         st.markdown("<div class='miro-container'>", unsafe_allow_html=True)
-        streamlit_flow(
-            key="miro_board_state",
-            nodes=st.session_state.miro_nodes,
-            edges=st.session_state.miro_edges,
-            height=500,
-            fit_view=True
-        )
+        streamlit_flow('miro_board', st.session_state.miro_state, height=500, fit_view=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ====================================================
-# 📊 TAB 2: SYSTEM MONITOR (Original Code)
+# 📊 TAB 2: SYSTEM MONITOR
 # ====================================================
 with tab_system:
-    # --- データ読み込み ---
     try:
         vault_data = load_vault()
     except NameError:
@@ -155,7 +146,6 @@ with tab_system:
     my_email = vault_data.get("api_keys", {}).get("my_email", "")
     gcal_json_str = vault_data.get("api_keys", {}).get("google_calendar", "")
 
-    # 簡易APIカウンター
     STATS_FILE = "system_stats.json"
     if not os.path.exists(STATS_FILE):
         with open(STATS_FILE, "w", encoding="utf-8") as f:
@@ -163,7 +153,6 @@ with tab_system:
     with open(STATS_FILE, "r", encoding="utf-8") as f:
         stats_data = json.load(f)
 
-    # --- 上部：ステータスカード ---
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(f"""
@@ -192,36 +181,25 @@ with tab_system:
         """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # --- 下部：カレンダー連携とシステムログ ---
     col_cal, col_log = st.columns([6, 4], gap="large")
 
     with col_cal:
         st.markdown("#### 📅 UPCOMING EVENTS (Google Calendar)")
-        
         if not gcal_json_str or not my_email:
             st.info("Vaultに「GoogleカレンダーのJSON」と「自分のGmailアドレス」が設定されていないため、スケジュールを取得できません。")
         else:
             try:
-                # 動的インポート（ライブラリがない場合のエラー回避）
                 from google.oauth2 import service_account
                 from googleapiclient.discovery import build
                 import datetime
                 
                 gcal_info = json.loads(gcal_json_str)
                 credentials = service_account.Credentials.from_service_account_info(
-                    gcal_info,
-                    scopes=['https://www.googleapis.com/auth/calendar.readonly']
+                    gcal_info, scopes=['https://www.googleapis.com/auth/calendar.readonly']
                 )
                 service = build('calendar', 'v3', credentials=credentials)
-                
-                # JST（日本時間）で現在時刻を取得
                 now = datetime.datetime.utcnow().isoformat() + 'Z'
-                
-                # Vaultに登録されたボスのメアドのカレンダーを取得
-                events_result = service.events().list(calendarId=my_email, timeMin=now,
-                                                      maxResults=5, singleEvents=True,
-                                                      orderBy='startTime').execute()
+                events_result = service.events().list(calendarId=my_email, timeMin=now, maxResults=5, singleEvents=True, orderBy='startTime').execute()
                 events = events_result.get('items', [])
                 
                 if not events:
@@ -229,9 +207,7 @@ with tab_system:
                 else:
                     for event in events:
                         start = event['start'].get('dateTime', event['start'].get('date'))
-                        # 日時を分かりやすく整形
                         try:
-                            # タイムゾーン情報を考慮してパース
                             dt = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
                             start_str = dt.strftime('%Y/%m/%d %H:%M')
                         except:
@@ -243,11 +219,8 @@ with tab_system:
                             <span style="font-size:13px; color:#4a5568;">🕒 {start_str}</span>
                         </div>
                         """, unsafe_allow_html=True)
-            
-            except ImportError:
-                st.error("⚠️ ライブラリ不足: ターミナルで `pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib` を実行してください。")
             except Exception as e:
-                st.error(f"カレンダー取得エラー（VaultのJSONやカレンダー共有設定を確認してください）: {e}")
+                st.error(f"カレンダー取得エラー: {e}")
 
     with col_log:
         st.markdown("#### 📡 SYSTEM ACTIVITY")
