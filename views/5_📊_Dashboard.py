@@ -133,15 +133,11 @@ with tab_miro:
         # 🗺️ 思考キャンバスの描画
         st.markdown("<div class='miro-container'>", unsafe_allow_html=True)
         streamlit_flow(
-            "miro_board_state",
-            st.session_state.miro_nodes,
-            st.session_state.miro_edges,
-            fit_view=True,
+            key="miro_board_state",
+            nodes=st.session_state.miro_nodes,
+            edges=st.session_state.miro_edges,
             height=500,
-            enable_pane_menu=True,
-            enable_node_menu=True,
-            enable_edge_menu=True,
-            hide_watermark=True
+            fit_view=True
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
