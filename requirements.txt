@@ -13,4 +13,4 @@ supabase
 cryptography
 python-pptx
 python-pptx
-streamlit-flow
+streamlit-flow-component
