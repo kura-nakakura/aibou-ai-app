@@ -25,19 +25,19 @@ import CodeMode from "@/components/CodeMode";
 import CoreOrb, { type CoreState } from "@/components/CoreOrb";
 import Dashboard from "@/components/Dashboard";
 import EntryGate from "@/components/EntryGate";
-import Forge from "@/components/Forge";
+import Workshop from "@/components/Workshop";
+import Capture from "@/components/Capture";
 import Home from "@/components/Home";
 import Income from "@/components/Income";
 import Keychain from "@/components/Keychain";
 import LifeMode from "@/components/LifeMode";
-import Studio from "@/components/Studio";
 import Tasks from "@/components/Tasks";
 import Vault from "@/components/Vault";
 import { health } from "@/lib/api";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { APP_VERSION } from "@/lib/version";
 
-type View = "chat" | "me" | "forge" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
+type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
 
 const LS_NAME = "forge_name";
 const LS_PERSONA = "forge_persona";
@@ -98,8 +98,9 @@ function Hud() {
       setSettings({ name, persona, voice: ttsVoice, rate });
       if (voice !== null) setVoiceReplies(voice === "1");
       // Reopen the mode you were using (PWA relaunch lands where you left off).
-      const savedView = localStorage.getItem("forge_view") as View | null;
-      if (savedView && ["chat", "me", "forge", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home"].includes(savedView)) {
+      let savedView = localStorage.getItem("forge_view") as View | null;
+      if (savedView === ("forge" as View)) savedView = "studio"; // 旧FORGEはWORKSHOP(studio)に統合
+      if (savedView && ["chat", "me", "capture", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home"].includes(savedView)) {
         setView(savedView);
       }
       if (localStorage.getItem("forge_fullscreen") === "1") setFullscreen(true);
@@ -250,12 +251,12 @@ function Hud() {
             <Chat settings={settings} voiceReplies={voiceReplies} onStateChange={setCoreState} />
           )}
           {loaded && view === "me" && <LifeMode settings={settings} />}
-          {loaded && view === "forge" && <Forge />}
+          {loaded && view === "capture" && <Centered><Capture /></Centered>}
           {loaded && view === "code" && <CodeMode />}
           {loaded && view === "vault" && <Centered><Vault /></Centered>}
           {loaded && view === "income" && <Centered><Income /></Centered>}
           {loaded && view === "tasks" && <Centered><Tasks /></Centered>}
-          {loaded && view === "studio" && <Centered><Studio /></Centered>}
+          {loaded && view === "studio" && <Centered><Workshop /></Centered>}
           {loaded && view === "autopilot" && <Centered><Autopilot /></Centered>}
           {loaded && view === "board" && <Centered><Dashboard /></Centered>}
           {loaded && view === "archive" && <Centered><AppArchive /></Centered>}
@@ -294,12 +295,12 @@ const NAV_ITEMS: { key: View; label: string }[] = [
   { key: "home", label: "HOME" },
   { key: "chat", label: "CHAT" },
   { key: "me", label: "ME" },
-  { key: "forge", label: "FORGE" },
   { key: "code", label: "CODE" },
+  { key: "studio", label: "STUDIO" },
+  { key: "capture", label: "CAPTURE" },
   { key: "vault", label: "VAULT" },
   { key: "tasks", label: "TASKS" },
   { key: "income", label: "INCOME" },
-  { key: "studio", label: "STUDIO" },
   { key: "autopilot", label: "AUTO" },
   { key: "board", label: "BOARD" },
   { key: "archive", label: "ARCHIVE" },
@@ -322,8 +323,8 @@ function NavIcon({ name }: { name: View }) {
       return (<svg {...p}><path d="M12 20s-7-4.6-9.2-8.8C1.2 8 3 5 6.2 5c2 0 3.3 1 4 2.2C11 6 12.3 5 14.3 5c3.2 0 5 3 3.4 6.2C15.5 15.4 12 20 12 20z" /></svg>);
     case "chat":
       return (<svg {...p}><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" /></svg>);
-    case "forge":
-      return (<svg {...p}><path d="M12 3l7.5 4.5v9L12 21l-7.5-4.5v-9L12 3z" /><circle cx="12" cy="12" r="3" /></svg>);
+    case "capture":
+      return (<svg {...p}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3" /><circle cx="8.5" cy="12" r="2.2" /></svg>);
     case "vault":
       return (<svg {...p}><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>);
     case "tasks":

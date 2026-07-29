@@ -31,6 +31,12 @@ async function goMode(page: Page, label: string) {
   await page.locator("nav").filter({ hasText: "MODES" }).getByText(label, { exact: true }).click();
 }
 
+/** STUDIO mode merges FORGE (生成) + AI STUDIO; open a tab. */
+async function goWorkshop(page: Page, tab: "FORGE" | "AI STUDIO") {
+  await goMode(page, "STUDIO");
+  await page.getByRole("button", { name: tab === "FORGE" ? /✦ FORGE/ : /AI STUDIO/ }).click();
+}
+
 /* ── EntryGate ──────────────────────────────────────────────────── */
 test("EntryGate renders with THE FORGE OS wordmark", async ({ page }) => {
   await page.goto("/");
@@ -62,7 +68,7 @@ test("Mode launcher shows all 10 modes", async ({ page }) => {
   await enterApp(page);
   await page.getByLabel("Modes", { exact: true }).click();
   const nav = page.locator("nav").filter({ hasText: "MODES" });
-  for (const label of ["HOME", "CHAT", "FORGE", "VAULT", "INCOME", "TASKS", "STUDIO", "BOARD", "ARCHIVE"]) {
+  for (const label of ["HOME", "CHAT", "CAPTURE", "VAULT", "INCOME", "TASKS", "STUDIO", "BOARD", "ARCHIVE"]) {
     await expect(nav.getByText(label, { exact: true })).toBeVisible();
   }
   await expect(nav.getByText("AUTO", { exact: true })).toBeVisible();
@@ -215,12 +221,25 @@ test("Settings close button works", async ({ page }) => {
 });
 
 /* ── Navigation (via mode launcher) ─────────────────────────────── */
-test("FORGE renders forge UI (split view)", async ({ page }) => {
+test("STUDIO mode merges FORGE + AI STUDIO tabs", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "FORGE");
-  await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 5_000 });
-  await expect(page.locator("button").filter({ hasText: /^IMAGE$/ }).first()).toBeVisible({ timeout: 3_000 });
+  await goMode(page, "STUDIO");
+  // Both tabs present; FORGE is the default → its kind buttons show.
+  await expect(page.getByRole("button", { name: /✦ FORGE/ })).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole("button", { name: /AI STUDIO/ })).toBeVisible();
+  await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 3_000 });
+  await expect(page.locator("button").filter({ hasText: /^IMAGE$/ }).first()).toBeVisible();
+});
+
+/* ── CAPTURE mode (screen / audio recording) ── */
+test("CAPTURE mode renders the recorder UI", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "CAPTURE");
+  await expect(page.getByText("画面録画・録音")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole("button", { name: "録画開始" })).toBeVisible();
+  await expect(page.getByText("音声のみ")).toBeVisible();
 });
 
 test("VAULT renders vault UI", async ({ page }) => {
@@ -253,7 +272,7 @@ test("INCOME renders income UI + setup guide", async ({ page }) => {
 test("STUDIO renders studio UI", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "STUDIO");
+  await goWorkshop(page, "AI STUDIO");
   await expect(page.getByRole("button", { name: "CUSTOM AI", exact: true })).toBeVisible({ timeout: 5_000 });
   await expect(page.getByRole("button", { name: "WORKFLOWS", exact: true })).toBeVisible();
 });
@@ -393,7 +412,7 @@ test("Tasks: filter tabs are visible", async ({ page }) => {
 test("Studio: create AI form expands", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "STUDIO");
+  await goWorkshop(page, "AI STUDIO");
   await page.click("text=+ NEW CUSTOM AI");
   await expect(page.getByText("AI NAME")).toBeVisible({ timeout: 3_000 });
   await expect(page.getByText("PERSONA")).toBeVisible();
@@ -402,7 +421,7 @@ test("Studio: create AI form expands", async ({ page }) => {
 test("Studio: workflow tab shows workflow form", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "STUDIO");
+  await goWorkshop(page, "AI STUDIO");
   await page.click("text=WORKFLOWS");
   await page.click("text=+ NEW WORKFLOW");
   await expect(page.getByText("WORKFLOW NAME")).toBeVisible({ timeout: 3_000 });
@@ -412,7 +431,7 @@ test("Studio: workflow tab shows workflow form", async ({ page }) => {
 test("Studio: EVOLVE tab shows self-evolution mode", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "STUDIO");
+  await goWorkshop(page, "AI STUDIO");
   await page.getByRole("button", { name: "EVOLVE", exact: true }).click();
   await expect(page.getByText(/SELF-EVOLVE/i)).toBeVisible({ timeout: 3_000 });
   await expect(page.getByText("PROPOSE EVOLUTION")).toBeVisible();
@@ -422,7 +441,7 @@ test("Studio: EVOLVE tab shows self-evolution mode", async ({ page }) => {
 test("Forge: prompt textarea is present", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "FORGE");
+  await goWorkshop(page, "FORGE");
   const kindBtn = page.locator("button").filter({ hasText: /^APP$/ }).first();
   await expect(kindBtn).toBeVisible({ timeout: 5_000 });
   await expect(page.locator("textarea").first()).toBeVisible();
@@ -431,14 +450,14 @@ test("Forge: prompt textarea is present", async ({ page }) => {
 test("Forge: shows the artifact placeholder before generating", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "FORGE");
+  await goWorkshop(page, "FORGE");
   await expect(page.getByText("ここに生成結果が表示されます")).toBeVisible({ timeout: 5_000 });
 });
 
 test("Forge: VIDEO tab switches to VideoPanel", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "FORGE");
+  await goWorkshop(page, "FORGE");
   await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 5_000 });
   await page.locator("button").filter({ hasText: /^VIDEO$/ }).click();
   await expect(page.getByText(/VIDEO|SCENE|NARRATION/i).first()).toBeVisible({ timeout: 5_000 });
@@ -472,7 +491,7 @@ test("Briefing opens a panel and closes again", async ({ page }) => {
 test("Forge: GENERATE enables once a prompt is typed", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "FORGE");
+  await goWorkshop(page, "FORGE");
   const genBtn = page.getByRole("button", { name: /GENERATE APP/i });
   await expect(genBtn).toBeDisabled();
   await page.locator("textarea").first().fill("家計簿アプリ");
@@ -585,12 +604,12 @@ test("Mode switch retints the accent (data-mode)", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
   await expect(page.locator("main[data-mode='chat']")).toBeAttached();
-  await goMode(page, "FORGE");
-  await expect(page.locator("main[data-mode='forge']")).toBeAttached({ timeout: 5_000 });
+  await goMode(page, "CAPTURE");
+  await expect(page.locator("main[data-mode='capture']")).toBeAttached({ timeout: 5_000 });
   const accent = await page.evaluate(() =>
     getComputedStyle(document.querySelector("main")!).getPropertyValue("--accent").trim(),
   );
-  expect(accent).toBe("#ffb454");
+  expect(accent).toBe("#ff7a7a");
 });
 
 /* ── Phase A (ui-r15): mobile thumb-zone nav ── */
@@ -812,7 +831,7 @@ test("No JavaScript errors navigating all modes", async ({ page }) => {
   page.on("pageerror", (err) => errors.push(err.message));
   await page.goto("/");
   await enterApp(page);
-  for (const mode of ["FORGE", "VAULT", "TASKS", "INCOME", "STUDIO", "AUTO", "BOARD", "ARCHIVE", "HOME", "CHAT"]) {
+  for (const mode of ["CAPTURE", "VAULT", "TASKS", "INCOME", "STUDIO", "AUTO", "BOARD", "ARCHIVE", "HOME", "CHAT"]) {
     await goMode(page, mode);
     await page.waitForTimeout(300);
   }

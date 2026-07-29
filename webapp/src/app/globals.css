@@ -616,7 +616,7 @@ a {
    CHAT keeps the signature cyan (default tokens above).
    ===================================================================== */
 [data-mode="home"]      { --accent: #9fd0ff; --glow: rgba(159, 208, 255, 0.3);  --glow-strong: rgba(159, 208, 255, 0.45); }
-[data-mode="forge"]     { --accent: #ffb454; --glow: rgba(255, 180, 84, 0.26);  --glow-strong: rgba(255, 180, 84, 0.4);  }
+[data-mode="capture"]   { --accent: #ff7a7a; --glow: rgba(255, 122, 122, 0.26); --glow-strong: rgba(255, 122, 122, 0.4);  }
 [data-mode="code"]      { --accent: #7ee787; --glow: rgba(126, 231, 135, 0.24); --glow-strong: rgba(126, 231, 135, 0.38); }
 [data-mode="vault"]     { --accent: #b18cff; --glow: rgba(177, 140, 255, 0.26); --glow-strong: rgba(177, 140, 255, 0.4);  }
 [data-mode="income"]    { --accent: #ffd060; --glow: rgba(255, 208, 96, 0.24);  --glow-strong: rgba(255, 208, 96, 0.38);  }

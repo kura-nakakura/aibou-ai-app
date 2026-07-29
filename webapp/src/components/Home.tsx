@@ -38,7 +38,7 @@ import type { ChatSettings } from "@/components/Chat";
 import ArtifactViewer from "@/components/ArtifactViewer";
 import Markdown from "@/components/Markdown";
 
-type View = "chat" | "me" | "forge" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
+type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
 
 function greeting(): string {
   const h = new Date().getHours();
