@@ -372,12 +372,22 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
     setInput("");
   }, [stopMic, resetMic]);
 
-  // 会話モード：発話が止まって1.8秒たったら自動送信。
+  // 割り込み（バージイン）：AIの発話/生成を止めて、すぐ自分が話せる状態に戻す。
+  const interruptVoice = useCallback(() => {
+    cancelRef.current?.();               // 生成中なら中断
+    speechCancelledRef.current = true;   // 遅れて来る応答を読み上げさせない
+    stopSpeaking();
+    setSpeaking(false);
+    setStreaming(false);
+    setTimeout(() => { if (voiceModeRef.current) { resetMic(); startMic(); } }, 150);
+  }, [resetMic, startMic]);
+
+  // 会話モード：発話が止まって約1.4秒たったら自動送信（テンポよくラリー）。
   useEffect(() => {
     if (!voiceMode || !listening || streaming) return;
     const text = transcript.trim();
-    if (!text) return;
-    const t = setTimeout(() => { void send(); }, 1800);
+    if (text.length < 1) return;
+    const t = setTimeout(() => { void send(); }, 1400);
     return () => clearTimeout(t);
   }, [voiceMode, listening, streaming, transcript, send]);
 
@@ -639,15 +649,15 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
             </button>
           )}
 
-          {/* Realtime voice conversation (hands-free loop) */}
+          {/* Realtime voice conversation (hands-free loop) — accent so it stands out */}
           {micSupported && (
             <button
               type="button"
               onClick={enterVoiceMode}
               disabled={streaming}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-lg text-muted transition hover:bg-white/5 hover:text-fg-strong disabled:opacity-40"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[var(--line)] text-[var(--accent)] shadow-glow transition hover:shadow-glow-strong disabled:opacity-40"
               aria-label="会話モード"
-              title="会話モード（話す→自動返答のループ）"
+              title="ハンズフリー会話モード（ボタンを押さずに話し続けられます）"
             >
               <WaveIcon />
             </button>
@@ -705,6 +715,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
             transcript={listening ? input : ""}
             lastReply={[...messages].reverse().find((m) => m.role === "assistant" && !m.pending && !m.error)?.content || ""}
             onExit={exitVoiceMode}
+            onInterrupt={interruptVoice}
           />
         )}
       </AnimatePresence>
@@ -714,75 +725,140 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
 
 /* ── Fullscreen realtime-voice overlay (ChatGPT voice-mode style) ──── */
 function VoiceOverlay({
-  state, transcript, lastReply, onExit,
+  state, transcript, lastReply, onExit, onInterrupt,
 }: {
   state: CoreState;
   transcript: string;
   lastReply: string;
   onExit: () => void;
+  onInterrupt: () => void;
 }) {
-  // ビュー切替ラッパーの perspective が fixed の基準を奪うため body へポータル。
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const label =
     state === "listening" ? "聞いています…"
       : state === "thinking" ? "考えています…"
-        : state === "speaking" ? "話しています…"
-          : "待機中";
+        : state === "speaking" ? "話しています…（タップで割り込み）"
+          : "接続中…";
   const color =
     state === "listening" ? "var(--accent)"
       : state === "speaking" ? "#60d394"
         : state === "thinking" ? "#ffd060"
           : "var(--muted)";
 
+  // Live audio-reactive orb: a dedicated analyser mic drives a --vlevel CSS var
+  // (0..1) every frame — no React re-renders. echoCancellation off so the orb
+  // also reacts while the AI speaks (TTS bleed), for a lively ChatGPT-like feel.
+  useEffect(() => {
+    let ctx: AudioContext | null = null;
+    let raf = 0;
+    let stream: MediaStream | null = null;
+    let cancelled = false;
+    let level = 0;
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false } });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        ctx = new Ctor();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          analyser.getByteTimeDomainData(data);
+          let sum = 0;
+          for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+          const rms = Math.sqrt(sum / data.length);
+          level = level * 0.75 + Math.min(1, rms * 3.5) * 0.25; // smooth
+          rootRef.current?.style.setProperty("--vlevel", level.toFixed(3));
+          raf = requestAnimationFrame(tick);
+        };
+        tick();
+      } catch { /* analyser is optional */ }
+    })();
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      try { void ctx?.close(); } catch { /* ignore */ }
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const canInterrupt = state === "speaking" || state === "thinking";
+
   return createPortal(
     <motion.div
+      ref={rootRef}
       role="dialog"
       aria-label="会話モード"
-      className="fixed inset-0 z-[80] flex flex-col items-center justify-between bg-black/90 px-6 py-8 backdrop-blur-md"
+      className="fixed inset-0 z-[80] flex flex-col items-center justify-between bg-black/92 px-6 py-8 backdrop-blur-md"
+      style={{ ["--vlevel" as string]: 0 }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
       <div className="text-[10px] tracking-[0.3em] text-muted label-mono">VOICE MODE · 会話モード</div>
 
-      {/* Breathing status orb */}
-      <div className="flex flex-col items-center gap-5">
-        <span className="relative grid place-items-center">
-          <motion.span
-            className="absolute h-40 w-40 rounded-full"
-            style={{ border: `1px solid ${color}`, opacity: 0.5 }}
-            animate={{ scale: state === "idle" ? 1 : [1, 1.35], opacity: state === "idle" ? 0.3 : [0.5, 0] }}
-            transition={{ duration: 1.6, repeat: state === "idle" ? 0 : Infinity, ease: "easeOut" }}
-          />
-          <motion.span
-            className="grid h-32 w-32 place-items-center rounded-full"
-            style={{ background: `radial-gradient(circle at 38% 32%, ${color}33, rgba(10,14,22,0.9) 70%)`, border: `1px solid ${color}66`, boxShadow: `0 0 42px ${color}44` }}
-            animate={{ scale: state === "speaking" ? [1, 1.06, 1] : state === "listening" ? [1, 1.04, 1] : 1 }}
-            transition={{ duration: state === "speaking" ? 0.55 : 1.4, repeat: Infinity, ease: "easeInOut" }}
-          >
-            <span className="text-2xl" aria-hidden>{state === "listening" ? "🎙" : state === "thinking" ? "◈" : state === "speaking" ? "♪" : "…"}</span>
-          </motion.span>
-        </span>
-        <div className="text-[12px] tracking-[0.22em] label-mono" style={{ color }}>{label}</div>
-
-        {/* Live transcript / latest reply */}
-        <div className="max-h-40 w-full max-w-md overflow-y-auto text-center">
-          {transcript ? (
-            <p className="text-[15px] leading-relaxed text-fg-strong">{transcript}</p>
-          ) : lastReply ? (
-            <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-muted">{lastReply.slice(0, 280)}</p>
-          ) : (
-            <p className="text-[11px] text-muted/70">話しかけてください。無音が続くと自動で送信されます。</p>
-          )}
-        </div>
-      </div>
-
+      {/* Audio-reactive orb (tap to interrupt while the AI is talking/thinking) */}
       <button
         type="button"
-        onClick={onExit}
-        className="rounded-full border border-[#ff6b6b55] bg-[rgba(255,107,107,0.08)] px-8 py-2.5 text-[11px] tracking-[0.22em] text-[#ff8888] transition hover:bg-[rgba(255,107,107,0.16)] label-mono"
+        onClick={() => canInterrupt && onInterrupt()}
+        aria-label={canInterrupt ? "割り込んで話す" : "会話中"}
+        className="relative grid flex-1 place-items-center focus:outline-none"
+        style={{ cursor: canInterrupt ? "pointer" : "default" }}
       >
-        ■ 終了
+        {/* concentric ripples (ambient, state-driven) */}
+        {[0, 1].map((i) => (
+          <motion.span
+            key={i}
+            className="absolute rounded-full"
+            style={{ width: 200, height: 200, border: `1px solid ${color}` }}
+            animate={{ scale: [1, 1.7], opacity: [0.4, 0] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: "easeOut", delay: i * 1.2 }}
+          />
+        ))}
+        {/* the orb — scales & glows with --vlevel (voice level) */}
+        <span
+          className="grid h-40 w-40 place-items-center rounded-full transition-[background] duration-500"
+          style={{
+            background: `radial-gradient(circle at 38% 32%, ${color}44, rgba(10,14,22,0.92) 70%)`,
+            border: `1px solid ${color}77`,
+            transform: "scale(calc(1 + var(--vlevel, 0) * 0.5))",
+            boxShadow: `0 0 calc(30px + var(--vlevel, 0) * 110px) ${color}66`,
+          }}
+        >
+          <motion.span
+            className="text-3xl"
+            aria-hidden
+            animate={state === "thinking" ? { opacity: [0.4, 1, 0.4] } : state === "speaking" ? { scale: [1, 1.12, 1] } : { opacity: 1 }}
+            transition={{ duration: state === "speaking" ? 0.5 : 1.2, repeat: Infinity }}
+          >
+            {state === "listening" ? "🎙" : state === "thinking" ? "◈" : state === "speaking" ? "🔊" : "…"}
+          </motion.span>
+        </span>
       </button>
+
+      <div className="flex w-full max-w-md flex-col items-center gap-4">
+        <div className="text-[12px] tracking-[0.22em] label-mono" style={{ color }}>{label}</div>
+        <div className="max-h-32 w-full overflow-y-auto text-center">
+          {transcript ? (
+            <p className="text-[16px] leading-relaxed text-fg-strong">{transcript}</p>
+          ) : lastReply ? (
+            <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-muted">{lastReply.slice(0, 240)}</p>
+          ) : (
+            <p className="text-[11px] leading-relaxed text-muted/70">
+              話しかけてください。話し終えて少し待つと自動で送信し、返答を読み上げます。<br />そのまま続けて話せます（ボタン操作は不要）。
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onExit}
+          className="rounded-full border border-[#ff6b6b55] bg-[rgba(255,107,107,0.08)] px-8 py-2.5 text-[11px] tracking-[0.22em] text-[#ff8888] transition hover:bg-[rgba(255,107,107,0.16)] label-mono"
+        >
+          ■ 会話を終了
+        </button>
+      </div>
     </motion.div>,
     document.body,
   );
