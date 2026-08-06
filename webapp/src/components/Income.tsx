@@ -15,6 +15,37 @@ import {
   type IncomeJob,
   type IncomeSummary,
 } from "@/lib/api";
+import PseoPanel from "@/components/PseoPanel";
+
+type IncomeTab = "queue" | "seo";
+
+/** 収益パイプラインの2系統（承認キュー / Programmatic SEO）を切り替える。 */
+function IncomeTabs({ tab, onChange }: { tab: IncomeTab; onChange: (t: IncomeTab) => void }) {
+  return (
+    <div className="mx-auto flex items-center gap-1.5">
+      {([
+        { key: "queue", label: "◎ 承認キュー" },
+        { key: "seo", label: "🔎 SEOページ" },
+      ] as const).map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => onChange(t.key)}
+          aria-pressed={tab === t.key}
+          className="rounded-forge border px-4 py-1.5 text-[10px] tracking-[0.16em] transition label-mono"
+          style={{
+            borderColor: tab === t.key ? "var(--accent)" : "var(--panel-bd)",
+            color: tab === t.key ? "var(--fg-strong)" : "var(--muted)",
+            background: tab === t.key ? "var(--btn-bg)" : "transparent",
+            boxShadow: tab === t.key ? "0 0 10px var(--glow)" : "none",
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "承認待ち",
@@ -25,6 +56,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function Income() {
+  const [tab, setTab] = useState<IncomeTab>("queue");
   const [theme, setTheme] = useState("");
   const [busy, setBusy] = useState(false);
   const [jobs, setJobs] = useState<IncomeJob[]>([]);
@@ -94,8 +126,19 @@ export default function Income() {
 
   const counts = ["pending", "approved", "rejected", "completed", "failed"] as const;
 
+  if (tab === "seo") {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pb-2">
+        <IncomeTabs tab={tab} onChange={setTab} />
+        <PseoPanel />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pb-2">
+      <IncomeTabs tab={tab} onChange={setTab} />
+
       {/* Setup guide — what YOU need to do to make the income pipeline run */}
       <IncomeSetupGuide open={guideOpen} onToggle={toggleGuide} />
 

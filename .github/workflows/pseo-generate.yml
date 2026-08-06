@@ -1,0 +1,67 @@
+name: Programmatic SEO — daily drafts
+
+# 掛け合わせキーワードのページを毎日すこしずつ「下書き」で積む。
+# 公開はされない（アプリの INCOME → SEOページ で承認したものだけが公開）。
+#
+# 必要な設定（リポジトリ Settings → Secrets and variables → Actions）:
+#   Secrets:   BACKEND_URL    … バックエンドURL（例 https://xxx.onrender.com）
+#   Variables: PSEO_AXIS1     … 軸1（カンマ区切り）例: 筋トレ,ヨガ,ランニング
+#              PSEO_AXIS2     … 軸2（任意）        例: 初心者,自宅,40代
+#              PSEO_TEMPLATE  … タイトル型（任意）  例: {1}向け{0}のはじめ方
+#              PSEO_LIMIT     … 1回の生成数（任意・既定3）
+on:
+  schedule:
+    - cron: "40 21 * * *"    # 毎日 21:40 UTC（= 翌 6:40 JST）
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "生成ページ数"
+        required: false
+        default: "3"
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate SEO drafts
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL || vars.BACKEND_URL }}
+          AXIS1: ${{ vars.PSEO_AXIS1 }}
+          AXIS2: ${{ vars.PSEO_AXIS2 }}
+          TEMPLATE: ${{ vars.PSEO_TEMPLATE }}
+          LIMIT: ${{ github.event.inputs.limit || vars.PSEO_LIMIT || '3' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKEND_URL:-}" ]; then
+            echo "BACKEND_URL 未設定 → スキップ"; exit 0
+          fi
+          if [ -z "${AXIS1:-}" ]; then
+            echo "PSEO_AXIS1 未設定 → スキップ（Variables に軸を設定してください）"; exit 0
+          fi
+
+          # 軸(カンマ区切り) → リクエストJSON
+          python3 - <<'PY' > body.json
+          import json, os
+          def axis(name):
+              return [v.strip() for v in os.environ.get(name, "").split(",") if v.strip()]
+          axes = [a for a in (axis("AXIS1"), axis("AXIS2")) if a]
+          try:
+              limit = int(os.environ.get("LIMIT", "3"))
+          except ValueError:
+              limit = 3
+          print(json.dumps({"axes": axes, "template": os.environ.get("TEMPLATE", ""), "limit": limit}))
+          PY
+          echo "request: $(cat body.json)"
+
+          # 無料プランのコールドスタート＋生成時間を考慮して長めに待つ
+          curl -fsS --max-time 300 -X POST "${BACKEND_URL%/}/pseo/generate" \
+            -H "Content-Type: application/json" --data @body.json -o out.json
+          cat out.json; echo
+
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("out.json"))
+          if d.get("error"):
+              print(f"::error::{d['error']}"); sys.exit(1)
+          print(f"created {d.get('count', 0)} draft page(s)")
+          PY

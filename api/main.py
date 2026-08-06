@@ -49,6 +49,7 @@ import llm
 import migrate
 import notify
 import proactive
+import pseo
 import scheduler
 import studio
 import tasks as tasks_module
@@ -368,6 +369,16 @@ class SlidesExportRequest(BaseModel):
 class ArtifactUpdateRequest(BaseModel):
     content: Optional[str] = None
     title: Optional[str] = None
+
+
+class PseoPlanRequest(BaseModel):
+    axes: List[List[str]] = Field(default_factory=list)
+    template: str = ""
+    limit: int = 20
+
+
+class PseoStatusRequest(BaseModel):
+    status: str
 
 
 class BoardCreateRequest(BaseModel):
@@ -1441,6 +1452,63 @@ async def scheduler_add(req: ScheduleRequest, _auth: None = Depends(require_auth
 async def scheduler_delete(schedule_id: str, _auth: None = Depends(require_auth)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: scheduler.delete(schedule_id))
+
+
+# ── Programmatic SEO（掛け合わせキーワードの大量ページ） ──────────────
+
+@app.post("/pseo/plan")
+async def pseo_plan(req: PseoPlanRequest, _auth: None = Depends(require_auth)):
+    """軸の掛け合わせでページ計画を返す（生成はしない・プレビュー用）。"""
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(None, lambda: pseo.plan_pages(req.axes, req.template, req.limit))
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/pseo/generate")
+async def pseo_generate(req: PseoPlanRequest, _auth: None = Depends(require_auth)):
+    """計画→本文生成→draft保存を一括実行（公開はされない）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: pseo.generate_batch(req.axes, req.template, req.limit))
+
+
+@app.get("/pseo/pages")
+async def pseo_pages(status: Optional[str] = None, _auth: None = Depends(require_auth)):
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(None, lambda: pseo.list_pages(status))
+    return {"items": items}
+
+
+@app.patch("/pseo/pages/{slug}")
+async def pseo_set_status(slug: str, req: PseoStatusRequest, _auth: None = Depends(require_auth)):
+    """承認 / 却下（セミオート運用：承認したページだけ公開される）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: pseo.set_status(slug, req.status))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.delete("/pseo/pages/{slug}")
+async def pseo_delete(slug: str, _auth: None = Depends(require_auth)):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: pseo.delete_page(slug))
+
+
+@app.get("/pseo/public/{slug}")
+async def pseo_public(slug: str):
+    """公開ページ用（認証不要）。承認済み以外は404にして未公開を守る。"""
+    loop = asyncio.get_event_loop()
+    page = await loop.run_in_executor(None, lambda: pseo.get_page(slug))
+    if not page or page.get("status") != "approved":
+        return JSONResponse(status_code=404, content={"error": "not found"})
+    return page
+
+
+@app.get("/pseo/sitemap")
+async def pseo_sitemap():
+    """承認済みページのみのサイトマップ（認証不要）。"""
+    loop = asyncio.get_event_loop()
+    return {"items": await loop.run_in_executor(None, pseo.sitemap)}
 
 
 # ── Keep-Alive（Supabaseの自動一時停止を防ぐ） ────────────────────────

@@ -672,6 +672,70 @@ export async function dbMigrate(): Promise<{ ok: boolean; error?: string; skippe
   return (await res.json().catch(() => ({ ok: false }))) as { ok: boolean; error?: string; skipped?: boolean; reason?: string };
 }
 
+/* ---------------- Programmatic SEO ---------------- */
+export interface PseoSpec { slug: string; title: string; keywords: string }
+export interface PseoPage {
+  slug: string;
+  title: string;
+  keywords?: string;
+  status: "draft" | "approved" | "rejected";
+  updated_at?: string;
+  content?: {
+    disclosure?: string;
+    lead?: string;
+    meta_description?: string;
+    sections?: { h2?: string; body?: string }[];
+    faq?: { q?: string; a?: string }[];
+  };
+}
+
+/** POST /pseo/plan — preview the keyword-matrix page plan (no generation). */
+export async function pseoPlan(axes: string[][], template = "", limit = 20): Promise<PseoSpec[]> {
+  const res = await fetch(`${requireApiUrl()}/pseo/plan`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ axes, template, limit }),
+  });
+  if (!res.ok) throw new Error(`Plan failed (${res.status})`);
+  const d = (await res.json()) as { items?: PseoSpec[] };
+  return d.items ?? [];
+}
+
+/** POST /pseo/generate — generate + save as drafts (never auto-published). */
+export async function pseoGenerate(axes: string[][], template = "", limit = 5): Promise<{ count: number; created: { slug: string; title: string }[]; failed?: unknown[]; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/pseo/generate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ axes, template, limit }),
+  });
+  return (await res.json().catch(() => ({ count: 0, created: [] }))) as { count: number; created: { slug: string; title: string }[]; failed?: unknown[]; error?: string };
+}
+
+/** GET /pseo/pages — list pages (optionally by status). */
+export async function pseoPages(status?: string): Promise<PseoPage[]> {
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  const res = await fetch(`${requireApiUrl()}/pseo/pages${q}`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Pages failed (${res.status})`);
+  const d = (await res.json()) as { items?: PseoPage[] };
+  return d.items ?? [];
+}
+
+/** PATCH /pseo/pages/{slug} — approve / reject (semi-auto gate). */
+export async function pseoSetStatus(slug: string, status: "draft" | "approved" | "rejected"): Promise<boolean> {
+  const res = await fetch(`${requireApiUrl()}/pseo/pages/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ status }),
+  });
+  return res.ok;
+}
+
+/** DELETE /pseo/pages/{slug}. */
+export async function pseoDelete(slug: string): Promise<boolean> {
+  const res = await fetch(`${requireApiUrl()}/pseo/pages/${encodeURIComponent(slug)}`, { method: "DELETE", headers: authHeaders() });
+  return res.ok;
+}
+
 /* ---------------- Keep-alive (prevent Supabase auto-pause) ---------------- */
 export interface KeepaliveStatus {
   supabase_configured: boolean;

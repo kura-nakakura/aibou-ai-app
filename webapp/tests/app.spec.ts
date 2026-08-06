@@ -257,6 +257,18 @@ test("TASKS renders tasks UI", async ({ page }) => {
   await expect(page.getByText("PENDING").first()).toBeVisible();
 });
 
+test("INCOME has a SEO tab with the programmatic-SEO builder", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "INCOME");
+  await page.getByRole("button", { name: /SEOページ/ }).click();
+  // Offline (no API_URL) → the panel explains it needs the backend.
+  await expect(page.getByText(/Programmatic SEO/)).toBeVisible({ timeout: 5_000 });
+  // Back to the approval queue
+  await page.getByRole("button", { name: /承認キュー/ }).click();
+  await expect(page.getByText("NEW THEME")).toBeVisible({ timeout: 5_000 });
+});
+
 test("INCOME renders income UI + setup guide", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);

@@ -228,6 +228,19 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_created ON artifacts(created_at DESC);
 
+-- 🔎 Programmatic SEO（掛け合わせキーワードの大量ページ）
+-- status: draft（生成直後・非公開）| approved（公開）| rejected
+-- 承認したページだけが /pseo/public と sitemap に出る（セミオート原則）。
+CREATE TABLE IF NOT EXISTS pseo_pages (
+  slug       text PRIMARY KEY,
+  title      text NOT NULL,
+  keywords   text DEFAULT '',
+  content    jsonb DEFAULT '{}'::jsonb,
+  status     text DEFAULT 'draft',
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pseo_status ON pseo_pages(status, updated_at DESC);
+
 -- 💓 停止防止（Keep-Alive）— 無料枠Supabaseは7日間アクセスが無いと一時停止する。
 -- 定期的に id=1 の1行を upsert して「活動あり」と認識させる。
 CREATE TABLE IF NOT EXISTS keepalive (
