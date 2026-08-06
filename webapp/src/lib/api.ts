@@ -672,6 +672,28 @@ export async function dbMigrate(): Promise<{ ok: boolean; error?: string; skippe
   return (await res.json().catch(() => ({ ok: false }))) as { ok: boolean; error?: string; skipped?: boolean; reason?: string };
 }
 
+/* ---------------- Keep-alive (prevent Supabase auto-pause) ---------------- */
+export interface KeepaliveStatus {
+  supabase_configured: boolean;
+  db_url_set: boolean;
+  last_at: string;
+  last_ok: boolean;
+  last_detail: string;
+}
+
+/** GET /keepalive/status — when the DB was last touched. */
+export async function keepaliveStatus(): Promise<KeepaliveStatus> {
+  const res = await fetch(`${requireApiUrl()}/keepalive/status`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Keepalive status failed (${res.status})`);
+  return (await res.json()) as KeepaliveStatus;
+}
+
+/** GET /keepalive — touch the DB now (also what the daily cron calls). */
+export async function keepalivePing(): Promise<{ ok: boolean; detail?: string; at?: string }> {
+  const res = await fetch(`${requireApiUrl()}/keepalive`, { headers: authHeaders(), cache: "no-store" });
+  return (await res.json().catch(() => ({ ok: false }))) as { ok: boolean; detail?: string; at?: string };
+}
+
 /* ---------------- AI provider / model config ---------------- */
 export interface AiConfig {
   provider: string;

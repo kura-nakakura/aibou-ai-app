@@ -1,25 +1,63 @@
 name: Supabase Keep-Alive
 
 # 無料枠Supabaseは「7日間アクセスが無い」と自動一時停止する。
-# 3日ごとに本体＋記憶の両プロジェクトへ軽いクエリを投げて起こし続ける。
+# 毎日DBを触って起こし続ける。2系統のどちらかが設定されていればOK：
+#   A) BACKEND_URL … バックエンドの /keepalive を叩く（推奨・追加シークレット不要）
+#   B) SUPABASE_URL + SUPABASE_KEY … Supabaseへ直接クエリ（バックエンド無しでも動く）
+# どちらも未設定/失敗ならジョブを失敗させる（黙って停止するのを防ぐため）。
 on:
   schedule:
-    - cron: "17 2 */3 * *"   # 3日ごと 02:17 UTC
-  workflow_dispatch:           # 手動実行も可
+    - cron: "17 2 * * *"     # 毎日 02:17 UTC（= 11:17 JST）
+  workflow_dispatch:          # 手動実行も可
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ping backend /keepalive (A)
+        id: backend
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL || vars.BACKEND_URL }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "BACKEND_URL 未設定 → スキップして (B) を試す"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 無料プランのコールドスタートを考慮して長めに待ち、1回リトライする
+          for i in 1 2; do
+            if curl -fsS --max-time 120 "${BACKEND_URL%/}/keepalive" -o resp.json; then
+              cat resp.json; echo
+              if grep -q '"ok": *true' resp.json; then
+                echo "done=true" >> "$GITHUB_OUTPUT"; exit 0
+              fi
+              echo "⚠ 応答はあったが ok=false（バックエンドにSupabase未設定の可能性）"
+            fi
+            echo "retry $i…"; sleep 20
+          done
+          echo "done=false" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-python@v5
+        if: steps.backend.outputs.done != 'true'
         with:
           python-version: "3.11"
-      - name: Ping Supabase projects
+
+      - name: Ping Supabase directly (B)
+        if: steps.backend.outputs.done != 'true'
+        id: direct
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE_KEY }}
           MEMORY_SUPABASE_URL: ${{ secrets.MEMORY_SUPABASE_URL }}
           MEMORY_SUPABASE_KEY: ${{ secrets.MEMORY_SUPABASE_KEY }}
         run: python scripts/keepalive.py
+
+      - name: Fail if nothing kept the project alive
+        if: steps.backend.outputs.done != 'true' && steps.direct.outcome != 'success'
+        run: |
+          echo "::error::Supabaseを起こせませんでした（このままだと7日で一時停止します）。"
+          echo "::error::リポジトリの Settings → Secrets and variables → Actions に"
+          echo "::error::BACKEND_URL（例 https://xxx.onrender.com）を追加するのが最も簡単です。"
+          exit 1

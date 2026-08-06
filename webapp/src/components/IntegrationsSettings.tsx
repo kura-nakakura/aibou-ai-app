@@ -16,9 +16,12 @@ import {
   schedulesList,
   scheduleAdd,
   scheduleDelete,
+  keepaliveStatus,
+  keepalivePing,
   type GoogleStatus,
   type DbStatus,
   type ScheduleItem,
+  type KeepaliveStatus,
 } from "@/lib/api";
 
 export default function IntegrationsSettings() {
@@ -34,7 +37,80 @@ export default function IntegrationsSettings() {
       <GooglePanel />
       <SchedulerPanel />
       <DbPanel />
+      <KeepalivePanel />
     </>
+  );
+}
+
+/* ── Keep-alive (Supabase の自動一時停止を防ぐ) ──────────────────── */
+function KeepalivePanel() {
+  const [st, setSt] = useState<KeepaliveStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try { setSt(await keepaliveStatus()); } catch { setSt(null); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const runNow = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await keepalivePing();
+      setNote(r.ok ? `✓ 実行しました（${r.detail ?? ""}）` : `⚠ ${r.detail ?? "実行できませんでした"}`);
+      await load();
+    } catch {
+      setNote("⚠ 実行に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fmt = (iso: string) => {
+    if (!iso) return "未実行";
+    try { return new Date(iso).toLocaleString("ja-JP"); } catch { return iso; }
+  };
+
+  return (
+    <div className="mb-4 rounded-forge border border-panel p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[10px] tracking-[0.2em] text-muted label-mono">DB停止防止 — KEEP-ALIVE</span>
+        {st && (
+          <span className="text-[9px] tracking-[0.1em] label-mono" style={{ color: st.supabase_configured ? "#60d394" : "#ffd060" }}>
+            ● {st.supabase_configured ? "有効" : "Supabase未設定"}
+          </span>
+        )}
+      </div>
+
+      <p className="text-[10px] leading-relaxed text-muted">
+        無料のSupabaseは<b className="text-fg">7日間アクセスが無いと自動で一時停止</b>します。
+        毎日DBに軽く触って停止を防ぎます（アプリ稼働中は自動・確実にするには下のcron設定）。
+      </p>
+
+      {st && (
+        <div className="mt-2 rounded-forge border border-panel p-2 text-[10px] leading-relaxed">
+          <div className="flex justify-between gap-2">
+            <span className="text-muted label-mono">最終実行</span>
+            <span style={{ color: st.last_ok ? "#60d394" : "var(--muted)" }}>{fmt(st.last_at)}</span>
+          </div>
+          {st.last_detail && <p className="mt-0.5 break-all text-muted/80">{st.last_detail}</p>}
+        </div>
+      )}
+
+      <button type="button" onClick={() => void runNow()} disabled={busy}
+        className="mt-2 w-full rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] py-2 text-[11px] tracking-[0.16em] text-fg-strong disabled:opacity-40 label-mono">
+        {busy ? "実行中…" : "今すぐ実行（DBを起こす）"}
+      </button>
+
+      <p className="mt-2 text-[9px] leading-relaxed text-muted">
+        ※ 確実に止めないためには、GitHubリポジトリの <b className="text-fg">Settings → Secrets and variables → Actions</b> に
+        <code className="text-fg"> BACKEND_URL</code>（例 https://xxx.onrender.com）を追加してください。
+        毎日 <code className="text-fg">/keepalive</code> を自動で叩きます（同梱の Supabase Keep-Alive ワークフロー）。
+        無料の外部cron（cron-job.org等）から <code className="text-fg">{"{API_URL}"}/keepalive</code> を叩く方法でもOKです。
+      </p>
+      {note && <p className="mt-1 text-[10px] leading-relaxed" style={{ color: note.startsWith("✓") ? "#60d394" : "#ff9b9b" }}>{note}</p>}
+    </div>
   );
 }
 

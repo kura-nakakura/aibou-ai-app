@@ -42,6 +42,7 @@ import forge
 import gh
 import gservice
 import income
+import keepalive as keepalive_mod
 import keychain
 import life
 import llm
@@ -57,11 +58,19 @@ from memory_store import mem_add, mem_recall, mem_recent
 
 async def _scheduler_loop():
     """常駐ループ：60秒ごとに定期実行(scheduler.tick)を確認する（best-effort）。
-    サーバーがスリープする無料プランでは起きている間のみ動く（外部cronは /scheduler/tick）。"""
+    あわせて1日1回 Supabase を触って自動一時停止（7日）を防ぐ。
+    サーバーがスリープする無料プランでは起きている間のみ動く
+    （外部cronは /scheduler/tick と /keepalive）。"""
+    ticks = 0
     while True:
         try:
             await asyncio.sleep(60)
-            await asyncio.get_event_loop().run_in_executor(None, scheduler.tick)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, scheduler.tick)
+            ticks += 1
+            if ticks % 1440 == 1:  # 起動直後 + 以後およそ24時間ごと
+                res = await loop.run_in_executor(None, keepalive_mod.ping)
+                print(f"[keepalive] {res}")
         except asyncio.CancelledError:
             break
         except Exception as e:  # pragma: no cover
@@ -1432,6 +1441,23 @@ async def scheduler_add(req: ScheduleRequest, _auth: None = Depends(require_auth
 async def scheduler_delete(schedule_id: str, _auth: None = Depends(require_auth)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: scheduler.delete(schedule_id))
+
+
+# ── Keep-Alive（Supabaseの自動一時停止を防ぐ） ────────────────────────
+
+@app.get("/keepalive")
+async def keepalive_get():
+    """DBを軽く触って「活動あり」にする。外部cron（GitHub Actions等）から叩く。
+    認証不要（副作用は1行のupsertのみ）。/health より確実にSupabaseを起こし続ける。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, keepalive_mod.ping)
+
+
+@app.get("/keepalive/status")
+async def keepalive_status(_auth: None = Depends(require_auth)):
+    """最後に実行した時刻と結果（UI表示用）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, keepalive_mod.status)
 
 
 @app.post("/scheduler/tick")

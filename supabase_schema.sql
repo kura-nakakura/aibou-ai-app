@@ -228,6 +228,13 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_created ON artifacts(created_at DESC);
 
+-- 💓 停止防止（Keep-Alive）— 無料枠Supabaseは7日間アクセスが無いと一時停止する。
+-- 定期的に id=1 の1行を upsert して「活動あり」と認識させる。
+CREATE TABLE IF NOT EXISTS keepalive (
+  id        int PRIMARY KEY,
+  last_ping text DEFAULT ''
+);
+
 -- ⏰ 定期実行（Scheduler）— 毎日 or 曜日指定の時刻にエージェント指示を自動実行。
 CREATE TABLE IF NOT EXISTS schedules (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
