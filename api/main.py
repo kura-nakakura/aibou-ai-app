@@ -34,6 +34,7 @@ import artifacts
 import autopilot
 import board
 import automations
+import compliance
 import config
 import code_agent
 import evolve
@@ -1509,6 +1510,13 @@ async def pseo_sitemap():
     """承認済みページのみのサイトマップ（認証不要）。"""
     loop = asyncio.get_event_loop()
     return {"items": await loop.run_in_executor(None, pseo.sitemap)}
+
+
+@app.get("/compliance/policy")
+async def compliance_policy(_auth: None = Depends(require_auth)):
+    """送信先ごとの配信ポリシー（既定ブロック／オプトインで解除済み）を返す。"""
+    loop = asyncio.get_event_loop()
+    return {"platforms": await loop.run_in_executor(None, compliance.policy_report)}
 
 
 # ── Keep-Alive（Supabaseの自動一時停止を防ぐ） ────────────────────────

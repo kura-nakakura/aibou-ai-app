@@ -97,6 +97,8 @@ KNOWN_KEYS: List[Dict[str, str]] = [
     {"name": "SUPABASE_URL", "label": "Supabase URL", "hint": "永続ストレージ（任意）"},
     {"name": "SUPABASE_SERVICE_KEY", "label": "Supabase Service Key", "hint": "永続ストレージ（任意）"},
     {"name": "SUPABASE_DB_URL", "label": "Supabase DB接続URL", "hint": "テーブル自動作成に使う postgresql://… 接続文字列"},
+    {"name": "ALLOW_AI_STOCK_UPLOAD", "label": "AI画像のストック送信を許可", "hint": "1で有効。規約確認は利用者責任（既定OFF）"},
+    {"name": "ALLOW_NOTE_AUTOPOST", "label": "noteへの自動投稿を許可", "hint": "1で有効。非公式APIのため規約リスクは利用者責任（既定OFF）"},
     {"name": "GOOGLE_CLIENT_ID", "label": "Google Client ID", "hint": "Google連携（スプレッドシート/ドキュメント/カレンダー）"},
     {"name": "GOOGLE_CLIENT_SECRET", "label": "Google Client Secret", "hint": "Google連携（OAuth）"},
     {"name": "EMAIL_ADDRESS", "label": "メールアドレス", "hint": "エージェントのメール送受信（Gmail等）"},

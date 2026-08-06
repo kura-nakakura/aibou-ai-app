@@ -58,23 +58,68 @@ def has_disclosure(text: str) -> bool:
     return "プロモーションが含まれています" in (text or "")
 
 
+# 既定はブロックだが、アカウント所有者の判断で解除できるフラグ（KEYCHAIN/環境変数）。
+# 各プラットフォームの規約に同意・確認するのは利用者本人なので、こちらで恒久的に
+# 禁止はしない。既定OFF＋明示的なオプトインという形にして、事故を防ぐ。
+_OVERRIDE_FLAGS = {
+    "shutterstock": "ALLOW_AI_STOCK_UPLOAD",   # AI生成画像をストックへ送るか
+    "note": "ALLOW_NOTE_AUTOPOST",             # note へ自動投稿するか（非公式API）
+}
+
+
+def _flag(name: str) -> bool:
+    """KEYCHAIN → 環境変数の順に真偽フラグを読む。"""
+    val = ""
+    try:
+        import keychain
+        val = (keychain.get_key(name) or "").strip()
+    except Exception:
+        val = ""
+    if not val:
+        import os
+        val = (os.environ.get(name, "") or "").strip()
+    return val.lower() in ("1", "true", "yes", "on")
+
+
 def platform_policy(platform: str) -> dict:
-    """送信先のポリシーを返す。未知の送信先は保守的に allowed=False。"""
+    """送信先のポリシーを返す。未知の送信先は保守的に allowed=False。
+    オプトインフラグが立っている送信先は allowed/generative_ok を解除する。"""
     key = (platform or "").strip().lower()
-    return _PLATFORM_POLICY.get(key, {
-        "allowed": False, "generative_ok": False, "auto_post": False,
-        "note": f"未登録の送信先（{platform}）のため、安全側に倒して送信しません。",
-    })
+    base = _PLATFORM_POLICY.get(key)
+    if base is None:
+        return {
+            "allowed": False, "generative_ok": False, "auto_post": False, "overridden": False,
+            "note": f"未登録の送信先（{platform}）のため、安全側に倒して送信しません。",
+        }
+    p = dict(base)
+    flag = _OVERRIDE_FLAGS.get(key)
+    if flag and _flag(flag):
+        p["allowed"] = True
+        p["generative_ok"] = True
+        p["overridden"] = True
+        p["note"] = (f"{flag}=1 により利用者の判断で有効化されています。"
+                     f"規約の確認と結果の責任は利用者に帰属します（元の注意: {base['note']}）")
+    else:
+        p["overridden"] = False
+        if flag and not base["allowed"]:
+            p["note"] = f"{base['note']} 送る場合は {flag}=1 を設定してください（自己責任）。"
+    return p
 
 
 def gate(platform: str, ai_generated: bool = True) -> dict:
-    """配信可否の判定。{ok, reason}。AI生成物を認めない送信先はここで止める。"""
+    """配信可否の判定。{ok, reason}。既定でブロックされる送信先は
+    オプトインフラグ（例 ALLOW_AI_STOCK_UPLOAD=1）で解除できる。"""
     p = platform_policy(platform)
     if not p["allowed"]:
         return {"ok": False, "reason": p["note"]}
     if ai_generated and not p["generative_ok"]:
         return {"ok": False, "reason": f"AI生成コンテンツは許容されていません：{p['note']}"}
-    return {"ok": True, "reason": p["note"]}
+    return {"ok": True, "reason": p["note"], "overridden": p.get("overridden", False)}
+
+
+def policy_report() -> dict:
+    """全送信先の現在のポリシー（UI表示用）。"""
+    return {k: platform_policy(k) for k in _PLATFORM_POLICY}
 
 
 def polite_delay(lo: float = 2.0, hi: float = 6.0, sleep: bool = True) -> float:

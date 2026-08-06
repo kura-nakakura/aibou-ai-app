@@ -27,18 +27,63 @@ def _safe_name(text, fallback="asset"):
     return s or fallback
 
 
-def _build_ffmpeg_cmd(ff, image_path, audio_path, out_path, seconds, fps=2):
-    """静止画(ループ)＋環境音(ループ)を seconds 秒の mp4 にする ffmpeg コマンドを組む。
-    画像は 1280x720 に収まるよう scale＋pad（16:9で余白は中央）。"""
+def _ken_burns_vf(seconds, fps, seed=0, amp=0.12):
+    """ケン・バーンズ効果（ゆっくりズーム＋パン）のフィルタグラフを組む。
+
+    静止画をそのまま流すと“紙芝居”になり視聴体験が悪いので、映像編集の定番である
+    緩やかなズーム/パンを入れて「見られる動画」にする（作品としての品質向上）。
+
+    実装メモ:
+      * 先に 2倍解像度へ拡大しておくと、ズームしても解像が落ちない。
+      * zoompan の z は出力フレーム番号 `on` から算出する。ループ入力では
+        `zoom+inc` 方式だと毎フレーム状態がリセットされ得るため、`on` 基準にする。
+      * seed で「寄り/引き」とパン方向を決め、動画ごとに動きが変わるようにする。
+    """
+    total = max(1, int(seconds) * int(fps))
+    zoom_in = (seed % 2) == 0
+    # 寄り: 1.0 → 1+amp / 引き: 1+amp → 1.0
+    z = (f"1+{amp:.4f}*on/{total}" if zoom_in else f"{1 + amp:.4f}-{amp:.4f}*on/{total}")
+    # パン先（中央 / やや左上 / やや右下）を seed で選ぶ
+    pan = seed % 3
+    if pan == 0:
+        x, y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+    elif pan == 1:
+        x, y = f"iw/2-(iw/zoom/2)-(iw*0.04*on/{total})", f"ih/2-(ih/zoom/2)-(ih*0.03*on/{total})"
+    else:
+        x, y = f"iw/2-(iw/zoom/2)+(iw*0.04*on/{total})", f"ih/2-(ih/zoom/2)+(ih*0.03*on/{total})"
+
+    return (
+        "scale=2560:1440:force_original_aspect_ratio=increase,"
+        "crop=2560:1440,"
+        f"zoompan=z='{z}':d=1:x='{x}':y='{y}':s=1280x720:fps={fps},"
+        "format=yuv420p"
+    )
+
+
+def _build_ffmpeg_cmd(ff, image_path, audio_path, out_path, seconds, fps=24, seed=0, motion=True):
+    """静止画＋環境音(ループ)を seconds 秒の mp4 にする ffmpeg コマンドを組む。
+
+    motion=True ならケン・バーンズ効果で滑らかに動かす（既定・fps=24）。
+    motion=False は従来の静止画スライド（軽量・fpsは呼び出し側で下げる想定）。
+    """
+    if motion:
+        vf = _ken_burns_vf(seconds, fps, seed)
+        vcodec_opts = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "24"]
+    else:
+        vf = ("scale=1280:720:force_original_aspect_ratio=decrease,"
+              "pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p")
+        vcodec_opts = ["-c:v", "libx264", "-tune", "stillimage"]
+
     return [
         ff, "-y",
         "-loop", "1", "-framerate", str(fps), "-i", image_path,
         "-stream_loop", "-1", "-i", audio_path,
         "-t", str(int(seconds)),
-        "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,"
-               "pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-        "-c:v", "libx264", "-tune", "stillimage", "-r", str(fps),
+        "-vf", vf,
+        *vcodec_opts,
+        "-r", str(fps),
         "-c:a", "aac", "-b:a", "192k",
+        "-shortest",
         "-movflags", "+faststart",
         out_path,
     ]
@@ -59,7 +104,13 @@ def render_video(job, audio_path=None, image_path=None, out_dir="rendered", minu
         os.makedirs(out_dir, exist_ok=True)
         jid = str(job.get("id", "x"))[:8]
         out_path = os.path.join(out_dir, f"{jid}_{_safe_name(job.get('theme'))}.mp4")
-        cmd = _build_ffmpeg_cmd(ff, image_path, audio_path, out_path, seconds)
+        # テーマ/IDから決まる seed で、動画ごとにズーム方向とパンを変える
+        # （同じ入力なら同じ結果＝再現性あり）。
+        seed = abs(hash(f"{jid}{job.get('theme', '')}")) % 6
+        motion = (os.environ.get("RENDER_MOTION", "1") != "0")
+        fps = int(os.environ.get("RENDER_FPS") or (24 if motion else 2))
+        cmd = _build_ffmpeg_cmd(ff, image_path, audio_path, out_path, seconds,
+                                fps=fps, seed=seed, motion=motion)
         timeout = int(os.environ.get("RENDER_TIMEOUT_SEC") or 1800)
         r = subprocess.run(cmd, capture_output=True, timeout=timeout)
         if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:

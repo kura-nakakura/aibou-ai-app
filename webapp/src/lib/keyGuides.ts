@@ -218,6 +218,26 @@ export const KEY_GUIDES: Record<string, KeyGuide> = {
     ],
     note: "⚠ 秘密情報です。第三者に共有しないでください（サーバー側専用）。",
   },
+  ALLOW_AI_STOCK_UPLOAD: {
+    purpose: "AI生成画像をストックサイト（Shutterstock等）へ送信することを許可するスイッチ。",
+    free: true,
+    steps: [
+      "送信先の「投稿者規約（Contributor Terms）」でAI生成コンテンツの扱いを確認する",
+      "許容されている（または申告して受け付けられる）と判断できたら、この欄に 1 と入れて SAVE",
+      "既定はOFF（送信されません）。1にすると送信が有効になります",
+    ],
+    note: "⚠ Shutterstockの投稿者規約はAI生成画像の投稿を認めていないのが既定の理解です。Adobe Stock等はAI生成を申告すれば受け付けます。規約確認とアカウントの結果責任は利用者に帰属します。",
+  },
+  ALLOW_NOTE_AUTOPOST: {
+    purpose: "note への自動投稿（非公式API利用）を許可するスイッチ。",
+    free: true,
+    steps: [
+      "note の利用規約を確認する（非公式APIの利用はアカウント停止リスクがあります）",
+      "自己判断で進める場合、この欄に 1 と入れて SAVE",
+      "既定はOFF（下書きファイルを出力するだけ＝規約上安全な運用）",
+    ],
+    note: "⚠ 公式APIが無いため、仕様変更で動かなくなる/アカウントに影響が出る可能性があります。既定の「下書き出力→人が貼り付け」が最も安全です。",
+  },
   SUPABASE_DB_URL: {
     purpose: "テーブルを自動作成（永続化）するための Postgres 接続文字列。",
     free: true,
