@@ -42,7 +42,7 @@ def test_generate_forbids_external_deps_in_prompt(monkeypatch):
     seen = {}
     monkeypatch.setattr(lp.llm, "generate_text", lambda p, **k: (seen.update(p=p), _HTML)[1])
     lp.generate("何か")
-    assert "外部CSS/JS/フォント/画像URLは一切使わない" in seen["p"]
+    assert "外部CSS/JS/フォント/画像URL・CDNは一切使わない" in seen["p"]
     assert "レスポンシブ" in seen["p"]
 
 

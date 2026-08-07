@@ -736,22 +736,59 @@ export async function pseoDelete(slug: string): Promise<boolean> {
   return res.ok;
 }
 
-/* ---------------- LP / HP builder ---------------- */
-export interface LpResult { ok?: boolean; html?: string; title?: string; error?: string; artifact?: { id: string } }
+/* ---------------- LP / HP / Web app builder ---------------- */
+export interface LpResult {
+  ok?: boolean; html?: string; title?: string; kind?: string;
+  error?: string; artifact?: { id: string };
+}
 
-/** POST /lp/generate — build (or refine) a single-file landing page. */
+/** POST /lp/generate — build (or refine) a single-file page (kind="lp") or web app (kind="app"). */
 export async function lpGenerate(opts: {
-  brief: string; style?: string; sections?: string; current?: string; save?: boolean;
+  brief: string; style?: string; sections?: string; current?: string;
+  save?: boolean; kind?: "lp" | "app";
 }): Promise<LpResult> {
   const res = await fetch(`${requireApiUrl()}/lp/generate`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       brief: opts.brief, style: opts.style ?? "modern",
-      sections: opts.sections ?? "", current: opts.current ?? "", save: !!opts.save,
+      sections: opts.sections ?? "", current: opts.current ?? "",
+      save: !!opts.save, kind: opts.kind ?? "lp",
     }),
   });
   return (await res.json().catch(() => ({ error: "生成に失敗しました" }))) as LpResult;
+}
+
+/* ---------------- Image studio (multi-variant) ---------------- */
+export interface ImageAspect { key: string; w: number; h: number; label: string }
+export interface ImageVariant { url: string; seed: number }
+export interface ImageResult {
+  ok?: boolean; images?: ImageVariant[]; aspect?: string; width?: number; height?: number;
+  prompt?: string; offset?: number; artifacts?: { id: string }[]; error?: string;
+}
+
+/** GET /image/aspects — aspect-ratio presets (1:1, 4:5, 9:16, 16:9, 3:2). */
+export async function imageAspects(): Promise<ImageAspect[]> {
+  const res = await fetch(`${requireApiUrl()}/image/aspects`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Aspects failed (${res.status})`);
+  const d = (await res.json()) as { aspects?: ImageAspect[] };
+  return d.aspects ?? [];
+}
+
+/** POST /image/generate — n variants of one prompt (save=true → artifacts).
+ *  offset shifts the seeds so the same prompt can yield further alternatives. */
+export async function imageGenerate(opts: {
+  prompt: string; aspect?: string; n?: number; save?: boolean; offset?: number;
+}): Promise<ImageResult> {
+  const res = await fetch(`${requireApiUrl()}/image/generate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      prompt: opts.prompt, aspect: opts.aspect ?? "1:1",
+      n: opts.n ?? 2, save: !!opts.save, offset: opts.offset ?? 0,
+    }),
+  });
+  return (await res.json().catch(() => ({ error: "生成に失敗しました" }))) as ImageResult;
 }
 
 /* ---------------- SNS post support ---------------- */

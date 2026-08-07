@@ -42,6 +42,7 @@ import fileread
 import forge
 import gh
 import gservice
+import imagegen
 import income
 import keepalive as keepalive_mod
 import keychain
@@ -412,6 +413,15 @@ class LpGenerateRequest(BaseModel):
     sections: str = ""
     current: str = ""     # 既存HTML（指定すると改善モード）
     save: bool = False    # 生成物として保存するか
+    kind: str = "lp"      # lp（ページ）| app（動くWebアプリ）
+
+
+class ImageGenerateRequest(BaseModel):
+    prompt: str
+    aspect: str = "1:1"
+    n: int = 2
+    save: bool = False
+    offset: int = 0   # 同じ指示で“さらに別案”を出すためのseedずらし
 
 
 class SnsGenerateRequest(BaseModel):
@@ -1561,7 +1571,7 @@ async def lp_generate(req: LpGenerateRequest, _auth: None = Depends(require_auth
     """LPを生成する。current を渡すと「その内容を指示どおり直す」改善モード。"""
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
-        None, lambda: lp_mod.generate(req.brief, req.style, req.sections, req.current))
+        None, lambda: lp_mod.generate(req.brief, req.style, req.sections, req.current, req.kind))
     if res.get("error"):
         return JSONResponse(status_code=400, content=res)
     if req.save:
@@ -1573,6 +1583,34 @@ async def lp_generate(req: LpGenerateRequest, _auth: None = Depends(require_auth
 @app.get("/lp/styles")
 async def lp_styles(_auth: None = Depends(require_auth)):
     return {"styles": [{"key": k, "note": v} for k, v in lp_mod.STYLES.items()]}
+
+
+# ── 画像スタジオ（アスペクト比・複数枚・履歴） ─────────────────────────
+
+@app.get("/image/aspects")
+async def image_aspects(_auth: None = Depends(require_auth)):
+    return {"aspects": [{"key": k, "w": v[0], "h": v[1], "label": v[2]}
+                        for k, v in imagegen.ASPECTS.items()]}
+
+
+@app.post("/image/generate")
+async def image_generate(req: ImageGenerateRequest, _auth: None = Depends(require_auth)):
+    """同じ指示で複数バリエーションを作る。save=Trueで生成物（履歴）に保存。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: imagegen.generate_variants(req.prompt, req.n, req.aspect, req.offset))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    if req.save:
+        def _save():
+            import artifacts
+            saved = []
+            for i, img in enumerate(res["images"], start=1):
+                title = f"{req.prompt[:40]}" + (f" ({i})" if len(res["images"]) > 1 else "")
+                saved.append(artifacts.create("image", title, img["url"], "image/url"))
+            return saved
+        res["artifacts"] = await loop.run_in_executor(None, _save)
+    return res
 
 
 # ── SNS投稿サポート（Instagram / X） ──────────────────────────────────

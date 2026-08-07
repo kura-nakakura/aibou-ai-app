@@ -1,12 +1,15 @@
-# lp.py — ランディングページ / ホームページの生成（1ファイル完結HTML）
+# lp.py — Webページ / Webアプリの生成（1ファイル完結HTML）
 # =====================================================================
-# 「作りたいもの」を文章で書くと、そのまま公開できる 1枚のHTMLを書き上げる。
-# 外部CDNに依存しない自己完結HTML（<style>インライン）にするのが要点で、
+# 「作りたいもの」を文章で書くと、そのまま使える 1枚のHTMLを書き上げる。
+# 外部CDNに依存しない自己完結HTML（<style>/<script>インライン）にするのが要点で、
 # これによりフロントの iframe でそのままライブプレビューでき、
 # ダウンロードして任意のサーバーに置くだけで動く。
 #
-#   generate(brief)                 … 新規生成
-#   generate(brief, current=html)   … 既存HTMLを指示で改善（反復デザイン）
+#   kind="lp"  … ランディングページ / ホームページ（見せるためのページ）
+#   kind="app" … 動くWebアプリ（入力・保存・計算ができる道具）
+#
+#   generate(brief, kind=...)                 … 新規生成
+#   generate(brief, kind=..., current=html)   … 既存HTMLを指示で改善（反復開発）
 #
 # 生成物は artifacts に kind="site" / mime="text/html" で保存され、
 # HOMEの「生成物」から再表示・ダウンロードできる。
@@ -27,22 +30,51 @@ STYLES = {
 MAX_HTML = 120_000
 
 
-def _system(style: str, sections: str) -> str:
+KINDS = ("lp", "app")
+
+# アプリ生成時の既定の構成（未指定ならこれを使う）
+APP_DEFAULT_SPEC = (
+    "入力エリア・一覧表示・追加/編集/削除・件数や合計の表示。"
+    "データは localStorage に保存して再読込後も残るようにする。"
+)
+
+# 両方に共通する「1ファイル完結」の技術要件（iframeプレビューを成立させる要）
+_COMMON_RULES = (
+    "【厳守する技術要件】\n"
+    "・出力は 完全な1ファイルのHTML のみ（<!DOCTYPE html> から </html> まで）\n"
+    "・CSSは <style>、JSは <script> にインラインで書く。"
+    "外部CSS/JS/フォント/画像URL・CDNは一切使わない（装飾はCSSで表現する）\n"
+    "・レスポンシブ（スマホ幅で崩れない。CSS Grid/Flexbox、clamp()でフォント可変）\n"
+    "・アクセシビリティ：見出し階層、label、alt、十分なコントラスト\n"
+    "・日本語UI。空欄プレースホルダやTODOを残さない\n"
+    "説明文やマークダウンのコードフェンスは書かず、HTMLだけを出力してください。"
+)
+
+
+def _system(style: str, sections: str, kind: str = "lp") -> str:
     style_note = STYLES.get(style, STYLES["modern"])
+    if kind == "app":
+        return (
+            "あなたは一流のフロントエンドエンジニアです。"
+            "依頼内容から、ブラウザだけで完結して“実際に動く”Webアプリを作ってください。\n"
+            + _COMMON_RULES + "\n"
+            "【アプリとしての要件】\n"
+            "・バックエンド無しで動作する（保存は localStorage、fetchで外部APIを呼ばない）\n"
+            "・素のJavaScriptで実装（Reactなどのフレームワークは読み込めないので使わない）\n"
+            "・実際に操作できること：入力→保存→再読込しても残る、削除や編集も動く\n"
+            "・入力検証とエラー表示、空状態のメッセージも用意する\n"
+            "・データを消す操作には確認を入れる\n"
+            f"【デザインの方向性】{style_note}\n"
+            f"【作るもの・機能】{sections}\n"
+        )
     return (
         "あなたは一流のWebデザイナー兼フロントエンド実装者です。"
         "依頼内容から、そのまま公開できる日本語のランディングページを作ってください。\n"
-        "【厳守する技術要件】\n"
-        "・出力は 完全な1ファイルのHTML のみ（<!DOCTYPE html> から </html> まで）\n"
-        "・CSSは <style> にインラインで書く。外部CSS/JS/フォント/画像URLは一切使わない\n"
-        "  （CDN・Google Fonts・外部画像は禁止。装飾はCSSグラデーションや図形で表現する）\n"
-        "・レスポンシブ（スマホ幅で崩れない。CSS Grid/Flexbox、clamp()でフォント可変）\n"
-        "・アクセシビリティ：見出し階層、alt、十分なコントラスト\n"
-        "・JSを使う場合も <script> にインラインで、最小限（スムーススクロールや開閉のみ）\n"
+        + _COMMON_RULES + "\n"
+        "・JSを使う場合も最小限（スムーススクロールや開閉のみ）\n"
         f"【デザインの方向性】{style_note}\n"
         f"【構成】{sections}\n"
-        "【コピー】具体的で誇張しない日本語。空欄プレースホルダを残さない。\n"
-        "説明文やマークダウンのコードフェンスは書かず、HTMLだけを出力してください。"
+        "【コピー】具体的で誇張しない日本語。\n"
     )
 
 
@@ -68,25 +100,29 @@ def _looks_like_html(html: str) -> bool:
     return "<html" in low and "</html>" in low and len(html) > 300
 
 
-def generate(brief: str, style: str = "modern", sections: str = "", current: str = "") -> dict:
-    """LPを生成（current があればそれを改善）。{ok, html, title} / {error}。"""
+def generate(brief: str, style: str = "modern", sections: str = "",
+             current: str = "", kind: str = "lp") -> dict:
+    """ページ/アプリを生成（current があればそれを改善）。{ok, html, title} / {error}。"""
     brief = (brief or "").strip()
+    kind = kind if kind in KINDS else "lp"
     if not brief:
-        return {"error": "作りたいページの内容（brief）が空です"}
+        return {"error": "作りたいものの内容（brief）が空です"}
     sections = (sections or "").strip() or (
+        APP_DEFAULT_SPEC if kind == "app" else
         "ヒーロー（キャッチコピー＋CTA）／課題提起／提供価値3点／使い方3ステップ／"
         "よくある質問／最後のCTA／フッター"
     )
 
     if current and _looks_like_html(current):
         prompt = (
-            _system(style, sections)
+            _system(style, sections, kind)
             + "\n\n【既存のHTML】\n" + current[:60_000]
             + "\n\n【修正指示】\n" + brief
             + "\n\n修正後の完全なHTMLを出力してください（差分ではなく全文）。"
+              "既にある機能を壊さないこと。"
         )
     else:
-        prompt = _system(style, sections) + "\n\n【依頼内容】\n" + brief
+        prompt = _system(style, sections, kind) + "\n\n【依頼内容】\n" + brief
 
     try:
         text = llm.generate_text(prompt, max_tokens=8000)
@@ -99,8 +135,9 @@ def generate(brief: str, style: str = "modern", sections: str = "", current: str
     html = html[:MAX_HTML]
 
     m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
-    title = (m.group(1).strip() if m else brief[:40]) or "ランディングページ"
-    return {"ok": True, "html": html, "title": title[:120]}
+    fallback = "Webアプリ" if kind == "app" else "ランディングページ"
+    title = (m.group(1).strip() if m else brief[:40]) or fallback
+    return {"ok": True, "html": html, "title": title[:120], "kind": kind}
 
 
 def save_as_artifact(title: str, html: str) -> dict:

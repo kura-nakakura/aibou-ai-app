@@ -8,6 +8,7 @@
 import { motion } from "framer-motion";
 import { useState } from "react";
 import VideoPanel from "@/components/VideoPanel";
+import ImageStudio from "@/components/ImageStudio";
 import Markdown from "@/components/Markdown";
 import { addToArchive } from "@/components/AppArchive";
 import { forgeGenerate, type ForgeKind, type ForgeResult } from "@/lib/api";
@@ -47,6 +48,8 @@ export default function Forge() {
   const [editInstruction, setEditInstruction] = useState("");
 
   const isVideo = tab === "video";
+  // 画像は専用スタジオ（複数案・比率プリセット・拡大表示）に任せる
+  const isImageStudio = tab === "image";
   const kind: ForgeKind = isVideo ? "app" : tab;
   const active = KINDS.find((k) => k.key === kind)!;
 
@@ -136,6 +139,10 @@ export default function Forge() {
       {isVideo ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <VideoPanel />
+        </div>
+      ) : isImageStudio ? (
+        <div className="min-h-0 flex-1">
+          <ImageStudio />
         </div>
       ) : (
         /* Split view (Claude-style): left = controls/chat, right = artifact */

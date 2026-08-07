@@ -246,10 +246,38 @@ test("STUDIO has an LP/HP builder tab", async ({ page }) => {
   await enterApp(page);
   await goMode(page, "STUDIO");
   await page.getByRole("button", { name: /LP \/ HP/ }).click();
-  await expect(page.getByText(/LP作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/LP \/ HP作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
   // FORGE tab still reachable
   await page.getByRole("button", { name: /✦ FORGE/ }).click();
   await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 5_000 });
+});
+
+/* ── ① Web app builder / ② image studio (ui-r38) ── */
+test("STUDIO has a Web app builder tab", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "STUDIO");
+  await page.getByRole("button", { name: /▣ アプリ/ }).click();
+  await expect(page.getByText(/Webアプリ作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
+});
+
+test("STUDIO workshop tab persists across reload", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "STUDIO");
+  await page.getByRole("button", { name: /▣ アプリ/ }).click();
+  await expect(page.getByText(/Webアプリ作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
+  await page.reload();
+  await enterApp(page);
+  await expect(page.getByText(/Webアプリ作成はバックエンド接続後/)).toBeVisible({ timeout: 8_000 });
+});
+
+test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "STUDIO");
+  await page.locator("button").filter({ hasText: /^IMAGE$/ }).first().click();
+  await expect(page.getByText(/画像作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
 });
 
 /* ── CAPTURE mode (screen / audio recording) ── */
