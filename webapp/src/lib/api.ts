@@ -736,6 +736,55 @@ export async function pseoDelete(slug: string): Promise<boolean> {
   return res.ok;
 }
 
+/* ---------------- LP / HP builder ---------------- */
+export interface LpResult { ok?: boolean; html?: string; title?: string; error?: string; artifact?: { id: string } }
+
+/** POST /lp/generate — build (or refine) a single-file landing page. */
+export async function lpGenerate(opts: {
+  brief: string; style?: string; sections?: string; current?: string; save?: boolean;
+}): Promise<LpResult> {
+  const res = await fetch(`${requireApiUrl()}/lp/generate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      brief: opts.brief, style: opts.style ?? "modern",
+      sections: opts.sections ?? "", current: opts.current ?? "", save: !!opts.save,
+    }),
+  });
+  return (await res.json().catch(() => ({ error: "生成に失敗しました" }))) as LpResult;
+}
+
+/* ---------------- SNS post support ---------------- */
+export interface SnsPost {
+  text: string;
+  hashtags: string[];
+  image_prompt?: string;
+  image_url?: string;
+  thread?: string[];
+  length: number;
+  over_limit: boolean;
+}
+export interface SnsResult {
+  ok?: boolean; platform?: string; label?: string; limit?: number;
+  posts?: SnsPost[]; error?: string;
+}
+
+/** POST /sns/generate — draft posts for X / Instagram (never auto-posts). */
+export async function snsGenerate(opts: {
+  platform: string; topic: string; n?: number; tone?: string;
+  promo?: boolean; thread?: boolean; withImages?: boolean;
+}): Promise<SnsResult> {
+  const res = await fetch(`${requireApiUrl()}/sns/generate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      platform: opts.platform, topic: opts.topic, n: opts.n ?? 3, tone: opts.tone ?? "",
+      promo: !!opts.promo, thread: !!opts.thread, with_images: !!opts.withImages,
+    }),
+  });
+  return (await res.json().catch(() => ({ error: "生成に失敗しました" }))) as SnsResult;
+}
+
 /* ---------------- Newsletter (list building + broadcast) ---------------- */
 export interface Subscriber { email: string; status: string; source?: string; created_at?: string }
 export interface NewsletterStats { total: number; pending: number; confirmed: number; unsubscribed: number }

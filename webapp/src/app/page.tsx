@@ -4,8 +4,9 @@
  * THE FORGE OS — main HUD.
  *
  * Flows: EntryGate → BootScreen → Hud.
- * Views (12): HOME / CHAT / ME / FORGE / CODE / VAULT / INCOME / TASKS / STUDIO /
- *   AUTOPILOT / BOARD / ARCHIVE — default is CHAT.
+ * Views (13): HOME / CHAT / ME / CODE / STUDIO / SNS / CAPTURE / VAULT / TASKS /
+ *   INCOME / AUTO / BOARD / ARCHIVE — default is CHAT.
+ * (STUDIO hosts the former FORGE as a tab, plus the LP/HP builder.)
  * Navigation is a Google-apps-style waffle "ModeLauncher" popover (top-right),
  * not a bottom bar. CHAT goes extra-wide with its history in the far-left
  * margin; other modes use the full width with their own centring.
@@ -27,6 +28,7 @@ import Dashboard from "@/components/Dashboard";
 import EntryGate from "@/components/EntryGate";
 import Workshop from "@/components/Workshop";
 import Capture from "@/components/Capture";
+import SnsMode from "@/components/SnsMode";
 import Home from "@/components/Home";
 import Income from "@/components/Income";
 import Keychain from "@/components/Keychain";
@@ -37,7 +39,7 @@ import { health } from "@/lib/api";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { APP_VERSION } from "@/lib/version";
 
-type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
+type View = "chat" | "me" | "sns" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
 
 const LS_NAME = "forge_name";
 const LS_PERSONA = "forge_persona";
@@ -100,7 +102,7 @@ function Hud() {
       // Reopen the mode you were using (PWA relaunch lands where you left off).
       let savedView = localStorage.getItem("forge_view") as View | null;
       if (savedView === ("forge" as View)) savedView = "studio"; // 旧FORGEはWORKSHOP(studio)に統合
-      if (savedView && ["chat", "me", "capture", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home"].includes(savedView)) {
+      if (savedView && ["chat", "me", "sns", "capture", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home"].includes(savedView)) {
         setView(savedView);
       }
       if (localStorage.getItem("forge_fullscreen") === "1") setFullscreen(true);
@@ -251,6 +253,7 @@ function Hud() {
             <Chat settings={settings} voiceReplies={voiceReplies} onStateChange={setCoreState} />
           )}
           {loaded && view === "me" && <LifeMode settings={settings} />}
+          {loaded && view === "sns" && <Centered><SnsMode /></Centered>}
           {loaded && view === "capture" && <Centered><Capture /></Centered>}
           {loaded && view === "code" && <CodeMode />}
           {loaded && view === "vault" && <Centered><Vault /></Centered>}
@@ -297,6 +300,7 @@ const NAV_ITEMS: { key: View; label: string }[] = [
   { key: "me", label: "ME" },
   { key: "code", label: "CODE" },
   { key: "studio", label: "STUDIO" },
+  { key: "sns", label: "SNS" },
   { key: "capture", label: "CAPTURE" },
   { key: "vault", label: "VAULT" },
   { key: "tasks", label: "TASKS" },
@@ -323,6 +327,8 @@ function NavIcon({ name }: { name: View }) {
       return (<svg {...p}><path d="M12 20s-7-4.6-9.2-8.8C1.2 8 3 5 6.2 5c2 0 3.3 1 4 2.2C11 6 12.3 5 14.3 5c3.2 0 5 3 3.4 6.2C15.5 15.4 12 20 12 20z" /></svg>);
     case "chat":
       return (<svg {...p}><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z" /></svg>);
+    case "sns":
+      return (<svg {...p}><path d="M4 5h16v11H7l-3 3V5z" /><circle cx="9" cy="10.5" r="1" /><circle cx="12" cy="10.5" r="1" /><circle cx="15" cy="10.5" r="1" /></svg>);
     case "capture":
       return (<svg {...p}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3" /><circle cx="8.5" cy="12" r="2.2" /></svg>);
     case "vault":

@@ -232,6 +232,26 @@ test("STUDIO mode merges FORGE + AI STUDIO tabs", async ({ page }) => {
   await expect(page.locator("button").filter({ hasText: /^IMAGE$/ }).first()).toBeVisible();
 });
 
+/* ── SNS mode + LP builder (ui-r37) ── */
+test("SNS mode renders the post-support UI", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "SNS");
+  // Offline → the panel explains it needs the backend
+  await expect(page.getByText(/SNSサポートはバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
+});
+
+test("STUDIO has an LP/HP builder tab", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "STUDIO");
+  await page.getByRole("button", { name: /LP \/ HP/ }).click();
+  await expect(page.getByText(/LP作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
+  // FORGE tab still reachable
+  await page.getByRole("button", { name: /✦ FORGE/ }).click();
+  await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 5_000 });
+});
+
 /* ── CAPTURE mode (screen / audio recording) ── */
 test("CAPTURE mode renders the recorder UI", async ({ page }) => {
   await page.goto("/");

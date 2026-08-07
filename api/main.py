@@ -47,6 +47,7 @@ import keepalive as keepalive_mod
 import keychain
 import life
 import llm
+import lp as lp_mod
 import migrate
 import newsletter
 import note_client
@@ -54,6 +55,7 @@ import notify
 import proactive
 import pseo
 import scheduler
+import sns as sns_mod
 import studio
 import tasks as tasks_module
 import tools
@@ -402,6 +404,24 @@ class IssueSendRequest(BaseModel):
 class NoteDraftRequest(BaseModel):
     title: str
     markdown: str
+
+
+class LpGenerateRequest(BaseModel):
+    brief: str
+    style: str = "modern"
+    sections: str = ""
+    current: str = ""     # 既存HTML（指定すると改善モード）
+    save: bool = False    # 生成物として保存するか
+
+
+class SnsGenerateRequest(BaseModel):
+    platform: str = "x"
+    topic: str
+    n: int = 3
+    tone: str = ""
+    promo: bool = False
+    thread: bool = False
+    with_images: bool = False
 
 
 class BoardCreateRequest(BaseModel):
@@ -1532,6 +1552,48 @@ async def pseo_sitemap():
     """承認済みページのみのサイトマップ（認証不要）。"""
     loop = asyncio.get_event_loop()
     return {"items": await loop.run_in_executor(None, pseo.sitemap)}
+
+
+# ── LP / HP 作成（1ファイル完結HTML・反復デザイン） ────────────────────
+
+@app.post("/lp/generate")
+async def lp_generate(req: LpGenerateRequest, _auth: None = Depends(require_auth)):
+    """LPを生成する。current を渡すと「その内容を指示どおり直す」改善モード。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: lp_mod.generate(req.brief, req.style, req.sections, req.current))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    if req.save:
+        meta = await loop.run_in_executor(None, lambda: lp_mod.save_as_artifact(res["title"], res["html"]))
+        res["artifact"] = meta
+    return res
+
+
+@app.get("/lp/styles")
+async def lp_styles(_auth: None = Depends(require_auth)):
+    return {"styles": [{"key": k, "note": v} for k, v in lp_mod.STYLES.items()]}
+
+
+# ── SNS投稿サポート（Instagram / X） ──────────────────────────────────
+
+@app.get("/sns/platforms")
+async def sns_platforms(_auth: None = Depends(require_auth)):
+    return {"platforms": [{"key": k, **v} for k, v in sns_mod.PLATFORMS.items()]}
+
+
+@app.post("/sns/generate")
+async def sns_generate(req: SnsGenerateRequest, _auth: None = Depends(require_auth)):
+    """SNS投稿案を複数生成する（自動投稿はしない・コピーして使う）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: sns_mod.generate_posts(req.platform, req.topic, req.n, req.tone, req.promo, req.thread))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    if req.with_images:
+        res["posts"] = await loop.run_in_executor(
+            None, lambda: [sns_mod.with_image(p) for p in res["posts"]])
+    return res
 
 
 # ── ニュースレター（⑤ リスト取得 → 定期配信） ────────────────────────

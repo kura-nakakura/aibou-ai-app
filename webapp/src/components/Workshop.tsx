@@ -10,14 +10,18 @@
 import { useEffect, useState } from "react";
 import Forge from "@/components/Forge";
 import Studio from "@/components/Studio";
+import LpBuilder from "@/components/LpBuilder";
 
-type Tab = "forge" | "studio";
+type Tab = "forge" | "lp" | "studio";
 
 export default function Workshop() {
   const [tab, setTab] = useState<Tab>("forge");
 
   useEffect(() => {
-    try { if (localStorage.getItem("forge_workshop_tab") === "studio") setTab("studio"); } catch { /* ignore */ }
+    try {
+      const t = localStorage.getItem("forge_workshop_tab");
+      if (t === "studio" || t === "lp") setTab(t);
+    } catch { /* ignore */ }
   }, []);
   useEffect(() => {
     try { localStorage.setItem("forge_workshop_tab", tab); } catch { /* ignore */ }
@@ -28,6 +32,7 @@ export default function Workshop() {
       <div className="mx-auto flex items-center gap-1.5">
         {([
           { key: "forge", label: "✦ FORGE" },
+          { key: "lp", label: "◫ LP / HP" },
           { key: "studio", label: "⚙ AI STUDIO" },
         ] as const).map((t) => (
           <button
@@ -48,7 +53,7 @@ export default function Workshop() {
         ))}
       </div>
       <div className="min-h-0 flex-1">
-        {tab === "forge" ? <Forge /> : <Studio />}
+        {tab === "forge" ? <Forge /> : tab === "lp" ? <LpBuilder /> : <Studio />}
       </div>
     </div>
   );
