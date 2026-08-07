@@ -48,6 +48,8 @@ import keychain
 import life
 import llm
 import migrate
+import newsletter
+import note_client
 import notify
 import proactive
 import pseo
@@ -380,6 +382,26 @@ class PseoPlanRequest(BaseModel):
 
 class PseoStatusRequest(BaseModel):
     status: str
+
+
+class SubscribeRequest(BaseModel):
+    email: str
+    source: str = ""
+
+
+class IssueDraftRequest(BaseModel):
+    subject: str = ""
+    body: str = ""
+    topic: str = ""
+
+
+class IssueSendRequest(BaseModel):
+    test_to: str = ""
+
+
+class NoteDraftRequest(BaseModel):
+    title: str
+    markdown: str
 
 
 class BoardCreateRequest(BaseModel):
@@ -1510,6 +1532,96 @@ async def pseo_sitemap():
     """承認済みページのみのサイトマップ（認証不要）。"""
     loop = asyncio.get_event_loop()
     return {"items": await loop.run_in_executor(None, pseo.sitemap)}
+
+
+# ── ニュースレター（⑤ リスト取得 → 定期配信） ────────────────────────
+
+@app.post("/newsletter/subscribe")
+async def newsletter_subscribe(req: SubscribeRequest):
+    """公開フォームからの購読登録（認証不要）。確認メールを送るまで配信しない。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: newsletter.subscribe(req.email, req.source))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.get("/newsletter/confirm")
+async def newsletter_confirm(token: str = ""):
+    """確認リンク（メール内から開かれる・認証不要）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: newsletter.confirm(token))
+    ok = not res.get("error")
+    msg = "購読を確定しました。ありがとうございます。" if ok else res["error"]
+    return HTMLResponse(
+        f"<div style='font-family:sans-serif;text-align:center;margin-top:14%'>"
+        f"<h2>{'✓ 登録完了' if ok else '⚠ エラー'}</h2><p>{msg}</p></div>",
+        status_code=200 if ok else 400,
+    )
+
+
+@app.get("/newsletter/unsubscribe")
+async def newsletter_unsubscribe(token: str = ""):
+    """配信停止リンク（全配信メールに記載・認証不要）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: newsletter.unsubscribe(token))
+    ok = not res.get("error")
+    msg = "配信を停止しました。今後お送りしません。" if ok else res["error"]
+    return HTMLResponse(
+        f"<div style='font-family:sans-serif;text-align:center;margin-top:14%'>"
+        f"<h2>{'配信停止しました' if ok else '⚠ エラー'}</h2><p>{msg}</p></div>",
+        status_code=200 if ok else 400,
+    )
+
+
+@app.get("/newsletter/subscribers")
+async def newsletter_subscribers(status: Optional[str] = None, _auth: None = Depends(require_auth)):
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(None, lambda: newsletter.list_subscribers(status))
+    st = await loop.run_in_executor(None, newsletter.stats)
+    return {"items": items, "stats": st}
+
+
+@app.get("/newsletter/issues")
+async def newsletter_issues(_auth: None = Depends(require_auth)):
+    loop = asyncio.get_event_loop()
+    return {"items": await loop.run_in_executor(None, newsletter.list_issues)}
+
+
+@app.post("/newsletter/issues")
+async def newsletter_draft(req: IssueDraftRequest, _auth: None = Depends(require_auth)):
+    """配信の下書きを作る（topic指定でAIが本文を執筆）。送信はしない。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: newsletter.draft_issue(req.subject, req.body, req.topic))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.post("/newsletter/issues/{issue_id}/send")
+async def newsletter_send(issue_id: str, req: IssueSendRequest, _auth: None = Depends(require_auth)):
+    """確認済み購読者へ送信（test_to 指定でテスト送信のみ）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: newsletter.send_issue(issue_id, req.test_to))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+# ── note（非公式APIでの下書き投稿・既定OFF） ──────────────────────────
+
+@app.get("/note/status")
+async def note_status(_auth: None = Depends(require_auth)):
+    """note自動投稿の有効/無効と理由（認証情報の値は返さない）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, note_client.status)
+
+
+@app.post("/note/draft")
+async def note_draft(req: NoteDraftRequest, _auth: None = Depends(require_auth)):
+    """noteに下書きを作成（ALLOW_NOTE_AUTOPOST=1 のときのみ実行）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: note_client.create_draft(req.title, req.markdown))
 
 
 @app.get("/compliance/policy")

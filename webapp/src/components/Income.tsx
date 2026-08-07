@@ -16,8 +16,9 @@ import {
   type IncomeSummary,
 } from "@/lib/api";
 import PseoPanel from "@/components/PseoPanel";
+import NewsletterPanel from "@/components/NewsletterPanel";
 
-type IncomeTab = "queue" | "seo";
+type IncomeTab = "queue" | "seo" | "mail";
 
 /** 収益パイプラインの2系統（承認キュー / Programmatic SEO）を切り替える。 */
 function IncomeTabs({ tab, onChange }: { tab: IncomeTab; onChange: (t: IncomeTab) => void }) {
@@ -26,6 +27,7 @@ function IncomeTabs({ tab, onChange }: { tab: IncomeTab; onChange: (t: IncomeTab
       {([
         { key: "queue", label: "◎ 承認キュー" },
         { key: "seo", label: "🔎 SEOページ" },
+        { key: "mail", label: "📧 ニュースレター" },
       ] as const).map((t) => (
         <button
           key={t.key}
@@ -126,11 +128,11 @@ export default function Income() {
 
   const counts = ["pending", "approved", "rejected", "completed", "failed"] as const;
 
-  if (tab === "seo") {
+  if (tab === "seo" || tab === "mail") {
     return (
       <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pb-2">
         <IncomeTabs tab={tab} onChange={setTab} />
-        <PseoPanel />
+        {tab === "seo" ? <PseoPanel /> : <NewsletterPanel />}
       </div>
     );
   }

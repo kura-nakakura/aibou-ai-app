@@ -269,6 +269,17 @@ test("INCOME has a SEO tab with the programmatic-SEO builder", async ({ page }) 
   await expect(page.getByText("NEW THEME")).toBeVisible({ timeout: 5_000 });
 });
 
+test("INCOME has a newsletter tab", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "INCOME");
+  await page.getByRole("button", { name: /ニュースレター/ }).click();
+  // Offline → the panel explains it needs the backend
+  await expect(page.getByText(/ニュースレターはバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
+  await page.getByRole("button", { name: /承認キュー/ }).click();
+  await expect(page.getByText("NEW THEME")).toBeVisible({ timeout: 5_000 });
+});
+
 test("INCOME renders income UI + setup guide", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);

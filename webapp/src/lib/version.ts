@@ -5,4 +5,4 @@
  * glance whether the live site is serving the latest deployment (vs. a cached
  * old build or a stale immutable deployment URL).
  */
-export const APP_VERSION = "2026.07.19 · ui-r35 PSEO+COMPLIANCE";
+export const APP_VERSION = "2026.07.19 · ui-r36 NEWSLETTER+NOTE";

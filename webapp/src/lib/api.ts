@@ -736,6 +736,44 @@ export async function pseoDelete(slug: string): Promise<boolean> {
   return res.ok;
 }
 
+/* ---------------- Newsletter (list building + broadcast) ---------------- */
+export interface Subscriber { email: string; status: string; source?: string; created_at?: string }
+export interface NewsletterStats { total: number; pending: number; confirmed: number; unsubscribed: number }
+export interface NewsletterIssue { id: string; subject: string; body: string; status: string; sent_count?: number; created_at?: string }
+
+export async function newsletterSubscribers(): Promise<{ items: Subscriber[]; stats: NewsletterStats }> {
+  const res = await fetch(`${requireApiUrl()}/newsletter/subscribers`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Subscribers failed (${res.status})`);
+  return (await res.json()) as { items: Subscriber[]; stats: NewsletterStats };
+}
+
+export async function newsletterIssues(): Promise<NewsletterIssue[]> {
+  const res = await fetch(`${requireApiUrl()}/newsletter/issues`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Issues failed (${res.status})`);
+  const d = (await res.json()) as { items?: NewsletterIssue[] };
+  return d.items ?? [];
+}
+
+/** Draft an issue; pass topic to have the AI write the body. Never sends. */
+export async function newsletterDraft(subject: string, body = "", topic = ""): Promise<NewsletterIssue & { error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/newsletter/issues`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ subject, body, topic }),
+  });
+  return (await res.json().catch(() => ({}))) as NewsletterIssue & { error?: string };
+}
+
+/** Send an issue to confirmed subscribers (or only to testTo). */
+export async function newsletterSend(id: string, testTo = ""): Promise<{ ok?: boolean; sent?: number; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/newsletter/issues/${encodeURIComponent(id)}/send`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ test_to: testTo }),
+  });
+  return (await res.json().catch(() => ({}))) as { ok?: boolean; sent?: number; error?: string };
+}
+
 /* ---------------- Keep-alive (prevent Supabase auto-pause) ---------------- */
 export interface KeepaliveStatus {
   supabase_configured: boolean;

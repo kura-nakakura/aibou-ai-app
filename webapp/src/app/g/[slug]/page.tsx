@@ -8,6 +8,7 @@
  */
 
 import type { Metadata } from "next";
+import SubscribeForm from "@/components/SubscribeForm";
 
 export const revalidate = 3600;
 
@@ -131,6 +132,9 @@ export default async function PseoPageView({ params }: { params: Promise<{ slug:
           }}
         />
       )}
+
+      {/* 企画書⑤：SEOトラフィック → 顧客リストへの送客ルート */}
+      <SubscribeForm source={`/g/${page.slug}`} />
 
       <footer style={{ marginTop: 56, paddingTop: 20, borderTop: "1px solid #e5e7eb", fontSize: 12, color: "#9ca3af" }}>
         {page.updated_at && <span>最終更新: {page.updated_at.slice(0, 10)}</span>}

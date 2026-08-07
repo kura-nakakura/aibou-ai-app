@@ -228,6 +228,28 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_created ON artifacts(created_at DESC);
 
+-- 📧 ニュースレター購読者（ダブルオプトイン）
+-- status: pending（確認待ち・配信しない）| confirmed（配信対象）| unsubscribed
+CREATE TABLE IF NOT EXISTS subscribers (
+  email      text PRIMARY KEY,
+  status     text DEFAULT 'pending',
+  source     text DEFAULT '',
+  token      text DEFAULT '',
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_subscribers_status ON subscribers(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_subscribers_token ON subscribers(token);
+
+-- 📧 ニュースレター配信号（下書き→承認→送信）
+CREATE TABLE IF NOT EXISTS newsletter_issues (
+  id         text PRIMARY KEY,
+  subject    text NOT NULL,
+  body       text DEFAULT '',
+  status     text DEFAULT 'draft',
+  sent_count int DEFAULT 0,
+  created_at timestamptz DEFAULT now()
+);
+
 -- 🔎 Programmatic SEO（掛け合わせキーワードの大量ページ）
 -- status: draft（生成直後・非公開）| approved（公開）| rejected
 -- 承認したページだけが /pseo/public と sitemap に出る（セミオート原則）。
