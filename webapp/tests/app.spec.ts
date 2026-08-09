@@ -280,6 +280,15 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
   await expect(page.getByText(/画像作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
 });
 
+/* ── ③ Video (storyboard-based) ── */
+test("FORGE VIDEO opens the storyboard video panel", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "STUDIO");
+  await page.locator("button").filter({ hasText: /^VIDEO$/ }).first().click();
+  await expect(page.getByText(/動画作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
+});
+
 /* ── CAPTURE mode (screen / audio recording) ── */
 test("CAPTURE mode renders the recorder UI", async ({ page }) => {
   await page.goto("/");

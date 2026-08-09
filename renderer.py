@@ -162,8 +162,138 @@ def build_assets(job):
 
 
 # =================================================================
-# Forge Lab 用：絵コンテ（複数シーン）から画像＋ナレーションのMP4を合成する
+# Forge Lab 用：絵コンテ（複数シーン）から画像＋ナレーション＋字幕のMP4を合成
 # =================================================================
+
+# 出力比率のプリセット。縦型（Shorts / Reels / TikTok）に対応するのが要点。
+VIDEO_ASPECTS = {
+    "16:9": (1280, 720, "横長（YouTube）"),
+    "9:16": (720, 1280, "縦型（Shorts / Reels / TikTok）"),
+    "1:1": (1080, 1080, "正方形（Instagramフィード）"),
+}
+
+MAX_SCENES = 10
+
+# 日本語字幕を焼き込むためのフォント候補（Dockerfileで fonts-ipafont-gothic を入れる）
+_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",   # 最後の砦（日本語は出ない）
+)
+
+
+def font_path():
+    """字幕に使える日本語フォントのパス。見つからなければ None（字幕なしで続行）。"""
+    for p in _FONT_CANDIDATES:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def has_filter(name):
+    """ffmpeg にそのフィルタが組み込まれているか（drawtext は libfreetype 依存）。"""
+    ff = _ffmpeg()
+    if not ff:
+        return False
+    try:
+        r = subprocess.run([ff, "-hide_banner", "-filters"], capture_output=True, timeout=20)
+        return f" {name} " in r.stdout.decode("utf-8", "ignore")
+    except Exception:
+        return False
+
+
+def wrap_ja(text, per_line=22, max_lines=3):
+    """日本語は単語区切りが無いので、文字数で折り返す（句読点の直後で優先的に折る）。
+
+    ffmpeg の drawtext は自動改行しないため、こちらで改行を入れておく必要がある。
+    """
+    t = " ".join((text or "").split())
+    if not t:
+        return ""
+    lines, cur = [], ""
+    for ch in t:
+        cur += ch
+        # 句読点で区切れるならそこで折り返す（読みやすさ優先）
+        if len(cur) >= per_line or (ch in "。！？" and len(cur) >= per_line * 0.6):
+            lines.append(cur)
+            cur = ""
+            if len(lines) >= max_lines:
+                break
+    if cur and len(lines) < max_lines:
+        lines.append(cur)
+    out = [ln.strip() for ln in lines if ln.strip()]
+    # 入り切らなかった分は最後の行に「…」を付けて示す
+    used = sum(len(ln) for ln in lines)
+    if used < len(t) and out:
+        out[-1] = out[-1][: max(1, per_line - 1)] + "…"
+    return "\n".join(out)
+
+
+def subtitle_metrics(width, height):
+    """字幕の (フォントサイズ, 1行の文字数, 下マージン) を実際の画面寸法から決める。
+
+    文字サイズを height だけで決めると、縦型（720x1280）では横にはみ出す。
+    日本語は全角＝送り幅がほぼフォントサイズなので、短辺基準でサイズを決め、
+    1行の文字数は「使える横幅 ÷ フォントサイズ」で求める。
+    """
+    fontsize = max(18, int(round(min(width, height) * 0.045)))
+    side = max(int(width * 0.05), int(fontsize * 0.8))     # 左右の余白
+    per_line = max(8, int((width - side * 2) // fontsize))
+    return fontsize, per_line, int(height * 0.06)
+
+
+def _subtitle_vf(textfile, font, width, height):
+    """字幕（下寄せ・半透明の座布団つき）の drawtext フィルタを組む。
+
+    テキストは textfile 経由で渡す。フィルタ文字列に本文を直接埋めると
+    `:` や `'` のエスケープ地獄になるうえ、日本語の記号で壊れやすい。
+    """
+    fontsize, _per_line, margin = subtitle_metrics(width, height)
+    return (
+        f"drawtext=fontfile='{font}':textfile='{textfile}'"
+        f":fontcolor=white:fontsize={fontsize}:line_spacing={int(fontsize * 0.35)}"
+        f":box=1:boxcolor=black@0.55:boxborderw={int(fontsize * 0.5)}"
+        f":x=(w-text_w)/2:y=h-text_h-{margin}"
+    )
+
+
+def _scene_vf(width, height, seconds, fps, seed, subtitle_file=None, font=None, motion=True):
+    """1シーン分の映像フィルタ（ケン・バーンズ＋フェード＋字幕）を組む。"""
+    parts = []
+    if motion:
+        # 一度大きめに整えてから zoompan で寄る/引く（解像を落とさない）
+        big_w, big_h = width * 2, height * 2
+        total = max(1, int(round(seconds * fps)))
+        zoom_in = (seed % 2) == 0
+        amp = 0.12
+        z = (f"1+{amp:.4f}*on/{total}" if zoom_in else f"{1 + amp:.4f}-{amp:.4f}*on/{total}")
+        pan = seed % 3
+        if pan == 0:
+            x, y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        elif pan == 1:
+            x, y = f"iw/2-(iw/zoom/2)-(iw*0.04*on/{total})", f"ih/2-(ih/zoom/2)-(ih*0.03*on/{total})"
+        else:
+            x, y = f"iw/2-(iw/zoom/2)+(iw*0.04*on/{total})", f"ih/2-(ih/zoom/2)+(ih*0.03*on/{total})"
+        parts.append(f"scale={big_w}:{big_h}:force_original_aspect_ratio=increase")
+        parts.append(f"crop={big_w}:{big_h}")
+        parts.append(f"zoompan=z='{z}':d=1:x='{x}':y='{y}':s={width}x{height}:fps={fps}")
+    else:
+        parts.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease")
+        parts.append(f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
+
+    # シーンの切り替わりを滑らかにする（黒からのフェードイン／黒へのフェードアウト）
+    fade = min(0.4, max(0.15, seconds * 0.12))
+    parts.append(f"fade=t=in:st=0:d={fade:.2f}")
+    parts.append(f"fade=t=out:st={max(0.0, seconds - fade):.2f}:d={fade:.2f}")
+
+    if subtitle_file and font:
+        parts.append(_subtitle_vf(subtitle_file, font, width, height))
+    parts.append("format=yuv420p")
+    return ",".join(parts)
+
+
 def _fetch_image_bytes(prompt, width=1280, height=720, timeout=60):
     """Pollinations（無料・キー不要）から画像を取得する。失敗時は None。"""
     try:
@@ -178,16 +308,42 @@ def _fetch_image_bytes(prompt, width=1280, height=720, timeout=60):
     return None
 
 
-def _clip_from_image_audio(ff, image_path, audio_path, out_path):
-    """1枚画像＋ナレーション音声から、音声長に合わせた16:9のMP4クリップを作る。"""
+def _audio_seconds(ff, path):
+    """音声の長さ（秒）。取れなければ None。ケン・バーンズの尺算出に使う。"""
+    probe = shutil.which("ffprobe") or (ff.replace("ffmpeg", "ffprobe") if ff else None)
+    if not probe or not os.path.exists(probe):
+        return None
+    try:
+        r = subprocess.run(
+            [probe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            capture_output=True, timeout=30,
+        )
+        return float(r.stdout.decode().strip())
+    except Exception:
+        return None
+
+
+def _clip_from_image_audio(ff, image_path, audio_path, out_path, width=1280, height=720,
+                           subtitle_file=None, font=None, seed=0, motion=True, fps=24):
+    """1枚画像＋ナレーション音声から、音声長に合わせたMP4クリップを作る。
+
+    ケン・バーンズで動かすには尺が必要なので ffprobe で音声長を測る。
+    測れないときは静止画スライドに落として、必ず何かを返せるようにする。
+    """
+    seconds = _audio_seconds(ff, audio_path)
+    if seconds is None or seconds <= 0:
+        seconds, motion = 5.0, False
+    vf = _scene_vf(width, height, seconds, fps, seed, subtitle_file, font, motion)
     cmd = [
         ff, "-y",
-        "-loop", "1", "-i", image_path,
+        "-loop", "1", "-framerate", str(fps), "-i", image_path,
         "-i", audio_path,
-        "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,"
-               "pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-        "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "192k",
+        "-t", f"{seconds:.2f}",
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-pix_fmt", "yuv420p",
+        "-r", str(fps),
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
         "-shortest", "-movflags", "+faststart",
         out_path,
     ]
@@ -195,29 +351,49 @@ def _clip_from_image_audio(ff, image_path, audio_path, out_path):
         r = subprocess.run(cmd, capture_output=True, timeout=600)
         if r.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
             return out_path
+        # 動きや字幕でフィルタが通らなかった場合は、静止画スライドで作り直す
+        if motion or subtitle_file:
+            return _clip_from_image_audio(ff, image_path, audio_path, out_path, width, height,
+                                          subtitle_file=None, font=None, seed=seed,
+                                          motion=False, fps=fps)
     except Exception:
         return None
     return None
 
 
-def render_forge_video(scenes, image_prompt="", out_dir="rendered", lang="ja"):
-    """複数シーン [{"narration": 日本語, "visual": 英語(任意)}] から、
-    各シーンの画像（Pollinations）＋ナレーション（gTTS）を合成し、連結したMP4のパスを返す。
-    FFmpeg/ネットワークが無ければ None（絶対にraiseしない）。"""
+def render_forge_video(scenes, image_prompt="", out_dir="rendered", lang="ja",
+                       aspect="16:9", subtitles=True):
+    """複数シーン [{"narration": 日本語, "visual": 英語(任意)}] から動画を合成する。
+
+    各シーンで Pollinations の画像＋gTTSのナレーションを作り、ケン・バーンズで
+    動かし、字幕（narration）を焼き込んでから連結する。
+    aspect で縦型（Shorts/Reels）にもできる。
+    FFmpeg/ネットワークが無ければ None（絶対にraiseしない）。
+    """
     ff = _ffmpeg()
     if not ff or not scenes:
         return None
+    width, height, _ = VIDEO_ASPECTS.get(aspect) or VIDEO_ASPECTS["16:9"]
     try:
         from gtts import gTTS
         import tempfile, uuid
         work = tempfile.mkdtemp(prefix="forgevid_")
+        # 字幕はフォントと drawtext の両方が揃って初めて焼ける（無ければ字幕なしで続行）
+        font = font_path() if subtitles else None
+        if font and not has_filter("drawtext"):
+            font = None
+        # 1行の文字数は画面寸法から決める（縦型は横幅が狭いので自動的に少なくなる）
+        _fs, per_line, _mg = subtitle_metrics(width, height)
+        motion = (os.environ.get("RENDER_MOTION", "1") != "0")
+
         clips = []
-        for i, sc in enumerate(scenes[:8]):  # 安全のため最大8シーン
+        for i, sc in enumerate(scenes[:MAX_SCENES]):
             narration = (sc.get("narration") or "").strip()
             visual = (sc.get("visual") or image_prompt or narration or "cinematic scene").strip()
             if not narration:
                 narration = visual
-            img = _fetch_image_bytes(f"{image_prompt}, {visual}" if image_prompt else visual)
+            img = _fetch_image_bytes(f"{image_prompt}, {visual}" if image_prompt else visual,
+                                     width=width, height=height)
             if not img:
                 continue
             img_path = os.path.join(work, f"img_{i}.png")
@@ -228,7 +404,20 @@ def render_forge_video(scenes, image_prompt="", out_dir="rendered", lang="ja"):
                 gTTS(text=narration[:500], lang=lang).save(aud_path)
             except Exception:
                 continue
-            clip = _clip_from_image_audio(ff, img_path, aud_path, os.path.join(work, f"clip_{i}.mp4"))
+
+            sub_file = None
+            if font:
+                wrapped = wrap_ja(narration, per_line=per_line)
+                if wrapped:
+                    sub_file = os.path.join(work, f"sub_{i}.txt")
+                    with open(sub_file, "w", encoding="utf-8") as f:
+                        f.write(wrapped)
+
+            clip = _clip_from_image_audio(
+                ff, img_path, aud_path, os.path.join(work, f"clip_{i}.mp4"),
+                width=width, height=height, subtitle_file=sub_file, font=font,
+                seed=i, motion=motion,
+            )
             if clip:
                 clips.append(clip)
         if not clips:

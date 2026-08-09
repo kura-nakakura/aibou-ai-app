@@ -9,8 +9,10 @@
 FROM python:3.11-slim
 
 # ffmpeg（/video の動画合成に必須）。--no-install-recommends で軽量に。
+# fonts-ipafont-gothic は日本語字幕の焼き込み用（約5MB）。
+# これが無いと drawtext が日本語を描けず、字幕が□や空白になる。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-ipafont-gothic \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

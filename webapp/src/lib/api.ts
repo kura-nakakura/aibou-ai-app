@@ -1311,15 +1311,56 @@ export interface VideoScene {
 }
 
 /** POST /video — render an MP4 from image+narration scenes (ffmpeg backend). */
-export async function videoGenerate(scenes: VideoScene[], imagePrompt = ""): Promise<VideoResult> {
+export async function videoGenerate(
+  scenes: VideoScene[],
+  imagePrompt = "",
+  opts?: { aspect?: string; subtitles?: boolean },
+): Promise<VideoResult> {
   const res = await fetch(`${requireApiUrl()}/video`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ scenes, image_prompt: imagePrompt }),
+    body: JSON.stringify({
+      scenes, image_prompt: imagePrompt,
+      aspect: opts?.aspect ?? "16:9",
+      subtitles: opts?.subtitles ?? true,
+    }),
   });
   const data = (await res.json().catch(() => ({}))) as VideoResult;
   if (!res.ok && !data.error) return { error: `Video failed (${res.status})` };
   return data;
+}
+
+export interface VideoAspect { key: string; w: number; h: number; label: string }
+export interface VideoCaps {
+  aspects: VideoAspect[];
+  available: boolean;
+  subtitles_available: boolean;
+}
+
+/** GET /video/aspects — presets + whether ffmpeg and a JP font are present. */
+export async function videoCaps(): Promise<VideoCaps> {
+  const res = await fetch(`${requireApiUrl()}/video/aspects`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Video caps failed (${res.status})`);
+  return (await res.json()) as VideoCaps;
+}
+
+export interface StoryboardResult {
+  ok?: boolean; title?: string; scenes?: VideoScene[]; error?: string;
+}
+
+/** POST /video/storyboard — turn a topic into narration + image prompts. */
+export async function videoStoryboard(opts: {
+  topic: string; n?: number; aspect?: string; tone?: string; style?: string;
+}): Promise<StoryboardResult> {
+  const res = await fetch(`${requireApiUrl()}/video/storyboard`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      topic: opts.topic, n: opts.n ?? 5, aspect: opts.aspect ?? "16:9",
+      tone: opts.tone ?? "friendly", style: opts.style ?? "",
+    }),
+  });
+  return (await res.json().catch(() => ({ error: "絵コンテの生成に失敗しました" }))) as StoryboardResult;
 }
 
 /* ---------------- Autopilot (goal-based autonomous missions) ---------------- */

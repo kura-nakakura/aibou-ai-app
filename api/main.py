@@ -61,6 +61,7 @@ import studio
 import tasks as tasks_module
 import tools
 import vault
+import video_script
 from memory_store import mem_add, mem_recall, mem_recent
 
 async def _scheduler_loop():
@@ -249,6 +250,16 @@ class Scene(BaseModel):
 class VideoRequest(BaseModel):
     scenes: List[Scene]
     image_prompt: Optional[str] = ""
+    aspect: str = "16:9"        # 16:9 / 9:16（Shorts） / 1:1
+    subtitles: bool = True      # ナレーションを字幕として焼き込む
+
+
+class StoryboardRequest(BaseModel):
+    topic: str
+    n: int = 5
+    aspect: str = "16:9"
+    tone: str = "friendly"
+    style: str = ""
 
 
 class ForgeRequest(BaseModel):
@@ -1070,6 +1081,42 @@ async def briefing(_auth: None = Depends(require_auth)):
     return {"text": text}
 
 
+@app.get("/video/aspects")
+async def video_aspects(_auth: None = Depends(require_auth)):
+    """出力比率のプリセットと、この環境で字幕を焼けるかを返す。"""
+    renderer = _load_renderer()
+    presets = [
+        {"key": "16:9", "w": 1280, "h": 720, "label": "横長（YouTube）"},
+        {"key": "9:16", "w": 720, "h": 1280, "label": "縦型（Shorts / Reels / TikTok）"},
+        {"key": "1:1", "w": 1080, "h": 1080, "label": "正方形（Instagramフィード）"},
+    ]
+    available, subs = False, False
+    if renderer is not None:
+        try:
+            available = bool(renderer.is_available())
+            # フォントが無い環境では日本語字幕が焼けない（□になる）ので正直に伝える
+            subs = available and bool(renderer.font_path())
+        except Exception:
+            pass
+        try:
+            presets = [{"key": k, "w": v[0], "h": v[1], "label": v[2]}
+                       for k, v in renderer.VIDEO_ASPECTS.items()]
+        except Exception:
+            pass
+    return {"aspects": presets, "available": available, "subtitles_available": subs}
+
+
+@app.post("/video/storyboard")
+async def video_storyboard(req: StoryboardRequest, _auth: None = Depends(require_auth)):
+    """テーマから絵コンテ（シーン割り＋ナレーション＋画のプロンプト）を作る。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: video_script.storyboard(req.topic, req.n, req.aspect, req.tone, req.style))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
 @app.post("/video")
 async def video(req: VideoRequest, _auth: None = Depends(require_auth)):
     """絵コンテ(scenes)から動画を生成する。リポジトリ root の renderer.py を再利用する。
@@ -1091,7 +1138,8 @@ async def video(req: VideoRequest, _auth: None = Depends(require_auth)):
     try:
         loop = asyncio.get_event_loop()
         path = await loop.run_in_executor(
-            None, lambda: renderer.render_forge_video(scenes, image_prompt)
+            None, lambda: renderer.render_forge_video(
+                scenes, image_prompt, aspect=req.aspect, subtitles=req.subtitles)
         )
     except Exception:
         path = None
