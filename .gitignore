@@ -8,3 +8,6 @@ rendered/
 system_stats.json
 forge_apps/
 backups/
+# Playwright のテスト出力（ローカル生成物）
+test-results/
+playwright-report/

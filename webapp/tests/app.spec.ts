@@ -284,6 +284,35 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── ⑧ CODE: run + test in a browser sandbox (works offline) ── */
+test("CODE can run the workspace and execute tests in the sandbox", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "CODE");
+  // Webスターターでワークスペースを用意
+  await page.getByText("WEBアプリ (index.html)").click();
+  await expect(page.getByText("index.html").first()).toBeVisible({ timeout: 8_000 });
+
+  // 実行 → CONSOLE パネルが開く
+  await page.getByRole("button", { name: /▶ 実行/ }).click();
+  await expect(page.getByText(/CONSOLE/)).toBeVisible({ timeout: 8_000 });
+
+  // *.test.js を足すとテストが実行できるようになる
+  const testBtn = page.getByRole("button", { name: /✓ テスト/ });
+  await expect(testBtn).toBeDisabled();
+  page.once("dialog", (d) => void d.accept("calc.test.js"));
+  await page.getByLabel("Add file").click();
+  await page.locator('textarea[aria-label^="Edit"]').fill(
+    'test("通る", function(){ expect(1+1).toBe(2); });\n'
+    + 'test("落ちる", function(){ expect(1+1).toBe(3); });',
+  );
+  await expect(testBtn).toBeEnabled();
+  await testBtn.click();
+  // 本当に実行され、成功/失敗が出る
+  await expect(page.getByText(/1\/2 成功/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/期待 3 \/ 実際 2/)).toBeVisible();
+});
+
 /* ⑦ VAULT の資料取り込み（PDFはサーバー抽出）・出典表示・資料削除は、
    ノートブックが1つ以上ある状態でしか画面に出ない＝バックエンド接続が前提。
    この offline スイートでは到達できないため、モックバックエンドを使った

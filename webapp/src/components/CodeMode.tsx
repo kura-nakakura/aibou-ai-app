@@ -14,6 +14,10 @@ import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { codeGenerateStream, ghRepos, ghImport, ghPush, API_URL, type CodeFile, type ChatTurn, type GhRepo, type CodeGenerateResult } from "@/lib/api";
 import Markdown from "@/components/Markdown";
+import {
+  buildRunDoc, buildTestDoc, testFiles, RUN_SANDBOX, RUN_CHANNEL,
+  type ConsoleLine, type TestSummary,
+} from "@/lib/runner";
 
 const LS_WORKSPACES = "forge_code_workspaces";
 const WS_LIMIT = 12;
@@ -107,6 +111,16 @@ export default function CodeMode() {
   const [undoSnap, setUndoSnap] = useState<CodeFile[] | null>(null);
   const [preview, setPreview] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 実行（CONSOLE / TESTS）— サンドボックスiframe内で本当に動かす
+  const [runTab, setRunTab] = useState<"console" | "tests" | null>(null);
+  const [logs, setLogs] = useState<ConsoleLine[]>([]);
+  const [tests, setTests] = useState<TestSummary | null>(null);
+  const [running, setRunning] = useState(false);
+  // プレビュー用とテスト用で別のiframeを持つ（1つのrefを共有すると、
+  // 後にマウントされた方だけが有効になり、もう片方のログを取り落とす）
+  const previewFrame = useRef<HTMLIFrameElement | null>(null);
+  const testFrame = useRef<HTMLIFrameElement | null>(null);
+  const [runNonce, setRunNonce] = useState(0);
   const logRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   useEffect(() => () => cancelRef.current?.(), []);
@@ -210,6 +224,58 @@ export default function CodeMode() {
     [ws, selected],
   );
   const isHtml = !!selectedFile && /\.html?$/i.test(selectedFile.path);
+  const hasTests = useMemo(() => testFiles(ws?.files ?? []).length > 0, [ws?.files]);
+  const htmlEntry = useMemo(
+    () => (selectedFile && isHtml ? selectedFile.path
+      : ws?.files.find((f) => /(^|\/)index\.html?$/i.test(f.path))?.path
+        ?? ws?.files.find((f) => /\.html?$/i.test(f.path))?.path ?? null),
+    [selectedFile, isHtml, ws?.files],
+  );
+
+  /* ── 実行（サンドボックスiframe） ──────────────────────────────
+     サーバーで他人のコードを走らせるのは危険なので、実行はブラウザ内で行う。
+     allow-scripts のみ・allow-same-origin なしなので、親のDOMや
+     localStorage（＝APIキー）には触れられない。 */
+  useEffect(() => {
+    const onMsg = (e: globalThis.MessageEvent) => {
+      const m = e.data as { channel?: string; type?: string; level?: ConsoleLine["level"]; text?: string; summary?: TestSummary };
+      if (!m || m.channel !== RUN_CHANNEL) return;
+      // 自分が作った実行用iframeからのメッセージだけを受け取る
+      const mine = [previewFrame.current?.contentWindow, testFrame.current?.contentWindow];
+      if (!mine.some((w) => w && e.source === w)) return;
+      if (m.type === "log") {
+        setLogs((prev) => [...prev, { level: m.level ?? "log", text: m.text ?? "" }].slice(-200));
+      } else if (m.type === "tests" && m.summary) {
+        setTests(m.summary);
+        setRunning(false);
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  /** プレビュー（HTML）を実行し直す。同一ワークスペースのCSS/JSも埋め込む。 */
+  const runPreview = () => {
+    if (!ws || !htmlEntry) return;
+    setLogs([]);
+    setRunTab("console");
+    setPreview(true);
+    setSelected(htmlEntry);
+    // srcDoc の差し替えは iframe の key を変えて確実に再実行させる
+    setRunNonce((n) => n + 1);
+  };
+
+  /** *.test.js を実行する。 */
+  const runTests = () => {
+    if (!ws || !hasTests) return;
+    setLogs([]);
+    setTests(null);
+    setRunning(true);
+    setRunTab("tests");
+    setRunNonce((n) => n + 1);
+    // 応答が来ない場合に押しっぱなしにならないよう保険をかける
+    window.setTimeout(() => setRunning(false), 15_000);
+  };
 
   // ログは常に最新へ
   useEffect(() => {
@@ -619,6 +685,17 @@ export default function CodeMode() {
               ))}
             </div>
           )}
+          {/* 実行 — ブラウザのサンドボックス内で本当に動かす */}
+          <button type="button" onClick={runPreview} disabled={!htmlEntry}
+            title={htmlEntry ? `${htmlEntry} を実行` : "HTMLファイルがありません"}
+            className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-fg-strong disabled:opacity-40 label-mono">
+            ▶ 実行
+          </button>
+          <button type="button" onClick={runTests} disabled={!hasTests || running}
+            title={hasTests ? "*.test.js を実行" : "テストファイル（*.test.js）がありません"}
+            className="rounded-forge border border-panel px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-muted transition hover:text-fg-strong disabled:opacity-40 label-mono">
+            {running ? "…" : "✓ テスト"}
+          </button>
           <div className="flex-1" />
           {undoSnap && (
             <button type="button" onClick={undo} className="rounded-forge border border-[#ffd06044] px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-[#ffd060] label-mono">
@@ -669,9 +746,12 @@ export default function CodeMode() {
               </div>
             ) : preview && isHtml ? (
               <iframe
+                key={`prev-${htmlEntry}-${runNonce}`}
+                ref={previewFrame}
                 title="preview"
-                sandbox="allow-scripts"
-                srcDoc={selectedFile.content}
+                /* allow-same-origin は付けない（親のデータを守るため） */
+                sandbox={RUN_SANDBOX}
+                srcDoc={buildRunDoc(ws.files, selectedFile.path)}
                 className="h-full w-full flex-1 border-0 bg-white"
               />
             ) : (
@@ -686,6 +766,83 @@ export default function CodeMode() {
             )}
           </div>
         </div>
+
+        {/* 実行結果 — CONSOLE / TESTS */}
+        {runTab && (
+          <div className="flex max-h-56 min-h-0 flex-col overflow-hidden rounded-forge border border-panel bg-black/30">
+            <div className="flex items-center gap-1.5 border-b border-panel px-2 py-1">
+              {(["console", "tests"] as const).map((t) => (
+                <button key={t} type="button" onClick={() => setRunTab(t)}
+                  className="rounded px-2 py-0.5 text-[9px] tracking-[0.14em] label-mono"
+                  style={{
+                    background: runTab === t ? "var(--btn-bg)" : "transparent",
+                    color: runTab === t ? "var(--fg-strong)" : "var(--muted)",
+                  }}>
+                  {t === "console" ? `⌗ CONSOLE${logs.length ? ` (${logs.length})` : ""}` : "✓ TESTS"}
+                </button>
+              ))}
+              {tests && (
+                <span className="text-[9px] label-mono"
+                  style={{ color: tests.failed ? "#ff9b9b" : "#60d394" }}>
+                  {tests.passed}/{tests.total} 成功{tests.failed ? ` · ${tests.failed} 失敗` : ""}
+                </span>
+              )}
+              <div className="flex-1" />
+              <button type="button" onClick={() => { setLogs([]); setTests(null); }}
+                className="text-[9px] text-muted transition hover:text-fg-strong label-mono">クリア</button>
+              <button type="button" onClick={() => setRunTab(null)} aria-label="実行結果を閉じる"
+                className="px-1 text-[10px] text-muted transition hover:text-fg-strong">✕</button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
+              {runTab === "console" ? (
+                logs.length === 0 ? (
+                  <p className="text-[10px] text-muted">
+                    console.log / エラーがここに出ます（▶ 実行 で開始）
+                  </p>
+                ) : logs.map((l, i) => (
+                  <div key={i} className="whitespace-pre-wrap"
+                    style={{ color: l.level === "error" ? "#ff9b9b" : l.level === "warn" ? "#ffcf8b" : "var(--fg)" }}>
+                    <span className="mr-1.5 text-muted">{l.level === "error" ? "✕" : l.level === "warn" ? "!" : "›"}</span>
+                    {l.text}
+                  </div>
+                ))
+              ) : running ? (
+                <p className="text-[10px] text-muted">実行中…</p>
+              ) : !tests ? (
+                <p className="text-[10px] text-muted">
+                  {hasTests ? "「✓ テスト」を押すと実行します" : "*.test.js を作るとテストを実行できます"}
+                </p>
+              ) : tests.total === 0 ? (
+                <p className="text-[10px] text-muted">テストが見つかりませんでした</p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {tests.cases.map((c, i) => (
+                    <div key={i} className="flex items-start gap-1.5">
+                      <span style={{ color: c.ok ? "#60d394" : "#ff9b9b" }}>{c.ok ? "✓" : "✕"}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-fg">{c.name} <span className="text-muted">{c.ms}ms</span></div>
+                        {c.error && <div className="whitespace-pre-wrap text-[10px] text-[#ff9b9b]">{c.error}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* テスト実行用の隠しiframe（画面には出さない） */}
+        {runTab === "tests" && ws && (
+          <iframe
+            key={`tests-${runNonce}`}
+            ref={testFrame}
+            title="tests"
+            sandbox={RUN_SANDBOX}
+            srcDoc={buildTestDoc(ws.files)}
+            className="hidden"
+          />
+        )}
       </div>
     </div>
   );
