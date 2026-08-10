@@ -118,6 +118,20 @@ export default function Autopilot() {
     <div className="grid h-full min-h-0 gap-3 overflow-y-auto pb-2 lg:grid-cols-[24rem_1fr] lg:content-start">
       {/* ── Left: create mission ── */}
       <div className="flex flex-col gap-3">
+      {/* このモードが何なのか、他の2つ（ワークフロー/自動化）と何が違うのかを
+          最初に説明する。3つとも「手順を並べて実行する」ので迷いやすい。 */}
+      <div className="panel p-3">
+        <div className="mb-1.5 text-[10px] tracking-[0.2em] text-muted label-mono">AUTOPILOT とは</div>
+        <p className="text-[11px] leading-relaxed text-fg">
+          <span className="text-fg-strong">ゴールだけ決めて、手順はAIに考えさせる</span>ためのモードです。
+          「何をすればいいか分からない」ことに向いています。
+        </p>
+        <div className="mt-2 flex flex-col gap-1 border-t border-panel pt-2 text-[10px] leading-relaxed text-muted">
+          <div>▸ 手順が決まっている作業を繰り返したい → <span className="text-fg">STUDIO の WORKFLOW</span></div>
+          <div>▸ きっかけ（トリガー）から動かしたい → <span className="text-fg">BOARD の AUTOMATION</span></div>
+          <div className="text-muted/70">※ どれも同じ実行エンジンなので、担当AI・根拠資料・条件分岐は共通で使えます。</div>
+        </div>
+      </div>
       <div className="panel p-3">
         <div className="mb-1.5 text-[10px] tracking-[0.2em] text-muted label-mono">NEW MISSION — ゴールを設定</div>
         <textarea

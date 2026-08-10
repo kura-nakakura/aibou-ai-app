@@ -1461,6 +1461,11 @@ export interface AutomationStep {
   type: StepType;
   name?: string;
   params?: Record<string, string>;
+  // AI STUDIO のワークフローと共通の拡張（未指定なら従来どおり動く）
+  prompt?: string;
+  ai_id?: string;
+  notebook_id?: string;
+  when?: string;
 }
 
 export interface Automation {
@@ -1476,8 +1481,15 @@ export interface Automation {
 export interface AutomationRunResult {
   automation_id: string;
   name: string;
-  results: Array<{ step: number; name: string; type: string; ok: boolean; output: string; error?: string }>;
+  // AI STUDIO のワークフローと同じ実行エンジンなので trace の形も共通
+  results: Array<{
+    step: number; name: string; type: string; ok: boolean; output: string;
+    error?: string; skipped?: boolean; reason?: string; ai?: string;
+    knowledge?: string; warning?: string;
+  }>;
   final_output: string;
+  ran?: number;
+  skipped?: number;
 }
 
 export async function automationsList(): Promise<Automation[]> {

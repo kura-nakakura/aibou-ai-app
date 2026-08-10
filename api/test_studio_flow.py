@@ -1,4 +1,7 @@
-# test_studio_flow.py — ⑤ AI STUDIO（ナレッジ連携・分岐・カスタムAI適用）
+# test_studio_flow.py — ⑤ AI STUDIO / ⑥ 共通フローエンジン
+#
+# 実行部分は flow_engine に1本化してあり、AI STUDIO のワークフローと
+# BOARD の自動化の両方がこれを使う。
 #
 # ワークフローのステップが
 #   ・担当のカスタムAIの人格/ルールを実際に使うか
@@ -9,6 +12,8 @@
 
 from fastapi.testclient import TestClient
 
+import automations
+import flow_engine
 import studio
 from main import app
 
@@ -32,19 +37,19 @@ def _capture(monkeypatch, answers=None):
         seen.append(prompt)
         return seq.pop(0) if seq else f"OUT{len(seen)}"
 
-    monkeypatch.setattr(studio.llm, "generate_text", fake)
+    monkeypatch.setattr(flow_engine.llm, "generate_text", fake)
     return seen
 
 
 # ── プレースホルダー ─────────────────────────────────────────────────
 def test_fill_supports_input_original_and_step_refs():
-    out = studio._fill("A={input} B={original} C={step1} D={step2}",
+    out = flow_engine.fill("A={input} B={original} C={step1} D={step2}",
                        "最初", "直前", ["一番目", "二番目"])
     assert out == "A=直前 B=最初 C=一番目 D=二番目"
 
 
 def test_fill_ignores_out_of_range_step_refs():
-    assert studio._fill("x={step9}", "o", "c", ["a"]) == "x="
+    assert flow_engine.fill("x={step9}", "o", "c", ["a"]) == "x="
 
 
 # ── カスタムAIの適用 ─────────────────────────────────────────────────
@@ -164,7 +169,7 @@ def test_condition_error_runs_step(monkeypatch):
             raise RuntimeError("boom")
         return "出力"
 
-    monkeypatch.setattr(studio.llm, "generate_text", flaky)
+    monkeypatch.setattr(flow_engine.llm, "generate_text", flaky)
     res = studio.run_workflow(wf["id"], "")
     assert res["results"][0]["skipped"] is False
     assert "判定できなかった" in res["results"][0]["reason"]
@@ -199,7 +204,12 @@ def test_run_validation():
     assert studio.run_workflow(wf["id"]).get("error") == "no steps defined"
 
 
-def test_step_failure_does_not_stop_the_workflow(monkeypatch):
+def test_generation_failure_stops_the_flow(monkeypatch):
+    """生成が失敗したら以降は続けない。
+
+    エラー文字列を {input} として次に渡すと、意味のない出力を作りながら
+    APIを消費してしまう。失敗した行に error を残して止めるほうが分かりやすい。
+    """
     _reset()
     wf = studio.create_workflow("w", [{"prompt": "壊れる"}, {"prompt": "続く: {input}"}])
     calls = {"n": 0}
@@ -210,10 +220,12 @@ def test_step_failure_does_not_stop_the_workflow(monkeypatch):
             raise RuntimeError("model down")
         return "2番目は動いた"
 
-    monkeypatch.setattr(studio.llm, "generate_text", flaky)
+    monkeypatch.setattr(flow_engine.llm, "generate_text", flaky)
     res = studio.run_workflow(wf["id"], "")
-    assert "[error:" in res["results"][0]["output"]
-    assert res["results"][1]["output"] == "2番目は動いた"
+    assert res["results"][0]["ok"] is False
+    assert "model down" in res["results"][0]["error"]
+    assert len(res["results"]) == 1      # 2番目は実行しない
+    assert calls["n"] == 1
 
 
 def test_steps_are_capped(monkeypatch):
@@ -221,7 +233,7 @@ def test_steps_are_capped(monkeypatch):
     wf = studio.create_workflow("w", [{"prompt": f"s{i}"} for i in range(40)])
     _capture(monkeypatch)
     res = studio.run_workflow(wf["id"], "")
-    assert len(res["results"]) == studio.MAX_STEPS
+    assert len(res["results"]) == flow_engine.MAX_STEPS
 
 
 # ── エンドポイント ───────────────────────────────────────────────────
@@ -238,3 +250,89 @@ def test_workflow_endpoint_round_trip(monkeypatch):
     assert r.status_code == 200
     d = r.json()
     assert d["ran"] == 1 and d["results"][0]["ai"] == "要約AI"
+
+
+# ── ⑥ 自動化とワークフローが同じエンジンを使う ───────────────────────
+def test_automation_steps_can_use_ai_knowledge_and_conditions(monkeypatch):
+    """BOARDの自動化でも担当AI・根拠資料・実行条件が効く（同じ実装だから）。"""
+    _reset()
+    automations._mem_flows.clear()
+    import vault
+    monkeypatch.setattr(vault, "_load_context", lambda nb: ("## 規則\n有給は20日", None))
+    ai = studio.create_ai("窓口さん", persona="丁寧に案内します。", rules="敬体で書く")
+    flow = automations.create_flow("問い合わせ自動化", steps=[
+        {"type": "ai_generate", "name": "回答", "params": {"prompt": "答えて: {input}"},
+         "ai_id": ai["id"], "notebook_id": "nb1"},
+        {"type": "ai_generate", "name": "苦情対応", "params": {"prompt": "謝罪"},
+         "when": "苦情である"},
+    ])
+    # 拡張フィールドが保存されている
+    assert flow["steps"][0]["ai_id"] == ai["id"]
+    assert flow["steps"][0]["notebook_id"] == "nb1"
+    assert flow["steps"][1]["when"] == "苦情である"
+
+    seen = _capture(monkeypatch, ["案内文", "NO"])
+    res = automations.run_flow(flow["id"], "有給は何日?")
+    p = seen[0]
+    assert "あなたは「窓口さん」です。丁寧に案内します。" in p
+    assert "有給は20日" in p
+    rows = res["results"]
+    assert rows[0]["ai"] == "窓口さん" and rows[0]["knowledge"] == "nb1"
+    assert rows[1]["skipped"] is True and res["ran"] == 1 and res["skipped"] == 1
+
+
+def test_plain_automation_still_works_without_the_new_fields(monkeypatch):
+    """従来の単純な自動化（params だけ）がそのまま動く。"""
+    _reset()
+    automations._mem_flows.clear()
+    sent = {}
+    made = {}
+    monkeypatch.setattr(flow_engine, "_act_notify",
+                        lambda text: (sent.update(text=text), {"ok": True})[1])
+    monkeypatch.setattr(flow_engine, "_act_create_task",
+                        lambda t, c: (made.update(title=t), {"ok": True})[1])
+    flow = automations.create_flow("朝の要約", steps=[
+        {"type": "ai_generate", "name": "要約", "params": {"prompt": "要約: {input}"}},
+        {"type": "notify", "name": "通知", "params": {"message": "できました: {input}"}},
+        {"type": "create_task", "name": "タスク", "params": {"title": "確認: {input}"}},
+    ])
+    _capture(monkeypatch, ["きょうの要約"])
+    res = automations.run_flow(flow["id"], "元ネタ")
+    assert [r["type"] for r in res["results"]] == ["ai_generate", "notify", "create_task"]
+    assert all(r["ok"] for r in res["results"])
+    # 通知とタスクにも生成結果が差し込まれる
+    assert sent["text"] == "できました: きょうの要約"
+    assert made["title"] == "確認: きょうの要約"
+    # 通知やタスクは流れを変えない（最終出力は生成結果のまま）
+    assert res["final_output"] == "きょうの要約"
+
+
+def test_action_step_failure_does_not_stop_the_flow(monkeypatch):
+    """通知が失敗しても後続は続ける（生成と違い、流れは壊れない）。"""
+    _reset()
+    automations._mem_flows.clear()
+    monkeypatch.setattr(flow_engine, "_act_notify",
+                        lambda text: {"ok": False, "error": "LINE未設定"})
+    flow = automations.create_flow("f", steps=[
+        {"type": "notify", "params": {"message": "しらせる"}},
+        {"type": "ai_generate", "params": {"prompt": "つづき"}},
+    ])
+    _capture(monkeypatch, ["生成できた"])
+    res = automations.run_flow(flow["id"], "")
+    assert res["results"][0]["ok"] is False and "LINE未設定" in res["results"][0]["error"]
+    assert res["results"][1]["ok"] is True and res["final_output"] == "生成できた"
+
+
+def test_unknown_step_type_is_rejected_at_creation():
+    automations._mem_flows.clear()
+    flow = automations.create_flow("f", steps=[
+        {"type": "launch_missiles", "params": {}},
+        {"type": "notify", "params": {"message": "ok"}},
+    ])
+    assert [s["type"] for s in flow["steps"]] == ["notify"]
+
+
+def test_step_types_are_shared_between_modules():
+    """種別定義が1か所に集まっていること（片方だけ増えてずれないように）。"""
+    assert automations.STEP_TYPES == list(flow_engine.STEP_TYPES)
+    assert studio.MAX_STEPS == flow_engine.MAX_STEPS

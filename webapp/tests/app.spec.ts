@@ -284,6 +284,18 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── ⑥ AUTO mode explains itself and points at the other two builders ── */
+test("AUTO mode explains what AUTOPILOT is and when to use the others", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "AUTO");
+  await expect(page.getByText("AUTOPILOT とは")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/ゴールだけ決めて/)).toBeVisible();
+  // 3つの「手順を並べる」機能の使い分けを示す
+  await expect(page.getByText(/STUDIO の WORKFLOW/)).toBeVisible();
+  await expect(page.getByText(/BOARD の AUTOMATION/)).toBeVisible();
+});
+
 /* ── ⑤ AI STUDIO: per-step AI / knowledge / condition (ui-r41) ── */
 test("AI STUDIO workflow steps can be assigned an AI, knowledge and a condition", async ({ page }) => {
   await page.goto("/");

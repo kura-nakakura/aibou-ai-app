@@ -402,12 +402,20 @@ function FlowCard({ flow, onDelete }: { flow: Automation; onDelete: () => void }
       {result && (
         <div className="mt-2 flex flex-col gap-1">
           {result.results.map((r) => (
-            <div key={r.step} className="rounded-forge border border-panel p-2">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[9px] label-mono" style={{ color: r.ok ? "#60d394" : "#ff6b6b" }}>{r.ok ? "✓" : "✕"}</span>
+            <div key={r.step} className="rounded-forge border border-panel p-2" style={{ opacity: r.skipped ? 0.55 : 1 }}>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[9px] label-mono" style={{ color: r.skipped ? "var(--muted)" : r.ok ? "#60d394" : "#ff6b6b" }}>
+                  {r.skipped ? "–" : r.ok ? "✓" : "✕"}
+                </span>
                 <span className="text-[10px] tracking-[0.12em] text-muted label-mono">{r.name}</span>
+                {/* 担当AI・根拠資料・分岐は AI STUDIO のワークフローと共通の機能 */}
+                {r.ai && <span className="rounded-full border border-panel px-1.5 text-[9px] text-muted label-mono">◇ {r.ai}</span>}
+                {r.knowledge && <span className="rounded-full border border-panel px-1.5 text-[9px] text-muted label-mono">▤ 資料あり</span>}
+                {r.skipped && <span className="rounded-full border border-panel px-1.5 text-[9px] text-muted label-mono">スキップ</span>}
               </div>
-              {r.output && <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-fg">{r.output.slice(0, 600)}</p>}
+              {r.reason && <p className="mt-1 text-[10px] text-muted">{r.reason}</p>}
+              {r.warning && <p className="mt-1 text-[10px] text-[#ffcf8b]">⚠ {r.warning}</p>}
+              {!r.skipped && r.output && <p className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-fg">{r.output.slice(0, 600)}</p>}
               {r.error && <p className="mt-1 text-[10px] text-[#ff9b9b]">{r.error}</p>}
             </div>
           ))}

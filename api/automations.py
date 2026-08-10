@@ -6,9 +6,12 @@ api/automations.py — ノーコード自動化（Zapier風フロー）のエン
 （cron/Webhook 連携で）自動実行する。
 
 ステップ種別:
-  - ai_generate : Gemini でテキスト生成（params.prompt 内の {input} を置換）
-  - notify      : LINE/Discord/Slack へ通知（params.message 内の {input} を置換）
-  - create_task : Active Tasks にタスクを作成（params.title）
+  - ai_generate : テキスト生成（{input} 等を置換）
+  - notify      : LINE/Discord/Slack へ通知
+  - create_task : Active Tasks にタスクを作成
+
+実行は flow_engine に集約している（AI STUDIO のワークフローと同じ1実装）。
+そのため自動化のステップでも、担当AI（人格）・根拠資料（VAULT）・実行条件が使える。
 
 ストレージは Supabase `automations`、未設定ならメモリにフォールバック（crashしない）。
 """
@@ -17,12 +20,12 @@ import uuid
 from typing import List, Optional
 
 import config
-import notify
-import tasks as tasks_module
+import flow_engine
 
 _mem_flows: List[dict] = []
 
-STEP_TYPES = ["ai_generate", "notify", "create_task"]
+# 種別は flow_engine と共通（片方だけ増えてずれないように参照する）
+STEP_TYPES = list(flow_engine.STEP_TYPES)
 
 
 def _persist(flow: dict) -> None:
@@ -76,13 +79,20 @@ def create_flow(name: str, trigger: Optional[dict] = None, steps: Optional[list]
         st = (s.get("type") or "").strip()
         if st not in STEP_TYPES:
             continue
-        norm_steps.append({
+        norm = {
             "id": str(uuid.uuid4()),
             "n": i,
             "type": st,
             "name": (s.get("name") or st).strip(),
             "params": s.get("params") or {},
-        })
+        }
+        # AI STUDIO と同じ拡張（担当AI・根拠資料・実行条件）も保存する。
+        # 指定が無ければ従来どおりの単純な自動化として動く。
+        for k in ("prompt", "ai_id", "notebook_id", "when"):
+            v = s.get(k)
+            if v:
+                norm[k] = v
+        norm_steps.append(norm)
     flow = {
         "id": str(uuid.uuid4()),
         "name": name,
@@ -109,39 +119,26 @@ def delete_flow(flow_id: str) -> dict:
     return {"ok": True}
 
 
-def _run_step(step: dict, current_input: str) -> dict:
-    """1ステップを実行し {output, ok, error?} を返す。絶対に raise しない。"""
-    st = step.get("type")
-    params = step.get("params") or {}
-
-    if st == "ai_generate":
-        model = config.get_gemini_model()
-        if model is None:
-            return {"ok": False, "error": "GEMINI_API_KEY is not configured", "output": ""}
-        prompt = (params.get("prompt") or "{input}").replace("{input}", current_input or "")
-        try:
-            resp = model.generate_content(prompt)
-            return {"ok": True, "output": getattr(resp, "text", "") or ""}
-        except Exception as e:
-            return {"ok": False, "error": f"ai_generate failed: {e}", "output": ""}
-
-    if st == "notify":
-        msg = (params.get("message") or "{input}").replace("{input}", current_input or "")
-        res = notify.notify_all(msg)
-        return {"ok": bool(res.get("ok")), "output": current_input, "notify": res}
-
-    if st == "create_task":
-        title = (params.get("title") or current_input or "Automation task").strip()
-        content = (params.get("content") or current_input or "")
-        task = tasks_module.create_task(title, content, "pending")
-        return {"ok": not (isinstance(task, dict) and task.get("error")),
-                "output": current_input, "task": task}
-
-    return {"ok": False, "error": f"unknown step type: {st}", "output": current_input}
+def _resolve_ai(ai_id: str):
+    """ステップに担当AIが指定されていれば AI STUDIO のカスタムAIを引く。"""
+    if not ai_id:
+        return None
+    try:
+        import studio
+        for a in studio.list_ais():
+            if a.get("id") == ai_id:
+                return a
+    except Exception:
+        pass
+    return None
 
 
 def run_flow(flow_id: str, input_text: str = "") -> dict:
-    """フローのステップを順に実行する。各ステップの結果と最終出力を返す。"""
+    """フローのステップを順に実行する。
+
+    実行そのものは flow_engine（AI STUDIOのワークフローと共通の1実装）に任せる。
+    これにより自動化のステップでも担当AI・根拠資料・実行条件が使える。
+    """
     flow = get_flow(flow_id)
     if not flow:
         return {"error": "automation not found"}
@@ -149,31 +146,15 @@ def run_flow(flow_id: str, input_text: str = "") -> dict:
     if not steps:
         return {"error": "automation has no steps"}
 
-    results = []
-    current = input_text or ""
-    for step in steps:
-        r = _run_step(step, current)
-        results.append({
-            "step": step.get("n"),
-            "name": step.get("name"),
-            "type": step.get("type"),
-            "ok": r.get("ok"),
-            "output": r.get("output", ""),
-            "error": r.get("error"),
-        })
-        # ai_generate の出力は次ステップへ受け渡す
-        if step.get("type") == "ai_generate" and r.get("ok"):
-            current = r.get("output", "")
-        if not r.get("ok") and step.get("type") == "ai_generate":
-            # 生成系が失敗したら以降は中断（通知系は続けない）
-            break
+    run = flow_engine.run_steps(steps, input_text, resolve_ai=_resolve_ai)
 
     flow["status"] = "ran"
-    flow.setdefault("log", []).append(f"実行: {len(results)} ステップ")
+    skipped = run.get("skipped") or 0
+    flow.setdefault("log", []).append(
+        f"実行: {run.get('ran', 0)} ステップ" + (f"（スキップ {skipped}）" if skipped else ""))
     _persist(flow)
     return {
         "automation_id": flow_id,
         "name": flow.get("name"),
-        "results": results,
-        "final_output": current,
+        **run,
     }
