@@ -15,7 +15,12 @@ import {
   vaultQuery,
   vaultGenerateDoc,
   vaultGenerateDiagram,
+  vaultUpload,
+  vaultDocs,
+  vaultDocDelete,
   type VaultNotebook,
+  type VaultDoc,
+  type VaultAnswer,
 } from "@/lib/api";
 import Markdown from "@/components/Markdown";
 
@@ -35,11 +40,13 @@ export default function Vault() {
   const [adding, setAdding] = useState(false);
   const [addedNote, setAddedNote] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [note, setNote] = useState<string | null>(null);   // 取り込み結果の通知
+  const [docs, setDocs] = useState<VaultDoc[]>([]);        // 出典番号つきの資料一覧
 
   // query
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
-  const [answer, setAnswer] = useState<string | null>(null);
+  const [answer, setAnswer] = useState<VaultAnswer | null>(null);
 
   // create doc / diagram from the notebook
   const [genInstruction, setGenInstruction] = useState("");
@@ -98,6 +105,7 @@ export default function Vault() {
         setDocContent("");
         setAddedNote("資料を取り込みました。");
         await refresh();
+        await loadDocs(selectedId);
       } else {
         setError("資料の取り込みに失敗しました");
       }
@@ -108,25 +116,80 @@ export default function Vault() {
     }
   };
 
+  /** 資料一覧（出典番号つき）を読み込む。失敗しても画面は動かす。 */
+  const loadDocs = useCallback(async (nbId: string | null) => {
+    if (!nbId) { setDocs([]); return; }
+    try { setDocs(await vaultDocs(nbId)); } catch { setDocs([]); }
+  }, []);
+
+  useEffect(() => { void loadDocs(selectedId); }, [selectedId, loadDocs]);
+
+  /** 資料を1件消す（間違って入れた資料が根拠に混ざり続けないように）。 */
+  const removeDoc = async (title: string) => {
+    if (!selectedId) return;
+    if (!window.confirm(`資料「${title}」を削除しますか？`)) return;
+    if (await vaultDocDelete(selectedId, title)) {
+      setNote(`✓ 「${title}」を削除しました`);
+      // 削除すると出典番号が振り直されるので、表示中の回答の [1][2] は
+      // もう別の資料を指してしまう。嘘の出典を残さないよう回答を消す。
+      setAnswer(null);
+      await loadDocs(selectedId);
+      await refresh();
+    } else {
+      setError("資料の削除に失敗しました");
+    }
+  };
+
   const handleFileDrop = (e: React.DragEvent | React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
     setDragOver(false);
     const files = "dataTransfer" in e ? e.dataTransfer.files : (e.target as HTMLInputElement).files;
     if (!files?.length) return;
-    const list = Array.from(files);
-    // Read ALL files; a multi-drop merges into one source with per-file
-    // headers (previously only the last file survived, silently).
-    void Promise.all(
-      list.map(
-        (file) =>
-          new Promise<{ name: string; text: string }>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (ev) => resolve({ name: file.name, text: String(ev.target?.result || "") });
-            reader.onerror = () => resolve({ name: file.name, text: "" });
-            reader.readAsText(file, "utf-8");
-          }),
-      ),
-    ).then((docs) => {
+    void ingestFiles(Array.from(files));
+  };
+
+  /**
+   * ファイルを資料として取り込む。
+   *
+   * PDF はブラウザで readAsText すると中身がバイナリのまま入って文字化けする
+   * （以前はそうなっていた）。サーバーの /vault/upload に渡して pypdf で
+   * 抽出させ、テキスト系だけローカル読みの速い経路に載せる。
+   */
+  const ingestFiles = async (list: File[]) => {
+    if (!selectedId) { setError("先にノートブックを選んでください"); return; }
+    const isTextLike = (f: File) =>
+      /^text\//.test(f.type) || /\.(txt|md|markdown|csv|json|ya?ml|tsv|log|py|ts|tsx|js|jsx|html|css)$/i.test(f.name);
+
+    const needServer = list.filter((f) => !isTextLike(f));
+    const local = list.filter(isTextLike);
+
+    // PDF等はサーバーで抽出して、そのまま資料として登録する
+    if (needServer.length) {
+      setAdding(true);
+      setError(null);
+      try {
+        for (const f of needServer) {
+          const r = await vaultUpload(selectedId, f);
+          if (r.error) setError(r.error);
+          else setNote(`✓ ${f.name} を取り込みました（${(r.chars ?? 0).toLocaleString()}字）`);
+        }
+        await refresh();
+        await loadDocs(selectedId);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "取り込みに失敗しました");
+      } finally {
+        setAdding(false);
+      }
+    }
+
+    // テキスト系はフォームに読み込んで、内容を確認してから登録できるようにする
+    if (local.length) {
+      const docs = await Promise.all(local.map((file) => new Promise<{ name: string; text: string }>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve({ name: file.name, text: String(ev.target?.result || "") });
+        reader.onerror = () => resolve({ name: file.name, text: "" });
+        reader.readAsText(file, "utf-8");
+      })));
       if (docs.length === 1) {
         setDocTitle(docs[0].name.replace(/\.[^.]+$/, ""));
         setDocContent(docs[0].text);
@@ -134,7 +197,7 @@ export default function Vault() {
         setDocTitle(`${docs[0].name.replace(/\.[^.]+$/, "")} ほか${docs.length - 1}件`);
         setDocContent(docs.map((d) => `=== ${d.name} ===\n${d.text}`).join("\n\n"));
       }
-    });
+    }
   };
 
   const ask = async () => {
@@ -143,8 +206,7 @@ export default function Vault() {
     setError(null);
     setAnswer(null);
     try {
-      const r = await vaultQuery(selectedId, question.trim());
-      setAnswer(r.answer);
+      setAnswer(await vaultQuery(selectedId, question.trim()));
     } catch (e) {
       setError(e instanceof Error ? e.message : "質問の処理に失敗しました");
     } finally {
@@ -281,13 +343,16 @@ export default function Vault() {
               }}
             >
               <p className="text-[10px] tracking-[0.16em] text-muted label-mono">
-                TXT / MD ファイルをドロップ
+                PDF / TXT / MD / CSV をドロップ
+              </p>
+              <p className="mt-0.5 text-[9px] leading-relaxed text-muted">
+                PDFはサーバー側で本文を抽出してそのまま登録します
               </p>
               <label className="mt-1.5 block cursor-pointer text-[10px] text-[var(--accent)] hover:underline label-mono">
                 またはファイルを選択
                 <input
                   type="file"
-                  accept=".txt,.md,.csv"
+                  accept=".pdf,.txt,.md,.markdown,.csv,.json,.tsv,.log"
                   multiple
                   className="sr-only"
                   onChange={handleFileDrop}
@@ -325,10 +390,37 @@ export default function Vault() {
                 ◈ 知識として取り込み中…
               </motion.p>
             )}
+            {note && (
+              <p className="mt-2 text-[11px] label-mono" style={{ color: note.startsWith("✓") ? "#60d394" : "var(--muted)" }}>{note}</p>
+            )}
             {addedNote && !adding && (
               <p className="mt-2 text-[11px] text-[var(--accent)] label-mono">◈ {addedNote}</p>
             )}
           </div>
+
+          {/* 資料一覧 — 番号は回答の出典 [1][2] と一致する */}
+          {docs.length > 0 && (
+            <div className="panel p-3">
+              <div className="mb-2 text-[10px] tracking-[0.2em] text-muted label-mono">
+                資料 — SOURCES（{docs.length}件）
+              </div>
+              <div className="flex flex-col gap-1">
+                {docs.map((d) => (
+                  <div key={d.title} className="flex items-center gap-2 rounded-forge border border-panel px-2 py-1.5">
+                    <span className="shrink-0 text-[10px] text-[var(--accent)] label-mono">[{d.n}]</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-fg" title={d.title}>{d.title}</span>
+                    <span className="shrink-0 text-[9px] text-muted label-mono">{d.chars.toLocaleString()}字</span>
+                    <button type="button" onClick={() => void removeDoc(d.title)}
+                      aria-label={`資料「${d.title}」を削除`}
+                      className="shrink-0 rounded-md border border-panel px-1.5 text-[10px] text-muted transition hover:text-[#ff9b9b]">✕</button>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+                この番号が回答の出典 [1][2] と対応します。
+              </p>
+            </div>
+          )}
 
           {/* Ask a question */}
           <div className="panel p-3">
@@ -366,11 +458,42 @@ export default function Vault() {
             {answer && !asking && (
               <div className="mt-3">
                 <div className="divider mb-3" />
-                <Markdown text={answer} />
+                <Markdown text={answer.answer} />
+
+                {/* 出典 — 回答が [1] のように引用した資料を明示する。
+                    引用が無い場合も「どの資料を見たか」は示す（NotebookLM流）。 */}
+                {answer.sources.length > 0 && (
+                  <div className="mt-3 rounded-forge border border-panel p-2.5">
+                    <div className="mb-1.5 text-[9px] tracking-[0.16em] text-muted label-mono">
+                      出典{answer.cited.length ? `（${answer.cited.length}件を引用）` : "（引用なし）"}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {answer.sources.map((s) => {
+                        const used = answer.cited.includes(s.n);
+                        return (
+                          <span key={s.n}
+                            className="rounded-full border px-2 py-0.5 text-[10px]"
+                            style={{
+                              borderColor: used ? "var(--accent)" : "var(--panel-bd)",
+                              color: used ? "var(--fg-strong)" : "var(--muted)",
+                            }}>
+                            [{s.n}] {s.title}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    {answer.cited.length === 0 && (
+                      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+                        ※ 回答に出典番号が付いていません。資料に根拠が無い内容が含まれている可能性があります。
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
-                    try { void navigator.clipboard?.writeText(answer); setCopied(true); setTimeout(() => setCopied(false), 1400); } catch { /* ignore */ }
+                    try { void navigator.clipboard?.writeText(answer.answer); setCopied(true); setTimeout(() => setCopied(false), 1400); } catch { /* ignore */ }
                   }}
                   className="mt-2 text-[10px] tracking-[0.12em] text-muted transition hover:text-fg-strong label-mono"
                 >

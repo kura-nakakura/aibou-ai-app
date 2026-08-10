@@ -23,7 +23,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -348,6 +348,11 @@ class VaultAddRequest(BaseModel):
     notebook_id: str
     title: str = ""
     content: str = ""
+
+
+class VaultDocDeleteRequest(BaseModel):
+    notebook_id: str
+    title: str
 
 
 class VaultQueryRequest(BaseModel):
@@ -1052,6 +1057,47 @@ async def vault_add(req: VaultAddRequest, _auth: None = Depends(require_auth)):
     return await asyncio.get_event_loop().run_in_executor(
         None, lambda: vault.add_text(req.notebook_id, req.title, req.content)
     )
+
+
+@app.post("/vault/upload")
+async def vault_upload(notebook_id: str = Form(...), file: UploadFile = File(...),
+                       title: str = Form(""), _auth: None = Depends(require_auth)):
+    """PDF等をアップロードし、テキストを抽出してノートブックに資料として入れる。
+
+    ブラウザ側でPDFをテキストとして読むと文字化けするので、抽出はここで行う。
+    """
+    data = await file.read()
+    name = file.filename or "file"
+    ctype = file.content_type or ""
+    loop = asyncio.get_event_loop()
+    text = await loop.run_in_executor(None, lambda: fileread.extract_text(name, data, ctype))
+    doc_title = (title or "").strip() or name.rsplit(".", 1)[0]
+    if not (text or "").strip():
+        return JSONResponse(status_code=400, content={
+            "error": f"{name} からテキストを抽出できませんでした（画像PDFの可能性があります）"})
+    res = await loop.run_in_executor(None, lambda: vault.add_text(notebook_id, doc_title, text))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return {"ok": True, "title": doc_title, "chars": len(text), "name": name}
+
+
+@app.get("/vault/docs")
+async def vault_docs(notebook_id: str, _auth: None = Depends(require_auth)):
+    """ノートブック内の資料一覧（出典番号つき・本文は含まない）。"""
+    res = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: vault.list_docs(notebook_id))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.post("/vault/docs/delete")
+async def vault_doc_delete(req: VaultDocDeleteRequest, _auth: None = Depends(require_auth)):
+    res = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: vault.delete_doc(req.notebook_id, req.title))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
 
 
 @app.post("/vault/query")

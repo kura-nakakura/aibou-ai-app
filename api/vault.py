@@ -15,17 +15,52 @@
 # =====================================================================
 
 import re
+import uuid
 
 import config
+
+# Supabase が無いときの保存先。他のストアと同じく、設定が無くても使える。
+_mem_notebooks: list = []
+
+
+def _mem_find(notebook_id: str):
+    for nb in _mem_notebooks:
+        if nb.get("id") == notebook_id:
+            return nb
+    return None
+
+
+def _numbered_sources(docs: dict) -> list:
+    """docs（{タイトル: 本文}）を 1 から番号付けした一覧にする。
+
+    出典表示（[1][2]）の番号はここで決め、プロンプトと戻り値で必ず一致させる。
+    """
+    out = []
+    for title, content in (docs or {}).items():
+        body = content if isinstance(content, str) else str(content or "")
+        if body.strip():
+            out.append({"n": len(out) + 1, "title": str(title), "body": body.strip()})
+    return out
+
+
+def _cited_numbers(answer: str, total: int) -> list:
+    """回答本文から [1] [2] のような出典番号を拾う（存在する番号だけ）。"""
+    found = []
+    for m in re.finditer(r"\[(\d{1,2})\]", answer or ""):
+        n = int(m.group(1))
+        if 1 <= n <= total and n not in found:
+            found.append(n)
+    return sorted(found)
 
 
 def list_notebooks() -> list:
     """ノートブック一覧を [{id, name, doc_count}] で返す。
     新しい順（created_at降順）→ 同着は name 昇順。
-    Supabaseが無ければ []（絶対にraiseしない）。"""
+    Supabaseが無ければメモリ上のものを返す（絶対にraiseしない）。"""
     c = config.get_supabase()
     if not c:
-        return []
+        return [{"id": nb["id"], "name": nb["name"], "doc_count": len(nb.get("docs") or {})}
+                for nb in _mem_notebooks]
     try:
         rows = (c.table("vault_notebooks")
                 .select("id,name,docs,created_at")
@@ -57,7 +92,9 @@ def create_notebook(name: str) -> dict:
         return {"error": "name is empty"}
     c = config.get_supabase()
     if not c:
-        return {"error": "vault unavailable (Supabase not configured)"}
+        nb = {"id": str(uuid.uuid4()), "name": name, "docs": {}, "chat": []}
+        _mem_notebooks.insert(0, nb)
+        return {"id": nb["id"], "name": name}
     try:
         res = (c.table("vault_notebooks")
                .insert({"name": name, "docs": {}, "chat": []})
@@ -80,7 +117,11 @@ def add_text(notebook_id: str, title: str, content: str) -> dict:
         return {"error": "title is empty"}
     c = config.get_supabase()
     if not c:
-        return {"error": "vault unavailable (Supabase not configured)"}
+        nb = _mem_find(notebook_id)
+        if nb is None:
+            return {"error": "notebook not found"}
+        nb.setdefault("docs", {})[title] = content
+        return {"ok": True}
     try:
         # 既存 docs を読み込み、新しい資料をマージ（同名タイトルは上書き）。
         rows = (c.table("vault_notebooks")
@@ -100,78 +141,18 @@ def add_text(notebook_id: str, title: str, content: str) -> dict:
         return {"error": f"add_text failed: {e}"}
 
 
-def query(notebook_id: str, question: str) -> dict:
-    """ノートブックの全資料を連結し、その資料”だけ”を根拠にGeminiへ日本語で質問する。
-    {answer: str} を返す。資料が無ければ案内文、未設定/失敗時は error dict
-    （絶対にraiseしない）。"""
-    notebook_id = (notebook_id or "").strip()
-    question = (question or "").strip()
-    if not notebook_id:
-        return {"error": "notebook_id is empty"}
-    if not question:
-        return {"error": "question is empty"}
-
-    c = config.get_supabase()
-    if not c:
-        return {"error": "vault unavailable (Supabase not configured)"}
-
-    # 対象ノートブックの資料を取得
-    try:
-        rows = (c.table("vault_notebooks")
-                .select("docs")
-                .eq("id", notebook_id)
-                .limit(1)
-                .execute().data) or []
-    except Exception as e:
-        return {"error": f"query failed: {e}"}
-    if not rows:
-        return {"error": "notebook not found"}
-
-    docs = rows[0].get("docs") or {}
-    if not isinstance(docs, dict):
-        docs = {}
-
-    # タイトル付きで全資料を連結（本文が空のものは除外）
-    parts = []
-    for title, content in docs.items():
-        body = (content or "").strip() if isinstance(content, str) else str(content or "").strip()
-        if body:
-            parts.append(f"## {title}\n{body}")
-    context = "\n\n".join(parts).strip()
-
-    # 資料が無ければGeminiを呼ばず案内文を返す
-    if not context:
-        return {"answer": "このノートブックにはまだ資料が登録されていません。先に資料を追加してください。"}
-
-    model = config.get_gemini_model()
-    if model is None:
-        return {"error": "GEMINI_API_KEY is not configured"}
-
-    # この資料のみに基づき日本語で回答するよう厳密に指示するプロンプト
-    prompt = (
-        "あなたは資料に基づいて回答するアシスタントです。"
-        "以下の【資料】に書かれている情報”だけ”を根拠に、日本語で簡潔かつ正確に回答してください。"
-        "資料に答えが書かれていない場合は推測せず、「資料には記載がありません」と答えてください。\n\n"
-        f"【資料】\n{context}\n\n"
-        f"【質問】\n{question}\n\n"
-        "【回答】\n"
-    )
-    try:
-        resp = model.generate_content(prompt)
-        return {"answer": getattr(resp, "text", "") or ""}
-    except Exception as e:
-        return {"error": f"generation failed: {e}"}
-
-
-def _load_context(notebook_id: str):
-    """ノートブックの全資料を「## タイトル\\n本文」で連結して返す。
-    (context, error_dict) のタプル。error_dict が None なら成功。"""
+def _load_docs(notebook_id: str):
+    """ノートブックの docs マップを取得する。(docs, error_dict)。"""
     notebook_id = (notebook_id or "").strip()
     if not notebook_id:
         return None, {"error": "notebook_id is empty"}
     c = config.get_supabase()
     if not c:
-        return None, {"error": "vault unavailable (Supabase not configured)"}
+        nb = _mem_find(notebook_id)
+        if nb is None:
+            return None, {"error": "notebook not found"}
+        docs = nb.get("docs") or {}
+        return (docs if isinstance(docs, dict) else {}), None
     try:
         rows = (c.table("vault_notebooks").select("docs")
                 .eq("id", notebook_id).limit(1).execute().data) or []
@@ -180,13 +161,101 @@ def _load_context(notebook_id: str):
     if not rows:
         return None, {"error": "notebook not found"}
     docs = rows[0].get("docs") or {}
-    if not isinstance(docs, dict):
-        docs = {}
-    parts = []
-    for title, content in docs.items():
-        body = content if isinstance(content, str) else str(content or "")
-        if body.strip():
-            parts.append(f"## {title}\n{body.strip()}")
+    return (docs if isinstance(docs, dict) else {}), None
+
+
+def list_docs(notebook_id: str) -> dict:
+    """資料の一覧を [{n, title, chars}] で返す（本文は返さない）。
+
+    番号は query() の出典番号と同じ規則で振るので、UIで突き合わせられる。
+    """
+    docs, err = _load_docs(notebook_id)
+    if err:
+        return err
+    return {"items": [{"n": s["n"], "title": s["title"], "chars": len(s["body"])}
+                      for s in _numbered_sources(docs)]}
+
+
+def delete_doc(notebook_id: str, title: str) -> dict:
+    """資料を1件消す（間違って入れた資料が根拠に混ざり続けないように）。"""
+    title = (title or "").strip()
+    if not title:
+        return {"error": "title is empty"}
+    docs, err = _load_docs(notebook_id)
+    if err:
+        return err
+    if title not in docs:
+        return {"error": "document not found"}
+    docs = {k: v for k, v in docs.items() if k != title}
+    c = config.get_supabase()
+    if not c:
+        nb = _mem_find(notebook_id)
+        if nb is None:
+            return {"error": "notebook not found"}
+        nb["docs"] = docs
+        return {"ok": True}
+    try:
+        c.table("vault_notebooks").update({"docs": docs}).eq("id", notebook_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        return {"error": f"delete failed: {e}"}
+
+
+def query(notebook_id: str, question: str) -> dict:
+    """ノートブックの資料“だけ”を根拠に質問へ答える。出典番号つきで返す。
+
+    {answer, sources: [{n, title}], cited: [n...]} を返す。
+    NotebookLM のように「どの資料を根拠にしたか」を追えるようにするのが要点で、
+    番号は _numbered_sources() で一意に決め、プロンプトと戻り値で必ず一致させる。
+    """
+    question = (question or "").strip()
+    if not question:
+        return {"error": "question is empty"}
+
+    docs, err = _load_docs(notebook_id)
+    if err:
+        return err
+
+    sources = _numbered_sources(docs)
+    # 資料が無ければAIを呼ばず案内文を返す
+    if not sources:
+        return {"answer": "このノートブックにはまだ資料が登録されていません。先に資料を追加してください。",
+                "sources": [], "cited": []}
+
+    context = "\n\n".join(f"[{s['n']}] {s['title']}\n{s['body']}" for s in sources)
+
+    prompt = (
+        "あなたは資料に基づいて回答するアシスタントです。"
+        "以下の【資料】に書かれている情報”だけ”を根拠に、日本語で簡潔かつ正確に回答してください。\n"
+        "・根拠にした資料の番号を、その記述の直後に [1] のように必ず付けてください"
+        "（複数なら [1][3] と並べる）\n"
+        "・資料に答えが書かれていない場合は推測せず「資料には記載がありません」と答えてください\n"
+        "・存在しない番号は書かないでください\n\n"
+        f"【資料】\n{context}\n\n"
+        f"【質問】\n{question}\n\n"
+        "【回答】\n"
+    )
+    try:
+        import llm
+        answer = llm.generate_text(prompt, max_tokens=2200) or ""
+    except Exception as e:
+        return {"error": f"generation failed: {e}"}
+
+    return {
+        "answer": answer,
+        "sources": [{"n": s["n"], "title": s["title"]} for s in sources],
+        "cited": _cited_numbers(answer, len(sources)),
+    }
+
+
+def _load_context(notebook_id: str):
+    """ノートブックの全資料を「## タイトル\\n本文」で連結して返す。
+    (context, error_dict) のタプル。error_dict が None なら成功。
+    ワークフローの根拠資料（flow_engine）もここを通る。"""
+    docs, err = _load_docs(notebook_id)
+    if err:
+        return None, err
+    parts = [f"## {s['title']}\n{s['body']}" for s in _numbered_sources(docs)]
     return "\n\n".join(parts).strip(), None
 
 

@@ -284,6 +284,11 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ⑦ VAULT の資料取り込み（PDFはサーバー抽出）・出典表示・資料削除は、
+   ノートブックが1つ以上ある状態でしか画面に出ない＝バックエンド接続が前提。
+   この offline スイートでは到達できないため、モックバックエンドを使った
+   スクショ検証で確認している（PDFの実抽出・出典の番号一致・削除後の再採番）。 */
+
 /* ── ⑥ AUTO mode explains itself and points at the other two builders ── */
 test("AUTO mode explains what AUTOPILOT is and when to use the others", async ({ page }) => {
   await page.goto("/");

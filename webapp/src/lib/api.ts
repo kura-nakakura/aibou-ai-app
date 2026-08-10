@@ -1111,15 +1111,64 @@ export async function vaultAddText(notebookId: string, title: string, content: s
 }
 
 /** POST /vault/query — RAG answer grounded in the notebook's docs. */
-export async function vaultQuery(notebookId: string, question: string): Promise<{ answer: string }> {
+export interface VaultSource { n: number; title: string }
+export interface VaultAnswer {
+  answer: string;
+  sources: VaultSource[];
+  cited: number[];      // 回答が実際に引用した資料の番号
+}
+
+export async function vaultQuery(notebookId: string, question: string): Promise<VaultAnswer> {
   const res = await fetch(`${requireApiUrl()}/vault/query`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ notebook_id: notebookId, question }),
   });
-  const data = (await res.json().catch(() => ({}))) as { answer?: string; error?: string };
+  const data = (await res.json().catch(() => ({}))) as
+    { answer?: string; sources?: VaultSource[]; cited?: number[]; error?: string };
   if (!res.ok && !data.error) throw new Error(`Vault query failed (${res.status})`);
-  return { answer: data.answer ?? data.error ?? "" };
+  return {
+    answer: data.answer ?? data.error ?? "",
+    sources: data.sources ?? [],
+    cited: data.cited ?? [],
+  };
+}
+
+export interface VaultDoc { n: number; title: string; chars: number }
+
+/** GET /vault/docs — 資料の一覧（出典番号つき）。 */
+export async function vaultDocs(notebookId: string): Promise<VaultDoc[]> {
+  const res = await fetch(`${requireApiUrl()}/vault/docs?notebook_id=${encodeURIComponent(notebookId)}`,
+    { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Vault docs failed (${res.status})`);
+  const data = (await res.json().catch(() => ({ items: [] }))) as { items?: VaultDoc[] };
+  return data.items ?? [];
+}
+
+/** POST /vault/docs/delete — 資料を1件消す。 */
+export async function vaultDocDelete(notebookId: string, title: string): Promise<boolean> {
+  const res = await fetch(`${requireApiUrl()}/vault/docs/delete`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ notebook_id: notebookId, title }),
+  });
+  return res.ok;
+}
+
+/** POST /vault/upload — PDF等をサーバー側で抽出して資料にする。
+ *  ブラウザで PDF をテキストとして読むと文字化けするので、必ずこちらを通す。 */
+export async function vaultUpload(notebookId: string, file: File, title = ""):
+  Promise<{ ok?: boolean; title?: string; chars?: number; error?: string }> {
+  const form = new FormData();
+  form.append("notebook_id", notebookId);
+  form.append("file", file);
+  if (title) form.append("title", title);
+  const res = await fetch(`${requireApiUrl()}/vault/upload`, {
+    method: "POST",
+    headers: authHeaders(),   // Content-Type は FormData に任せる（boundary付与のため）
+    body: form,
+  });
+  return (await res.json().catch(() => ({ error: "取り込みに失敗しました" })));
 }
 
 /** POST /vault/generate — author a Markdown document grounded in the notebook. */
