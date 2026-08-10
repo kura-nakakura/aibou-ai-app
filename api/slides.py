@@ -154,6 +154,87 @@ def generate_deck(topic: str, n: int = 6, theme: str = "", with_images: bool = T
     return deck
 
 
+# 各レイアウトが使うフィールド（フロントの編集フォームと共有する定義）
+LAYOUT_FIELDS = {
+    "title": ["title", "subtitle", "image"],
+    "section": ["title", "subtitle"],
+    "bullets": ["title", "bullets"],
+    "two_col": ["title", "bullets"],
+    "stat": ["stat", "title", "subtitle"],
+    "quote": ["quote", "author"],
+    "image": ["title", "image", "bullets"],
+}
+
+LAYOUT_LABELS = {
+    "title": "表紙",
+    "section": "章の区切り",
+    "bullets": "箇条書き",
+    "two_col": "2段組み",
+    "stat": "数字を大きく",
+    "quote": "引用",
+    "image": "画像で見せる",
+}
+
+
+def revise_slide(slide: dict, instruction: str, deck_title: str = "",
+                 layout: str = "", context: str = "") -> dict:
+    """1枚だけをAIで書き直す（Genspark のようなスライド単位の編集）。
+
+    デッキ全体を作り直すと他の枚が変わってしまうので、対象の1枚と
+    前後の文脈だけを渡して、その枚だけを返させる。
+    {"ok": True, "slide": {...}} / {"error": ...}
+    """
+    instruction = (instruction or "").strip()
+    if not instruction:
+        return {"error": "修正指示が空です"}
+    if not isinstance(slide, dict):
+        slide = {}
+
+    want = layout.strip().lower() if layout else ""
+    if want and want not in LAYOUTS:
+        want = ""
+    layout_note = (
+        f"レイアウトは必ず \"{want}\"（{LAYOUT_LABELS.get(want, want)}）にする。"
+        f"使うフィールド: {', '.join(LAYOUT_FIELDS.get(want, []))}"
+        if want else
+        "レイアウトは内容に最も合うものを選ぶ（変えなくてよければそのまま）。"
+    )
+
+    prompt = (
+        "あなたはプロのプレゼンデザイナーです。スライド1枚だけを修正してください。\n"
+        + (f"【資料のタイトル】{deck_title}\n" if deck_title else "")
+        + (f"【前後のスライド】{context}\n" if context else "")
+        + "【いまのスライド】\n" + json.dumps(slide, ensure_ascii=False) + "\n"
+        + "【修正指示】\n" + instruction + "\n\n"
+        + f"{layout_note}\n"
+        f"使えるレイアウト: {', '.join(LAYOUTS)}\n"
+        "・箇条書きは1項目を短く（長い文章にしない）\n"
+        "・事実として断定できないことは書かない\n"
+        "・image は短い英語の画像プロンプト（不要なら入れない）\n"
+        "修正後のスライド1枚のJSONだけを ```json ``` の中に出力してください。\n"
+        '```json\n{"layout":"bullets","title":"...","bullets":["..."]}\n```'
+    )
+    try:
+        text = llm.generate_text(prompt, max_tokens=1200)
+    except Exception as e:
+        return {"error": f"修正に失敗しました: {e}"}
+
+    data = _extract_json(text)
+    if not isinstance(data, dict):
+        return {"error": "修正結果を読み取れませんでした。もう一度お試しください。"}
+    # デッキ全体が返ってきた場合は先頭の1枚を採用する
+    if "slides" in data and isinstance(data.get("slides"), list) and data["slides"]:
+        data = data["slides"][0]
+
+    out = _norm_slide(data)
+    if want:
+        out["layout"] = want
+    if not (out.get("title") or out.get("bullets") or out.get("quote")
+            or out.get("stat") or out.get("image")):
+        return {"error": "修正結果が空でした。もう一度お試しください。"}
+    return {"ok": True, "slide": out}
+
+
 def to_markdown(deck: dict) -> str:
     """デッキを Markdown 化する（ドキュメントとして扱いたい時用）。"""
     deck = _normalize(deck)

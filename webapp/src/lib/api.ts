@@ -1536,7 +1536,18 @@ export async function homeSummary(): Promise<HomeSummary> {
     events: { total: 0, upcoming: [] },
     notifications: { unread: 0 },
   };
-  return (await res.json().catch(() => empty)) as HomeSummary;
+  const data = (await res.json().catch(() => ({}))) as Partial<HomeSummary>;
+  // セクションごとに既定値へ被せる。JSONとしては読めても項目が欠けている
+  // （古いバックエンドや部分デプロイ）場合に summary.tasks.open で落ちないように。
+  const keys = Object.keys(empty) as (keyof HomeSummary)[];
+  const out = { ...empty };
+  for (const k of keys) {
+    const v = data[k];
+    if (v && typeof v === "object") {
+      Object.assign(out[k] as object, v);
+    }
+  }
+  return out;
 }
 
 export async function agendaList(): Promise<AgendaEvent[]> {
@@ -1639,6 +1650,30 @@ export interface Slide {
   notes?: string;
 }
 export interface SlideDeck { title: string; theme?: string; slides: Slide[] }
+
+export interface SlideLayoutDef { key: SlideLayout; label: string; fields: string[] }
+
+/** GET /slides/layouts — which fields each layout uses (drives the edit form). */
+export async function slideLayouts(): Promise<{ layouts: SlideLayoutDef[]; themes: string[] }> {
+  const res = await fetch(`${requireApiUrl()}/slides/layouts`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Layouts failed (${res.status})`);
+  return (await res.json()) as { layouts: SlideLayoutDef[]; themes: string[] };
+}
+
+/** POST /slides/revise — rewrite ONE slide with AI, leaving the rest of the deck alone. */
+export async function slideRevise(opts: {
+  slide: Slide; instruction: string; deckTitle?: string; layout?: string; context?: string;
+}): Promise<{ ok?: boolean; slide?: Slide; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/slides/revise`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      slide: opts.slide, instruction: opts.instruction,
+      deck_title: opts.deckTitle ?? "", layout: opts.layout ?? "", context: opts.context ?? "",
+    }),
+  });
+  return (await res.json().catch(() => ({ error: "修正に失敗しました" }))) as { ok?: boolean; slide?: Slide; error?: string };
+}
 
 /** POST /slides/google — convert a deck to Google Slides, returns the URL. */
 export async function slidesToGoogle(title: string, deckSlides: Slide[], theme = ""): Promise<{ ok: boolean; url?: string; error?: string }> {

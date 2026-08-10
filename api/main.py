@@ -56,6 +56,7 @@ import notify
 import proactive
 import pseo
 import scheduler
+import slides as slides_mod
 import sns as sns_mod
 import studio
 import tasks as tasks_module
@@ -381,6 +382,14 @@ class SlidesExportRequest(BaseModel):
     title: str = ""
     slides: list = Field(default_factory=list)
     theme: str = ""
+
+
+class SlideReviseRequest(BaseModel):
+    slide: dict = Field(default_factory=dict)
+    instruction: str
+    deck_title: str = ""
+    layout: str = ""
+    context: str = ""
 
 
 class ArtifactUpdateRequest(BaseModel):
@@ -1858,6 +1867,31 @@ async def google_auth_callback(request: Request, code: str = "", error: str = ""
 @app.post("/google/disconnect")
 async def google_disconnect(_auth: None = Depends(require_auth)):
     return gservice.disconnect()
+
+
+@app.get("/slides/layouts")
+async def slides_layouts(_auth: None = Depends(require_auth)):
+    """スライド1枚ごとの編集UIが使うレイアウト定義（使うフィールドと表示名）。"""
+    return {
+        "layouts": [
+            {"key": k, "label": slides_mod.LAYOUT_LABELS.get(k, k),
+             "fields": slides_mod.LAYOUT_FIELDS.get(k, [])}
+            for k in slides_mod.LAYOUTS
+        ],
+        "themes": slides_mod.THEMES,
+    }
+
+
+@app.post("/slides/revise")
+async def slides_revise(req: SlideReviseRequest, _auth: None = Depends(require_auth)):
+    """スライド1枚だけをAIで書き直す（他の枚は変えない）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: slides_mod.revise_slide(
+            req.slide, req.instruction, req.deck_title, req.layout, req.context))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
 
 
 @app.post("/slides/google")

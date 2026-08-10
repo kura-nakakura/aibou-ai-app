@@ -280,6 +280,10 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
   await expect(page.getByText(/画像作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
 });
 
+/* ④ スライドの1枚ごと編集は生成物ビューア内にあり、生成物パネル自体が
+   バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
+   実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
+
 /* ── ③ Video (storyboard-based) ── */
 test("FORGE VIDEO opens the storyboard video panel", async ({ page }) => {
   await page.goto("/");

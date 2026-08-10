@@ -138,3 +138,84 @@ def test_gservice_create_presentation_mocked(monkeypatch):
     monkeypatch.setattr(gservice.requests, "post", fake_post)
     res = gservice.create_presentation("提案", [{"title": "背景", "bullets": ["a", "b"]}])
     assert res["ok"] is True and "pid1" in res["url"] and calls["batch"] == 1
+
+
+# ── ④ スライド1枚ごとの編集（Genspark相当） ──────────────────────────
+_ONE = '```json\n{"layout":"bullets","title":"直した見出し","bullets":["短く1","短く2"]}\n```'
+
+
+def test_revise_slide_returns_single_slide(monkeypatch):
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: _ONE)
+    res = slides.revise_slide({"layout": "bullets", "title": "元", "bullets": ["長い文章"]},
+                              "もっと短く力強く")
+    assert res["ok"] and res["slide"]["title"] == "直した見出し"
+    assert res["slide"]["bullets"] == ["短く1", "短く2"]
+
+
+def test_revise_slide_prompt_scopes_to_one_slide(monkeypatch):
+    """デッキ全体ではなく1枚だけを直す指示になっている（他の枚を壊さない）。"""
+    seen = {}
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: (seen.update(p=p), _ONE)[1])
+    slides.revise_slide({"layout": "stat", "stat": "+30%"}, "数字を強調",
+                        deck_title="事業計画", context="前: 課題 / 次: まとめ")
+    p = seen["p"]
+    assert "スライド1枚だけを修正" in p
+    assert "事業計画" in p and "前: 課題 / 次: まとめ" in p
+    assert '"stat": "+30%"' in p or '"stat":"+30%"' in p     # いまの内容を渡している
+
+
+def test_revise_slide_can_force_layout(monkeypatch):
+    """レイアウトを指定したらAIの出力より指定が優先される。"""
+    seen = {}
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: (seen.update(p=p), _ONE)[1])
+    res = slides.revise_slide({"title": "x"}, "引用にして", layout="quote")
+    assert 'レイアウトは必ず "quote"' in seen["p"]
+    assert res["slide"]["layout"] == "quote"      # AIがbulletsを返しても指定を守る
+
+
+def test_revise_slide_unwraps_a_whole_deck(monkeypatch):
+    """デッキ形式で返ってきても先頭1枚を取り出す（モデルの揺れに耐える）。"""
+    whole = '{"title":"deck","slides":[{"layout":"quote","quote":"引用文","author":"著者"}]}'
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: whole)
+    res = slides.revise_slide({"title": "x"}, "引用に")
+    assert res["ok"] and res["slide"]["layout"] == "quote" and res["slide"]["quote"] == "引用文"
+
+
+def test_revise_slide_validation(monkeypatch):
+    assert slides.revise_slide({"title": "x"}, "").get("error")
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: "JSONではない")
+    assert slides.revise_slide({"title": "x"}, "直して").get("error")
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: '{"layout":"bullets"}')
+    assert slides.revise_slide({"title": "x"}, "直して").get("error")   # 中身が空
+
+
+def test_revise_slide_rejects_invalid_layout_request(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: (seen.update(p=p), _ONE)[1])
+    res = slides.revise_slide({"title": "x"}, "直して", layout="carousel")
+    assert "レイアウトは必ず" not in seen["p"]      # 未知のレイアウトは無視
+    assert res["slide"]["layout"] in slides.LAYOUTS
+
+
+def test_layout_fields_cover_every_layout():
+    """編集フォームの定義が全レイアウトに存在すること（UIが空にならない）。"""
+    for key in slides.LAYOUTS:
+        assert slides.LAYOUT_FIELDS.get(key), f"{key} のフィールド定義がない"
+        assert slides.LAYOUT_LABELS.get(key), f"{key} の表示名がない"
+
+
+def test_slides_layouts_endpoint():
+    r = client.get("/slides/layouts")
+    assert r.status_code == 200
+    d = r.json()
+    assert {x["key"] for x in d["layouts"]} == set(slides.LAYOUTS)
+    assert d["themes"] == slides.THEMES
+    stat = next(x for x in d["layouts"] if x["key"] == "stat")
+    assert "stat" in stat["fields"] and stat["label"] == "数字を大きく"
+
+
+def test_slides_revise_endpoint(monkeypatch):
+    monkeypatch.setattr(slides.llm, "generate_text", lambda p, **k: _ONE)
+    r = client.post("/slides/revise", json={"slide": {"title": "元"}, "instruction": "短く"})
+    assert r.status_code == 200 and r.json()["slide"]["title"] == "直した見出し"
+    assert client.post("/slides/revise", json={"slide": {}, "instruction": ""}).status_code == 400
