@@ -1226,6 +1226,9 @@ export interface StudioAI {
 export interface WorkflowStep {
   name?: string;
   prompt: string;
+  ai_id?: string;        // このステップを担当するカスタムAI（人格＋ルール）
+  notebook_id?: string;  // VAULTのノートブックを根拠資料にする（RAG）
+  when?: string;         // 条件（満たさなければこのステップを飛ばす）
 }
 
 export interface StudioWorkflow {
@@ -1235,11 +1238,24 @@ export interface StudioWorkflow {
   created_at?: string;
 }
 
+export interface WorkflowStepResult {
+  step: number;
+  name: string;
+  output: string;
+  skipped?: boolean;
+  reason?: string;
+  ai?: string;
+  knowledge?: string;
+  warning?: string;
+}
+
 export interface WorkflowResult {
   workflow_id: string;
   workflow_name: string;
-  results: Array<{ step: number; name: string; output: string }>;
+  results: WorkflowStepResult[];
   final_output: string;
+  ran?: number;
+  skipped?: number;
 }
 
 export async function studioListAIs(): Promise<StudioAI[]> {

@@ -22,12 +22,14 @@ import {
   evolvePropose,
   forgeGenerate,
   automationsCreate,
+  vaultList,
   type StudioAI,
   type StudioWorkflow,
   type WorkflowStep,
   type WorkflowResult,
   type EvolveProposal,
   type AutomationStep,
+  type VaultNotebook,
 } from "@/lib/api";
 
 type StudioTab = "ais" | "workflows" | "evolve";
@@ -246,6 +248,9 @@ function WorkflowsPanel() {
   // Form
   const [wfName, setWfName] = useState("");
   const [steps, setSteps] = useState<WorkflowStep[]>([{ name: "Step 1", prompt: "" }]);
+  // ステップに割り当てる候補（カスタムAIとVAULTのノートブック）
+  const [ais, setAis] = useState<StudioAI[]>([]);
+  const [notebooks, setNotebooks] = useState<VaultNotebook[]>([]);
 
   // Run state
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -268,6 +273,15 @@ function WorkflowsPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 担当AI・根拠資料の候補を読む。どちらも欠けていてもワークフローは作れる
+  // ので、失敗しても黙って空のままにする。
+  useEffect(() => {
+    let alive = true;
+    studioListAIs().then((v) => { if (alive) setAis(v); }).catch(() => { /* 任意項目 */ });
+    vaultList().then((v) => { if (alive) setNotebooks(v); }).catch(() => { /* 任意項目 */ });
+    return () => { alive = false; };
+  }, []);
 
   const addStep = () => setSteps((prev) => [...prev, { name: `Step ${prev.length + 1}`, prompt: "" }]);
   const removeStep = (i: number) => setSteps((prev) => prev.filter((_, idx) => idx !== i));
@@ -347,16 +361,55 @@ function WorkflowsPanel() {
                     placeholder={`Step ${i + 1}`}
                   />
                   {steps.length > 1 && (
-                    <button type="button" onClick={() => removeStep(i)} className="text-[#ff6b6b] text-xs">✕</button>
+                    <button type="button" onClick={() => removeStep(i)} className="text-[#ff6b6b] text-xs" aria-label={`ステップ${i + 1}を削除`}>✕</button>
                   )}
                 </div>
                 <textarea
                   value={step.prompt}
                   onChange={(e) => updateStep(i, "prompt", e.target.value)}
                   rows={2}
-                  placeholder={i === 0 ? "プロンプト (例: {input}を要約してください)" : "プロンプト (前ステップの出力は{input}で参照可)"}
+                  aria-label={`ステップ${i + 1}の指示`}
+                  placeholder={i === 0 ? "指示（例: {input} を要約してください）" : "指示（前の出力は {input}、最初の入力は {original}、N番目の出力は {stepN}）"}
                   className="w-full resize-none rounded bg-black/20 px-2 py-1.5 text-[11px] text-fg-strong placeholder:text-muted focus:outline-none"
                 />
+
+                {/* 担当AI・根拠資料・分岐条件（Difyのようにステップ単位で設定する） */}
+                <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[9px] tracking-[0.14em] text-muted label-mono">担当AI</span>
+                    <select
+                      value={step.ai_id ?? ""}
+                      onChange={(e) => updateStep(i, "ai_id", e.target.value)}
+                      aria-label={`ステップ${i + 1}の担当AI`}
+                      className="rounded bg-black/20 px-2 py-1 text-[11px] text-fg-strong focus:outline-none"
+                    >
+                      <option value="">指定なし</option>
+                      {ais.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    <span className="text-[9px] tracking-[0.14em] text-muted label-mono">根拠資料（VAULT）</span>
+                    <select
+                      value={step.notebook_id ?? ""}
+                      onChange={(e) => updateStep(i, "notebook_id", e.target.value)}
+                      aria-label={`ステップ${i + 1}の根拠資料`}
+                      className="rounded bg-black/20 px-2 py-1 text-[11px] text-fg-strong focus:outline-none"
+                    >
+                      <option value="">使わない</option>
+                      {notebooks.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <label className="mt-1.5 flex flex-col gap-0.5">
+                  <span className="text-[9px] tracking-[0.14em] text-muted label-mono">このステップを実行する条件（空なら必ず実行）</span>
+                  <input
+                    value={step.when ?? ""}
+                    onChange={(e) => updateStep(i, "when", e.target.value)}
+                    aria-label={`ステップ${i + 1}の条件`}
+                    placeholder="例：内容が苦情のとき／要約が3行を超えるとき"
+                    className="rounded bg-black/20 px-2 py-1 text-[11px] text-fg-strong placeholder:text-muted focus:outline-none"
+                  />
+                </label>
               </div>
             ))}
             <div className="mb-3 flex gap-2">
@@ -393,11 +446,30 @@ function WorkflowsPanel() {
 
       {runResult && (
         <div className="panel p-3">
-          <div className="mb-2 text-[10px] tracking-[0.2em] text-muted label-mono">RESULT: {runResult.workflow_name}</div>
+          <div className="mb-2 flex flex-wrap items-baseline gap-2">
+            <span className="text-[10px] tracking-[0.2em] text-muted label-mono">RESULT: {runResult.workflow_name}</span>
+            {/* 分岐で飛んだステップがあることを一目で分かるようにする */}
+            {runResult.ran !== undefined && (
+              <span className="text-[9px] text-muted label-mono">
+                実行 {runResult.ran}{runResult.skipped ? ` · スキップ ${runResult.skipped}` : ""}
+              </span>
+            )}
+          </div>
           {runResult.results.map((r) => (
-            <div key={r.step} className="mb-2 rounded-forge border border-panel p-2">
-              <div className="mb-1 text-[9px] tracking-[0.15em] text-muted label-mono">STEP {r.step}: {r.name}</div>
-              <p className="whitespace-pre-wrap text-[11px] text-fg">{r.output}</p>
+            <div key={r.step} className="mb-2 rounded-forge border border-panel p-2"
+              style={{ opacity: r.skipped ? 0.55 : 1 }}>
+              <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                {/* 名前が既定（Step N）のままなら "STEP 1: STEP 1" と重ねない */}
+                <span className="text-[9px] tracking-[0.15em] text-muted label-mono">
+                  STEP {r.step}{r.name && r.name.toLowerCase() !== `step ${r.step}` ? `: ${r.name}` : ""}
+                </span>
+                {r.ai && <span className="rounded-full border border-panel px-1.5 text-[9px] text-muted label-mono">◇ {r.ai}</span>}
+                {r.knowledge && <span className="rounded-full border border-panel px-1.5 text-[9px] text-muted label-mono">▤ 資料あり</span>}
+                {r.skipped && <span className="rounded-full border border-panel px-1.5 text-[9px] text-muted label-mono">スキップ</span>}
+              </div>
+              {r.reason && <p className="mb-1 text-[10px] text-muted">{r.reason}</p>}
+              {r.warning && <p className="mb-1 text-[10px] text-[#ffcf8b]">⚠ {r.warning}</p>}
+              {!r.skipped && <p className="whitespace-pre-wrap text-[11px] text-fg">{r.output}</p>}
             </div>
           ))}
         </div>

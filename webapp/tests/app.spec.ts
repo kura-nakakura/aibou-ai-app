@@ -284,6 +284,23 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── ⑤ AI STUDIO: per-step AI / knowledge / condition (ui-r41) ── */
+test("AI STUDIO workflow steps can be assigned an AI, knowledge and a condition", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goWorkshop(page, "AI STUDIO");
+  await page.getByRole("button", { name: "WORKFLOWS" }).click();
+  await page.getByRole("button", { name: /\+ NEW WORKFLOW/ }).click();
+  // Each step exposes the three Dify-like controls (offline → selectors are empty
+  // but present, so a workflow can still be composed).
+  await expect(page.getByLabel("ステップ1の担当AI")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByLabel("ステップ1の根拠資料")).toBeVisible();
+  await expect(page.getByLabel("ステップ1の条件")).toBeVisible();
+  // Adding a step gives the new one its own controls
+  await page.getByRole("button", { name: /\+ ADD STEP/ }).click();
+  await expect(page.getByLabel("ステップ2の条件")).toBeVisible({ timeout: 5_000 });
+});
+
 /* ── ③ Video (storyboard-based) ── */
 test("FORGE VIDEO opens the storyboard video panel", async ({ page }) => {
   await page.goto("/");
