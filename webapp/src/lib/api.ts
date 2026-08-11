@@ -506,6 +506,39 @@ export async function agentExecute(tool: string, params: Record<string, unknown>
   return data.result ?? "";
 }
 
+/* ---------------- CODE: server-side command run (opt-in) ---------------- */
+export interface ShellStatus {
+  enabled: boolean;
+  allowed: string[];
+  timeout_default: number;
+  timeout_max: number;
+  note?: string;
+}
+export interface ShellResult {
+  ok?: boolean; code?: number; stdout?: string; stderr?: string;
+  truncated?: boolean; timed_out?: boolean; cmd?: string; seconds?: number;
+  files?: number; error?: string;
+}
+
+/** GET /code/shell — サーバー実行が有効か（既定は無効）。 */
+export async function codeShellStatus(): Promise<ShellStatus> {
+  const res = await fetch(`${requireApiUrl()}/code/shell`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Shell status failed (${res.status})`);
+  return (await res.json()) as ShellStatus;
+}
+
+/** POST /code/shell — ワークスペースを一時ディレクトリに展開して1コマンド実行。 */
+export async function codeShellRun(
+  command: string, files: CodeFile[], timeout = 60,
+): Promise<ShellResult> {
+  const res = await fetch(`${requireApiUrl()}/code/shell`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ command, files, timeout }),
+  });
+  return (await res.json().catch(() => ({ error: "実行に失敗しました" }))) as ShellResult;
+}
+
 /* ---------------- Whiteboard (Miro-style, multi-board) ---------------- */
 export interface BoardNode {
   id: string;
@@ -1290,7 +1323,11 @@ export interface StudioAI {
 
 export interface WorkflowStep {
   name?: string;
-  prompt: string;
+  /** 指示。type/params 形式のステップでは省略できる（flow_engine が両方読む）。 */
+  prompt?: string;
+  /** ステップ種別。省略時は ai_generate として扱われる。 */
+  type?: StepType;
+  params?: Record<string, string>;
   ai_id?: string;        // このステップを担当するカスタムAI（人格＋ルール）
   notebook_id?: string;  // VAULTのノートブックを根拠資料にする（RAG）
   when?: string;         // 条件（満たさなければこのステップを飛ばす）

@@ -19,6 +19,7 @@ import {
   type ConsoleLine, type TestSummary,
 } from "@/lib/runner";
 import { diffLines, collapseDiff, changedFiles, type FileChange } from "@/lib/diff";
+import { codeShellStatus, codeShellRun, type ShellStatus, type ShellResult } from "@/lib/api";
 
 const LS_WORKSPACES = "forge_code_workspaces";
 const WS_LIMIT = 12;
@@ -124,7 +125,12 @@ export default function CodeMode() {
   const [preview, setPreview] = useState(false);
   const [copied, setCopied] = useState(false);
   // 実行（CONSOLE / TESTS）— サンドボックスiframe内で本当に動かす
-  const [runTab, setRunTab] = useState<"console" | "tests" | null>(null);
+  const [runTab, setRunTab] = useState<"console" | "tests" | "term" | null>(null);
+  // サーバー実行（既定は無効。有効な環境だけターミナルが使える）
+  const [shell, setShell] = useState<ShellStatus | null>(null);
+  const [cmd, setCmd] = useState("");
+  const [termLog, setTermLog] = useState<{ cmd: string; res: ShellResult }[]>([]);
+  const [termBusy, setTermBusy] = useState(false);
   const [logs, setLogs] = useState<ConsoleLine[]>([]);
   const [tests, setTests] = useState<TestSummary | null>(null);
   const [running, setRunning] = useState(false);
@@ -470,6 +476,31 @@ export default function CodeMode() {
     const errs = logs.filter((l) => l.level === "error").map((l) => `- ${l.text}`).join("\n");
     if (!errs) return;
     setInstruction(`実行時にエラーが出ています。原因を直してください。\n\n【エラー】\n${errs}`);
+  };
+
+  // サーバー実行が使えるかを一度だけ確認する（未接続・無効でも画面は動く）
+  useEffect(() => {
+    if (!API_URL) return;
+    let alive = true;
+    codeShellStatus().then((v) => { if (alive) setShell(v); }).catch(() => { /* 任意機能 */ });
+    return () => { alive = false; };
+  }, []);
+
+  /** サーバーで1コマンド実行する（ワークスペースを一時ディレクトリに展開）。 */
+  const runCommand = async (raw?: string) => {
+    const c = (raw ?? cmd).trim();
+    if (!c || termBusy || !ws) return;
+    setTermBusy(true);
+    setRunTab("term");
+    try {
+      const res = await codeShellRun(c, ws.files, 120);
+      setTermLog((prev) => [...prev, { cmd: c, res }].slice(-20));
+      if (raw === undefined) setCmd("");
+    } catch {
+      setTermLog((prev) => [...prev, { cmd: c, res: { error: "通信に失敗しました" } }]);
+    } finally {
+      setTermBusy(false);
+    }
   };
 
   /** 失敗内容から修正指示文を組み立てる（手動ボタンと自動ループで共用）。 */
@@ -832,6 +863,13 @@ export default function CodeMode() {
             className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-fg-strong disabled:opacity-40 label-mono">
             ▶ 実行
           </button>
+          {shell?.enabled && (
+            <button type="button" onClick={() => setRunTab("term")}
+              title="サーバーでコマンドを実行する（npm / pytest など）"
+              className="rounded-forge border border-panel px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-muted transition hover:text-fg-strong label-mono">
+              ⌨ ターミナル
+            </button>
+          )}
           <button type="button" onClick={runTests} disabled={!hasTests || running}
             title={hasTests ? "*.test.js を実行" : "テストファイル（*.test.js）がありません"}
             className="rounded-forge border border-panel px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-muted transition hover:text-fg-strong disabled:opacity-40 label-mono">
@@ -983,14 +1021,15 @@ export default function CodeMode() {
         {runTab && (
           <div className="flex max-h-56 min-h-0 flex-col overflow-hidden rounded-forge border border-panel bg-black/30">
             <div className="flex items-center gap-1.5 border-b border-panel px-2 py-1">
-              {(["console", "tests"] as const).map((t) => (
+              {(["console", "tests", "term"] as const).map((t) => (
                 <button key={t} type="button" onClick={() => setRunTab(t)}
                   className="rounded px-2 py-0.5 text-[9px] tracking-[0.14em] label-mono"
                   style={{
                     background: runTab === t ? "var(--btn-bg)" : "transparent",
                     color: runTab === t ? "var(--fg-strong)" : "var(--muted)",
                   }}>
-                  {t === "console" ? `⌗ CONSOLE${logs.length ? ` (${logs.length})` : ""}` : "✓ TESTS"}
+                  {t === "console" ? `⌗ CONSOLE${logs.length ? ` (${logs.length})` : ""}`
+                    : t === "tests" ? "✓ TESTS" : "⌨ TERMINAL"}
                 </button>
               ))}
               {tests && (
@@ -1034,7 +1073,49 @@ export default function CodeMode() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
-              {runTab === "console" ? (
+              {runTab === "term" ? (
+                !shell?.enabled ? (
+                  <div className="text-[10px] leading-relaxed text-muted">
+                    サーバーでのコマンド実行は無効です。
+                    <br />
+                    有効にするには、バックエンドの環境変数に
+                    <span className="mx-1 text-[var(--accent)]">ENABLE_SHELL=1</span>
+                    を設定してください。
+                    <br />
+                    ※ 生成したコードをサーバー上で実行することになります。
+                    自分専用／自ホスト運用でのみ有効にしてください。
+                  </div>
+                ) : (
+                  <>
+                    {termLog.length === 0 && (
+                      <p className="text-[10px] leading-relaxed text-muted">
+                        npm test / python3 -m pytest -q / node app.js などを実行できます。
+                        <br />
+                        ワークスペースのファイルを毎回一時ディレクトリに展開して走らせます
+                        （許可コマンド: {shell.allowed.slice(0, 10).join(", ")} …）。
+                      </p>
+                    )}
+                    {termLog.map((t, i) => (
+                      <div key={i} className="mb-2">
+                        <div className="text-[var(--accent)]">$ {t.cmd}</div>
+                        {t.res.error ? (
+                          <div className="text-[#ff9b9b]">⚠ {t.res.error}</div>
+                        ) : (
+                          <>
+                            {t.res.stdout && <pre className="whitespace-pre-wrap text-fg">{t.res.stdout}</pre>}
+                            {t.res.stderr && <pre className="whitespace-pre-wrap text-[#ffcf8b]">{t.res.stderr}</pre>}
+                            <div className="text-[9px] text-muted label-mono">
+                              exit {t.res.code} · {t.res.seconds}s
+                              {t.res.truncated ? " · 出力を打ち切りました" : ""}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    {termBusy && <p className="text-[10px] text-muted">実行中…</p>}
+                  </>
+                )
+              ) : runTab === "console" ? (
                 logs.length === 0 ? (
                   <p className="text-[10px] text-muted">
                     console.log / エラーがここに出ます（▶ 実行 で開始）
@@ -1068,6 +1149,25 @@ export default function CodeMode() {
                 </div>
               )}
             </div>
+
+            {/* コマンド入力（ターミナルのときだけ） */}
+            {runTab === "term" && shell?.enabled && (
+              <div className="flex items-center gap-1.5 border-t border-panel p-1.5">
+                <span className="text-[11px] text-[var(--accent)] label-mono">$</span>
+                <input
+                  value={cmd}
+                  onChange={(e) => setCmd(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) void runCommand(); }}
+                  placeholder="npm test / python3 -m pytest -q"
+                  aria-label="実行するコマンド"
+                  className="min-w-0 flex-1 rounded border border-[var(--input-bd)] bg-[var(--input-bg)] px-2 py-1 font-mono text-[11px] text-fg-strong placeholder:text-muted focus:outline-none"
+                />
+                <button type="button" onClick={() => void runCommand()} disabled={termBusy || !cmd.trim()}
+                  className="shrink-0 rounded border border-[var(--line)] bg-[var(--btn-bg)] px-2.5 py-1 text-[10px] text-fg-strong disabled:opacity-40 label-mono">
+                  {termBusy ? "…" : "実行"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 

@@ -56,6 +56,7 @@ import notify
 import proactive
 import pseo
 import scheduler
+import shellrun
 import slides as slides_mod
 import sns as sns_mod
 import studio
@@ -388,6 +389,12 @@ class SlidesExportRequest(BaseModel):
     title: str = ""
     slides: list = Field(default_factory=list)
     theme: str = ""
+
+
+class ShellRunRequest(BaseModel):
+    command: str
+    files: list = Field(default_factory=list)   # [{"path","content"}]
+    timeout: int = 60
 
 
 class SlideReviseRequest(BaseModel):
@@ -845,6 +852,29 @@ async def code_generate(req: CodeGenerateRequest, _auth: None = Depends(require_
             yield _sse(ev)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/code/shell")
+async def code_shell_status(_auth: None = Depends(require_auth)):
+    """サーバー実行が有効かどうかと、許可コマンドの一覧。"""
+    return shellrun.status()
+
+
+@app.post("/code/shell")
+async def code_shell_run(req: ShellRunRequest, _auth: None = Depends(require_auth)):
+    """CODEのワークスペースを一時ディレクトリに展開して1コマンド実行する。
+
+    既定では無効（ENABLE_SHELL=1 のときだけ動く）。有効時も環境変数を洗い、
+    許可コマンド・CPU/メモリ/時間の上限つきで実行する（shellrun.py 参照）。
+    """
+    if not shellrun.enabled():
+        return JSONResponse(status_code=403, content=shellrun.status())
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: shellrun.run(req.command, req.files, req.timeout))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
 
 
 @app.get("/code/scaffold")

@@ -34,3 +34,10 @@ services:
       # NEXT_PUBLIC_API_TOKEN に同じ値を入れる。
       - key: APP_TOKEN
         sync: false
+      # 任意：CODEモードから実際にコマンドを実行する（npm test / pytest など）。
+      # 既定は無効。有効にするとサーバー上で生成コードが動く＝任意コード実行に
+      # なるため、自分専用/自ホスト運用でのみ "1" にすること。
+      # 有効時も、鍵を含まない環境変数・許可コマンド・一時ディレクトリ・
+      # CPU/メモリ/時間の上限つきで実行する（api/shellrun.py 参照）。
+      - key: ENABLE_SHELL
+        value: ""

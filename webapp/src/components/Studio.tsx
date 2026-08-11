@@ -11,6 +11,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { addToArchive } from "@/components/AppArchive";
+import FlowBuilder from "@/components/FlowBuilder";
 import {
   studioListAIs,
   studioCreateAI,
@@ -245,12 +246,6 @@ function WorkflowsPanel() {
   const [creating, setCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
 
-  // Form
-  const [wfName, setWfName] = useState("");
-  const [steps, setSteps] = useState<WorkflowStep[]>([{ name: "Step 1", prompt: "" }]);
-  // ステップに割り当てる候補（カスタムAIとVAULTのノートブック）
-  const [ais, setAis] = useState<StudioAI[]>([]);
-  const [notebooks, setNotebooks] = useState<VaultNotebook[]>([]);
 
   // Run state
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -273,34 +268,6 @@ function WorkflowsPanel() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  // 担当AI・根拠資料の候補を読む。どちらも欠けていてもワークフローは作れる
-  // ので、失敗しても黙って空のままにする。
-  useEffect(() => {
-    let alive = true;
-    studioListAIs().then((v) => { if (alive) setAis(v); }).catch(() => { /* 任意項目 */ });
-    vaultList().then((v) => { if (alive) setNotebooks(v); }).catch(() => { /* 任意項目 */ });
-    return () => { alive = false; };
-  }, []);
-
-  const addStep = () => setSteps((prev) => [...prev, { name: `Step ${prev.length + 1}`, prompt: "" }]);
-  const removeStep = (i: number) => setSteps((prev) => prev.filter((_, idx) => idx !== i));
-  const updateStep = (i: number, field: keyof WorkflowStep, val: string) =>
-    setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, [field]: val } : s)));
-
-  const handleCreate = async () => {
-    if (!wfName.trim() || steps.some((s) => !s.prompt.trim())) return;
-    setCreating(true);
-    try {
-      await studioCreateWorkflow(wfName.trim(), steps);
-      setWfName(""); setSteps([{ name: "Step 1", prompt: "" }]); setShowForm(false);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "create failed");
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm("このワークフローを削除しますか？")) return;
@@ -342,89 +309,14 @@ function WorkflowsPanel() {
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
           >
-            <div className="mb-1 text-[10px] tracking-[0.2em] text-muted label-mono">WORKFLOW NAME</div>
-            <input
-              value={wfName}
-              onChange={(e) => setWfName(e.target.value)}
-              placeholder="例: コンテンツ生成パイプライン"
-              className="mb-3 w-full rounded-forge border border-[var(--input-bd)] bg-[var(--input-bg)] px-3 py-2 text-sm text-fg-strong placeholder:text-muted focus:outline-none"
+            {/* 編集画面は BOARD の自動化と共通（FlowBuilder）。
+                以前は同じことを2つのフォームで書いていて、片方にだけ
+                機能が付く状態だった。 */}
+            <FlowBuilder
+              target="workflow"
+              onCreated={() => { setShowForm(false); void load(); }}
+              onError={setError}
             />
-
-            <div className="mb-2 text-[10px] tracking-[0.2em] text-muted label-mono">STEPS</div>
-            {steps.map((step, i) => (
-              <div key={i} className="mb-2 rounded-forge border border-panel p-2.5">
-                <div className="mb-1 flex items-center gap-2">
-                  <input
-                    value={step.name ?? `Step ${i + 1}`}
-                    onChange={(e) => updateStep(i, "name", e.target.value)}
-                    className="flex-1 rounded border border-transparent bg-transparent text-[11px] text-fg-strong focus:outline-none"
-                    placeholder={`Step ${i + 1}`}
-                  />
-                  {steps.length > 1 && (
-                    <button type="button" onClick={() => removeStep(i)} className="text-[#ff6b6b] text-xs" aria-label={`ステップ${i + 1}を削除`}>✕</button>
-                  )}
-                </div>
-                <textarea
-                  value={step.prompt}
-                  onChange={(e) => updateStep(i, "prompt", e.target.value)}
-                  rows={2}
-                  aria-label={`ステップ${i + 1}の指示`}
-                  placeholder={i === 0 ? "指示（例: {input} を要約してください）" : "指示（前の出力は {input}、最初の入力は {original}、N番目の出力は {stepN}）"}
-                  className="w-full resize-none rounded bg-black/20 px-2 py-1.5 text-[11px] text-fg-strong placeholder:text-muted focus:outline-none"
-                />
-
-                {/* 担当AI・根拠資料・分岐条件（Difyのようにステップ単位で設定する） */}
-                <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
-                  <label className="flex flex-col gap-0.5">
-                    <span className="text-[9px] tracking-[0.14em] text-muted label-mono">担当AI</span>
-                    <select
-                      value={step.ai_id ?? ""}
-                      onChange={(e) => updateStep(i, "ai_id", e.target.value)}
-                      aria-label={`ステップ${i + 1}の担当AI`}
-                      className="rounded bg-black/20 px-2 py-1 text-[11px] text-fg-strong focus:outline-none"
-                    >
-                      <option value="">指定なし</option>
-                      {ais.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-0.5">
-                    <span className="text-[9px] tracking-[0.14em] text-muted label-mono">根拠資料（VAULT）</span>
-                    <select
-                      value={step.notebook_id ?? ""}
-                      onChange={(e) => updateStep(i, "notebook_id", e.target.value)}
-                      aria-label={`ステップ${i + 1}の根拠資料`}
-                      className="rounded bg-black/20 px-2 py-1 text-[11px] text-fg-strong focus:outline-none"
-                    >
-                      <option value="">使わない</option>
-                      {notebooks.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-                    </select>
-                  </label>
-                </div>
-                <label className="mt-1.5 flex flex-col gap-0.5">
-                  <span className="text-[9px] tracking-[0.14em] text-muted label-mono">このステップを実行する条件（空なら必ず実行）</span>
-                  <input
-                    value={step.when ?? ""}
-                    onChange={(e) => updateStep(i, "when", e.target.value)}
-                    aria-label={`ステップ${i + 1}の条件`}
-                    placeholder="例：内容が苦情のとき／要約が3行を超えるとき"
-                    className="rounded bg-black/20 px-2 py-1 text-[11px] text-fg-strong placeholder:text-muted focus:outline-none"
-                  />
-                </label>
-              </div>
-            ))}
-            <div className="mb-3 flex gap-2">
-              <button type="button" onClick={addStep} className="text-[10px] text-muted transition hover:text-fg-strong label-mono">
-                + ADD STEP
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleCreate()}
-              disabled={creating || !wfName.trim() || steps.some((s) => !s.prompt.trim())}
-              className="w-full rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] py-2 text-[11px] tracking-[0.2em] text-fg-strong shadow-glow transition disabled:opacity-40 label-mono"
-            >
-              {creating ? "CREATING…" : "CREATE WORKFLOW"}
-            </button>
           </motion.div>
         )}
       </AnimatePresence>
