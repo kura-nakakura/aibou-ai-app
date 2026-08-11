@@ -482,6 +482,11 @@ export default function Vault() {
                         );
                       })}
                     </div>
+                    {answer.partial && (
+                      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+                        ※ 資料が多いため、質問に関係する箇所を選んで参照しました（全文ではありません）。
+                      </p>
+                    )}
                     {answer.cited.length === 0 && (
                       <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
                         ※ 回答に出典番号が付いていません。資料に根拠が無い内容が含まれている可能性があります。

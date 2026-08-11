@@ -55,9 +55,11 @@ def persona_prefix(ai) -> str:
     return "\n".join(p for p in parts if p.strip()) + "\n\n"
 
 
-def knowledge_block(notebook_id: str) -> tuple:
+def knowledge_block(notebook_id: str, question: str = "") -> tuple:
     """VAULTのノートブックを資料として読み込む。(block, label, warning)。
 
+    資料が多いときは全文ではなく、その指示に関係する段落だけを選ぶ
+    （先頭から詰めるだけだと、後ろに答えがある資料に永久に届かない）。
     資料が使えないときも止めず、warning を残して素の生成を続ける
     （黙って根拠なしの回答を返さないよう、理由は必ず表に出す）。
     """
@@ -65,19 +67,33 @@ def knowledge_block(notebook_id: str) -> tuple:
         return "", "", ""
     try:
         import vault
-        context, err = vault._load_context(notebook_id)
+        docs, err = vault._load_docs(notebook_id)
     except Exception as e:
         return "", "", f"資料を読み込めませんでした（{e}）"
     if err:
         return "", "", f"資料を読み込めませんでした（{err.get('error')}）"
+
+    warn = ""
+    try:
+        import retrieval
+        picked = retrieval.select(docs or {}, question, budget=KNOWLEDGE_CHARS)
+        context = picked["context"]
+        if picked["chunks"] and not picked["matched"]:
+            warn = "指示に関係する記述が資料内に見つかりませんでした（先頭から渡しています）"
+    except Exception:
+        # 検索側が壊れても止めないよう、従来どおり先頭から詰める
+        parts = [f"## {t}\n{(b if isinstance(b, str) else str(b or '')).strip()}"
+                 for t, b in (docs or {}).items() if str(b or "").strip()]
+        context = "\n\n".join(parts)[:KNOWLEDGE_CHARS]
+
     if not context:
         return "", "", "指定のノートブックに資料がありません"
     block = (
         "【資料】以下の資料に書かれていることだけを根拠にしてください。"
         "資料に無いことは推測せず「資料には記載がありません」と書いてください。\n"
-        + context[:KNOWLEDGE_CHARS] + "\n\n"
+        + context + "\n\n"
     )
-    return block, notebook_id, ""
+    return block, notebook_id, warn
 
 
 def condition_met(when: str, original: str, current: str) -> tuple:
@@ -180,7 +196,7 @@ def run_steps(steps, input_text: str = "", resolve_ai=None) -> dict:
 
         if st == "ai_generate":
             ai = resolve_ai(step.get("ai_id") or "") if resolve_ai else None
-            knowledge, nb_id, warn = knowledge_block(step.get("notebook_id") or "")
+            knowledge, nb_id, warn = knowledge_block(step.get("notebook_id") or "", text)
             prompt = persona_prefix(ai) + knowledge + text
             try:
                 out = llm.generate_text(prompt, max_tokens=2200) or ""

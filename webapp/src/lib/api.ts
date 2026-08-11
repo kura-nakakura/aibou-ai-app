@@ -1129,6 +1129,8 @@ export interface VaultAnswer {
   answer: string;
   sources: VaultSource[];
   cited: number[];      // 回答が実際に引用した資料の番号
+  /** 資料が多く、関連箇所だけを見て答えた場合に true（全部読んだと誤解させないため） */
+  partial?: boolean;
 }
 
 export async function vaultQuery(notebookId: string, question: string): Promise<VaultAnswer> {
@@ -1138,12 +1140,13 @@ export async function vaultQuery(notebookId: string, question: string): Promise<
     body: JSON.stringify({ notebook_id: notebookId, question }),
   });
   const data = (await res.json().catch(() => ({}))) as
-    { answer?: string; sources?: VaultSource[]; cited?: number[]; error?: string };
+    { answer?: string; sources?: VaultSource[]; cited?: number[]; partial?: boolean; error?: string };
   if (!res.ok && !data.error) throw new Error(`Vault query failed (${res.status})`);
   return {
     answer: data.answer ?? data.error ?? "",
     sources: data.sources ?? [],
     cited: data.cited ?? [],
+    partial: !!data.partial,
   };
 }
 

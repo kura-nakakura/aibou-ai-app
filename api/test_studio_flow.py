@@ -86,7 +86,7 @@ def test_unknown_ai_id_is_ignored(monkeypatch):
 def test_step_grounds_on_vault_notebook(monkeypatch):
     _reset()
     import vault
-    monkeypatch.setattr(vault, "_load_context", lambda nb: ("## 就業規則\n年次有給は20日", None))
+    monkeypatch.setattr(vault, "_load_docs", lambda nb: ({"就業規則": "年次有給は20日"}, None))
     wf = studio.create_workflow("w", [{"prompt": "質問: {input}", "notebook_id": "nb1"}])
     seen = _capture(monkeypatch)
     res = studio.run_workflow(wf["id"], "有給は何日?")
@@ -100,7 +100,7 @@ def test_missing_knowledge_warns_but_still_runs(monkeypatch):
     """資料が読めなくても止めない（ただし警告を残して黙って通さない）。"""
     _reset()
     import vault
-    monkeypatch.setattr(vault, "_load_context", lambda nb: (None, {"error": "notebook not found"}))
+    monkeypatch.setattr(vault, "_load_docs", lambda nb: (None, {"error": "notebook not found"}))
     wf = studio.create_workflow("w", [{"prompt": "やって", "notebook_id": "bad"}])
     _capture(monkeypatch)
     res = studio.run_workflow(wf["id"], "")
@@ -112,7 +112,7 @@ def test_missing_knowledge_warns_but_still_runs(monkeypatch):
 def test_empty_notebook_warns(monkeypatch):
     _reset()
     import vault
-    monkeypatch.setattr(vault, "_load_context", lambda nb: ("", None))
+    monkeypatch.setattr(vault, "_load_docs", lambda nb: ({}, None))
     wf = studio.create_workflow("w", [{"prompt": "やって", "notebook_id": "nb"}])
     _capture(monkeypatch)
     res = studio.run_workflow(wf["id"], "")
@@ -258,7 +258,7 @@ def test_automation_steps_can_use_ai_knowledge_and_conditions(monkeypatch):
     _reset()
     automations._mem_flows.clear()
     import vault
-    monkeypatch.setattr(vault, "_load_context", lambda nb: ("## 規則\n有給は20日", None))
+    monkeypatch.setattr(vault, "_load_docs", lambda nb: ({"規則": "有給は20日"}, None))
     ai = studio.create_ai("窓口さん", persona="丁寧に案内します。", rules="敬体で書く")
     flow = automations.create_flow("問い合わせ自動化", steps=[
         {"type": "ai_generate", "name": "回答", "params": {"prompt": "答えて: {input}"},
@@ -336,3 +336,35 @@ def test_step_types_are_shared_between_modules():
     """種別定義が1か所に集まっていること（片方だけ増えてずれないように）。"""
     assert automations.STEP_TYPES == list(flow_engine.STEP_TYPES)
     assert studio.MAX_STEPS == flow_engine.MAX_STEPS
+
+
+def test_knowledge_reaches_an_answer_buried_in_a_large_notebook(monkeypatch):
+    """資料が上限を超える量でも、指示に関係する箇所が渡る。
+
+    以前は先頭から12,000字で切っていたため、後ろに答えがある資料では
+    永久に届かなかった。
+    """
+    _reset()
+    import vault
+    filler = "\n\n".join(f"無関係な段落 {i} です。社内の一般的な説明。" * 8 for i in range(300))
+    docs = {"大きな規程": filler + "\n\n特別休暇は年に3日付与されます。"}
+    assert len(docs["大きな規程"]) > flow_engine.KNOWLEDGE_CHARS
+    monkeypatch.setattr(vault, "_load_docs", lambda nb: (docs, None))
+    wf = studio.create_workflow("w", [{"prompt": "特別休暇は何日ですか？", "notebook_id": "nb1"}])
+    seen = _capture(monkeypatch)
+    res = studio.run_workflow(wf["id"], "")
+    assert "特別休暇は年に3日" in seen[0]
+    assert len(seen[0]) < len(docs["大きな規程"])      # 全文は渡していない
+    assert "warning" not in res["results"][0]          # 関連が見つかったので警告なし
+
+
+def test_knowledge_warns_when_nothing_relevant_is_found(monkeypatch):
+    """関連が見つからないときは黙って先頭を渡さず、その旨を残す。"""
+    _reset()
+    import vault
+    monkeypatch.setattr(vault, "_load_docs",
+                        lambda nb: ({"献立": "月曜はカレー。火曜は魚。"}, None))
+    wf = studio.create_workflow("w", [{"prompt": "半導体の製造装置について", "notebook_id": "nb"}])
+    _capture(monkeypatch)
+    res = studio.run_workflow(wf["id"], "")
+    assert "見つかりませんでした" in res["results"][0]["warning"]

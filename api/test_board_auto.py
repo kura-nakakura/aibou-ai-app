@@ -100,7 +100,7 @@ def test_scheduled_automation_uses_ai_and_knowledge(monkeypatch):
     import vault
     studio._mem_ais.clear()
     ai = studio.create_ai("窓口さん", persona="丁寧に案内します。")
-    monkeypatch.setattr(vault, "_load_context", lambda nb: ("## 規則\n有給は20日", None))
+    monkeypatch.setattr(vault, "_load_docs", lambda nb: ({"規則": "有給は20日"}, None))
     flow = automations.create_flow("定時案内", steps=[
         {"type": "ai_generate", "params": {"prompt": "案内文を書く"},
          "ai_id": ai["id"], "notebook_id": "nb1"},

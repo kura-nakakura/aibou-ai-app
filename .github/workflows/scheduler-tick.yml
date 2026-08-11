@@ -1,0 +1,64 @@
+name: Scheduler Tick
+
+# 定期実行（HOMEの「定期実行」／BOARDの「毎日この時刻」）を、
+# 誰もアプリを開かなくても発火させる。
+#
+# なぜ必要か:
+#   バックエンドは無料プランだと無操作でスリープする。スリープ中は時刻が来ても
+#   何も起きない。scheduler は「時刻を過ぎて本日未実行なら実行する」ので、
+#   起こしさえすれば遅れて追いついてくれる。ここでは定期的に起こして
+#   /scheduler/tick を叩き、その日の分を確実に走らせる。
+#
+# 頻度: 1時間ごと（= 最大1時間の遅れ）。もっと正確にしたい場合は cron を
+#       "*/30 * * * *" などに変更する（GitHub Actions の最小間隔は5分）。
+on:
+  schedule:
+    - cron: "5 * * * *"        # 毎時05分（UTC。JSTでも毎時05分に相当）
+  workflow_dispatch:            # 手動実行も可
+
+# 同時に走らせない（前回が長引いても二重実行しない）
+concurrency:
+  group: scheduler-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the backend and run due schedules
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL || vars.BACKEND_URL }}
+          APP_TOKEN: ${{ secrets.APP_TOKEN }}
+        run: |
+          set -u
+          if [ -z "${BACKEND_URL:-}" ]; then
+            echo "::warning::BACKEND_URL が未設定のため定期実行を起動できません。"
+            echo "Settings → Secrets and variables → Actions に BACKEND_URL"
+            echo "（例 https://xxx.onrender.com）を追加してください。"
+            exit 0
+          fi
+
+          AUTH=()
+          if [ -n "${APP_TOKEN:-}" ]; then
+            AUTH=(-H "Authorization: Bearer ${APP_TOKEN}")
+          fi
+
+          # 無料プランのコールドスタートは数十秒かかるので長めに待ち、2回リトライする
+          for i in 1 2 3; do
+            if curl -fsS --max-time 150 -X POST "${AUTH[@]}" \
+                 "${BACKEND_URL%/}/scheduler/tick" -o resp.json; then
+              echo "--- response ---"
+              cat resp.json; echo
+              # 何が動いたかをログに残す（黙って通すと気づけない）。
+              # ヒアドキュメントは run: | の中でインデントが崩れるので -c で渡す。
+              python3 -c 'import json;d=json.load(open("resp.json"));print("実行した定期タスク:",d.get("count",0),"件");[print("  -",str(r.get("instruction",""))[:60],"→",str(r.get("result",""))[:120]) for r in d.get("ran",[])]' \
+                || echo "::warning::応答を解析できませんでした"
+              exit 0
+            fi
+            echo "retry $i…（コールドスタート待ち）"
+            sleep 20
+          done
+
+          echo "::error::バックエンド（${BACKEND_URL}）に到達できず、定期実行を起動できませんでした。"
+          echo "::error::URLが正しいか、サービスが生きているかを確認してください。"
+          exit 1

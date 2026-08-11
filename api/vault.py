@@ -222,7 +222,26 @@ def query(notebook_id: str, question: str) -> dict:
         return {"answer": "このノートブックにはまだ資料が登録されていません。先に資料を追加してください。",
                 "sources": [], "cited": []}
 
-    context = "\n\n".join(f"[{s['n']}] {s['title']}\n{s['body']}" for s in sources)
+    # 資料が多いと全文は入り切らない。質問に関係する段落だけを選んで渡す。
+    # 出典番号は資料単位で決めてあるので、断片には元の番号を付け直す。
+    num_of = {s["title"]: s["n"] for s in sources}
+    try:
+        import retrieval
+        picked = retrieval.select({s["title"]: s["body"] for s in sources}, question)
+        parts = []
+        for line in picked["context"].split("\n\n"):
+            if not line.startswith("## "):
+                parts.append(line)
+                continue
+            head, _, rest = line.partition("\n")
+            title = head[3:].strip()
+            parts.append(f"[{num_of.get(title, 0)}] {title}\n{rest}")
+        context = "\n\n".join(parts) if parts else ""
+        truncated = picked["total_chars"] > len(picked["context"])
+    except Exception:
+        # 検索側で何かあっても答えられるように、従来どおり先頭から詰める
+        context = "\n\n".join(f"[{s['n']}] {s['title']}\n{s['body']}" for s in sources)
+        truncated = False
 
     prompt = (
         "あなたは資料に基づいて回答するアシスタントです。"
@@ -245,6 +264,8 @@ def query(notebook_id: str, question: str) -> dict:
         "answer": answer,
         "sources": [{"n": s["n"], "title": s["title"]} for s in sources],
         "cited": _cited_numbers(answer, len(sources)),
+        # 資料の一部だけを見て答えたことを隠さない（全部読んだと誤解させない）
+        "partial": bool(truncated),
     }
 
 
