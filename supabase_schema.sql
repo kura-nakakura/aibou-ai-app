@@ -282,3 +282,5 @@ CREATE TABLE IF NOT EXISTS schedules (
 );
 -- 既存テーブルへの後方互換アップグレード（自動マイグレーションで反映）
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS days text DEFAULT 'daily';
+-- BOARDの自動化を時刻で回すための参照（空ならエージェントへの指示として実行）
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS automation_id text DEFAULT '';

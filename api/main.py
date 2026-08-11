@@ -300,9 +300,10 @@ class AgentExecuteRequest(BaseModel):
 
 
 class ScheduleRequest(BaseModel):
-    instruction: str
+    instruction: str = ""
     time: str = "08:00"
-    days: str = "daily"   # "daily" | "mon,wed,fri" 形式
+    days: str = "daily"        # "daily" | "mon,wed,fri" 形式
+    automation_id: str = ""    # 指定すると BOARD の自動化を時刻で回す
 
 
 class GithubImportRequest(BaseModel):
@@ -1601,7 +1602,8 @@ async def scheduler_list(_auth: None = Depends(require_auth)):
 @app.post("/scheduler")
 async def scheduler_add(req: ScheduleRequest, _auth: None = Depends(require_auth)):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: scheduler.add(req.instruction, req.time, req.days))
+    return await loop.run_in_executor(
+        None, lambda: scheduler.add(req.instruction, req.time, req.days, req.automation_id))
 
 
 @app.delete("/scheduler/{schedule_id}")

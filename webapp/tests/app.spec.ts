@@ -284,6 +284,49 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── ⑨ BOARD: multi-select + edge styles (works offline) ──
+   既定のビューポートはスマホ幅なのでキャンバスが狭く、座標指定が枠外に出る。
+   範囲選択の検証にはPC幅が必要なのでここだけ広げる。 */
+test.describe("board on desktop", () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test("BOARD multi-selects stickies and acts on them together", async ({ page }) => {
+    await page.goto("/");
+    await enterApp(page);
+    await goMode(page, "BOARD");
+    // モード選択パネルの全面backdropが残っていると最初のクリックを吸われるので、
+    // 閉じきるのを待ってからキャンバスを触る。
+    await expect(page.locator("nav").filter({ hasText: "MODES" })).toBeHidden({ timeout: 8_000 });
+    const canvas = page.locator("[data-board-canvas]");
+    await expect(canvas).toBeVisible({ timeout: 8_000 });
+    // ボードが読み込み終わるまで待つ（未読込だとダブルクリックが空振りする）。
+    // 座標はレイアウトが落ち着いた後に取る（先に取ると枠外を叩いてしまう）。
+    await expect(page.getByText(/ダブルクリックで付箋を追加/)).toBeVisible({ timeout: 8_000 });
+    const box = (await canvas.boundingBox())!;
+
+    // 付箋を3つ作る。連続ダブルクリックは3連打として扱われることがあるので間を置く
+    for (const [x, y] of [[220, 180], [430, 180], [640, 340]]) {
+      await page.mouse.dblclick(box.x + x, box.y + y);
+      await page.waitForTimeout(250);
+    }
+    await expect(page.locator("[data-note]")).toHaveCount(3);
+
+    // Shift+ドラッグの範囲選択で左の2つだけを掴む
+    await page.keyboard.down("Shift");
+    await page.mouse.move(box.x + 100, box.y + 80);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 500, box.y + 220, { steps: 10 });
+    await page.mouse.up();
+    await page.keyboard.up("Shift");
+    await expect(page.locator('[data-note][data-selected="1"]')).toHaveCount(2);
+    await expect(page.getByText("2件選択")).toBeVisible();
+
+    // まとめて削除すると残り1件
+    await page.getByLabel("選択中をまとめて削除").click();
+    await expect(page.locator("[data-note]")).toHaveCount(1);
+  });
+});
+
 /* ── CODE: cross-file search (works offline) ── */
 test("CODE searches across the workspace files", async ({ page }) => {
   await page.goto("/");

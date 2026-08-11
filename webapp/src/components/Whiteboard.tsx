@@ -84,10 +84,17 @@ export default function Whiteboard() {
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [toast, setToast] = useState<string | null>(null);
+  // 複数選択（Miroのように、まとめて動かす・色を変える・消す）
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  // 範囲選択の枠（背景を Shift ドラッグ）。画面座標で持つ。
+  const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const panRef = useRef<{ px: number; py: number; vx: number; vy: number } | null>(null);
-  const dragRef = useRef<{ id: string; px: number; py: number; nx: number; ny: number } | null>(null);
+  // まとめて動かすため、掴んだ時点の全選択ノードの位置を覚えておく
+  const dragRef = useRef<{ id: string; px: number; py: number; nx: number; ny: number;
+                           group: { id: string; x: number; y: number }[] } | null>(null);
+  const bandRef = useRef<{ x0: number; y0: number } | null>(null);
   const resizeRef = useRef<{ id: string; px: number; py: number; w0: number; h0: number; kind: string } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipSave = useRef(true);
@@ -319,6 +326,17 @@ export default function Whiteboard() {
     return { x: (rx - view.x) / view.scale, y: (ry - view.y) / view.scale };
   }, [view]);
 
+  /** 要素内のローカル座標（既にrectを引いた値）→ キャンバス座標。 */
+  const toCanvasLocal = useCallback((lx: number, ly: number) => (
+    { x: (lx - view.x) / view.scale, y: (ly - view.y) / view.scale }
+  ), [view]);
+
+  /** 短い通知（選択件数など）。 */
+  const flash = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 1600);
+  }, []);
+
   /* ── node ops ── */
   const addNode = useCallback((kind: "sticky" | "text" | "frame", x?: number, y?: number) => {
     snapshot();
@@ -374,14 +392,44 @@ export default function Whiteboard() {
   const onBgPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    if (e.shiftKey) {
+      // Shift+ドラッグ = 範囲選択（素のドラッグはパンのまま残す）
+      const r = wrapRef.current?.getBoundingClientRect();
+      const x = e.clientX - (r?.left ?? 0), y = e.clientY - (r?.top ?? 0);
+      bandRef.current = { x0: x, y0: y };
+      setBand({ x0: x, y0: y, x1: x, y1: y });
+      return;
+    }
+    setSel(new Set());       // 何もない所を掴んだら選択解除
     panRef.current = { px: e.clientX, py: e.clientY, vx: view.x, vy: view.y };
   };
   const onBgPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const b = bandRef.current;
+    if (b) {
+      const r = wrapRef.current?.getBoundingClientRect();
+      setBand({ x0: b.x0, y0: b.y0, x1: e.clientX - (r?.left ?? 0), y1: e.clientY - (r?.top ?? 0) });
+      return;
+    }
     const pan = panRef.current;
     if (!pan) return;
     setView((v) => ({ ...v, x: pan.vx + (e.clientX - pan.px), y: pan.vy + (e.clientY - pan.py) }));
   };
-  const onBgPointerUp = () => { panRef.current = null; };
+  const onBgPointerUp = () => {
+    panRef.current = null;
+    if (bandRef.current && band) {
+      // 枠に重なったノードを選ぶ（枠は画面座標なのでキャンバス座標へ直す）
+      const a = toCanvasLocal(Math.min(band.x0, band.x1), Math.min(band.y0, band.y1));
+      const c = toCanvasLocal(Math.max(band.x0, band.x1), Math.max(band.y0, band.y1));
+      const picked = nodes.filter((n) => {
+        const w = n.w ?? 200, h = n.h ?? 90;
+        return n.x < c.x && n.x + w > a.x && n.y < c.y && n.y + h > a.y;
+      }).map((n) => n.id);
+      setSel(new Set(picked));
+      if (picked.length > 1) flash(`${picked.length}件を選択`);
+    }
+    bandRef.current = null;
+    setBand(null);
+  };
   const onBgDoubleClick = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
     const p = toCanvas(e.clientX, e.clientY);
@@ -441,16 +489,36 @@ export default function Whiteboard() {
       }
       return;
     }
+    // Shift+クリックは選択の追加/解除だけ（移動はしない）
+    if (e.shiftKey) {
+      setSel((prev) => {
+        const next = new Set(prev);
+        if (next.has(n.id)) next.delete(n.id); else next.add(n.id);
+        return next;
+      });
+      return;
+    }
+    // 選択外を掴んだらその1件だけの選択に切り替える（Miroと同じ挙動）
+    const group = sel.has(n.id) ? Array.from(sel) : [n.id];
+    if (!sel.has(n.id)) setSel(new Set([n.id]));
     snapshot();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = { id: n.id, px: e.clientX, py: e.clientY, nx: n.x, ny: n.y };
+    dragRef.current = {
+      id: n.id, px: e.clientX, py: e.clientY, nx: n.x, ny: n.y,
+      group: nodes.filter((m) => group.includes(m.id)).map((m) => ({ id: m.id, x: m.x, y: m.y })),
+    };
   };
   const onNodePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (d) {
       const dx = (e.clientX - d.px) / view.scale;
       const dy = (e.clientY - d.py) / view.scale;
-      setNodes((p) => p.map((n) => (n.id === d.id ? { ...n, x: d.nx + dx, y: d.ny + dy } : n)));
+      // 選択中のノードは相対位置を保ったまま一緒に動く
+      const base = new Map(d.group.map((g) => [g.id, g]));
+      setNodes((p) => p.map((n) => {
+        const g = base.get(n.id);
+        return g ? { ...n, x: g.x + dx, y: g.y + dy } : n;
+      }));
       return;
     }
     const r = resizeRef.current;
@@ -620,20 +688,52 @@ export default function Whiteboard() {
               </marker>
             </defs>
             <g transform="translate(5000,5000)">
-              {edgeLines.map((l) => (
-                <g key={l.id}>
-                  <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
-                    stroke="rgba(0,243,255,0.5)" strokeWidth={2 / view.scale} markerEnd="url(#wb-arrow)" />
-                  <line
-                    x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
-                    stroke="transparent" strokeWidth={14 / view.scale}
-                    className="pointer-events-auto cursor-pointer"
-                    onClick={() => { snapshot(); setEdges((p) => p.filter((e) => e.id !== l.id)); }}
-                  >
-                    <title>クリックで接続を削除</title>
-                  </line>
-                </g>
-              ))}
+              {edgeLines.map((l) => {
+                const ed = edges.find((x) => x.id === l.id);
+                const style = ed?.style ?? "arrow";
+                return (
+                  <g key={l.id}>
+                    <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+                      stroke="rgba(0,243,255,0.5)" strokeWidth={2 / view.scale}
+                      strokeDasharray={style === "dashed" ? `${6 / view.scale} ${5 / view.scale}` : undefined}
+                      markerEnd={style === "arrow" ? "url(#wb-arrow)" : undefined} />
+                    {/* 関係の説明（原因/根拠など）を線の中央に置く */}
+                    {ed?.label && (
+                      <text x={(l.x1 + l.x2) / 2} y={(l.y1 + l.y2) / 2 - 4 / view.scale}
+                        textAnchor="middle" fill="rgba(223,230,242,0.9)"
+                        fontSize={11 / view.scale} style={{ paintOrder: "stroke" }}
+                        stroke="rgba(8,11,18,0.9)" strokeWidth={3 / view.scale}>
+                        {ed.label}
+                      </text>
+                    )}
+                    <line
+                      x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+                      stroke="transparent" strokeWidth={14 / view.scale}
+                      className="pointer-events-auto cursor-pointer"
+                      onClick={(e) => {
+                        // 素のクリック＝種類を切替、Shift＝ラベル編集、Alt＝削除。
+                        // 以前は必ず削除だったので、押し間違いで線が消えていた。
+                        if (e.altKey) { snapshot(); setEdges((p) => p.filter((x) => x.id !== l.id)); return; }
+                        if (e.shiftKey) {
+                          const cur = ed?.label ?? "";
+                          const next = window.prompt("この線のラベル（空で消す）", cur);
+                          if (next === null) return;
+                          snapshot();
+                          setEdges((p) => p.map((x) => (x.id === l.id ? { ...x, label: next.trim() } : x)));
+                          return;
+                        }
+                        const order = ["arrow", "line", "dashed"] as const;
+                        const nextStyle = order[(order.indexOf(style) + 1) % order.length];
+                        snapshot();
+                        setEdges((p) => p.map((x) => (x.id === l.id ? { ...x, style: nextStyle } : x)));
+                        flash(`線: ${nextStyle === "arrow" ? "矢印" : nextStyle === "line" ? "直線" : "点線"}`);
+                      }}
+                    >
+                      <title>クリックで線の種類を切替 / Shift+クリックでラベル / Alt+クリックで削除</title>
+                    </line>
+                  </g>
+                );
+              })}
             </g>
           </svg>
 
@@ -643,10 +743,12 @@ export default function Whiteboard() {
             const kind = n.kind ?? "sticky";
             const isEditing = editing === n.id;
             const isConnectSrc = connectFrom === n.id;
+            const isSel = sel.has(n.id);
             return (
               <div
                 key={n.id}
                 data-note
+                data-selected={isSel ? "1" : undefined}
                 onPointerDown={(e) => onNodePointerDown(e, n)}
                 onPointerMove={onNodePointerMove}
                 onPointerUp={onNodePointerUp}
@@ -656,6 +758,9 @@ export default function Whiteboard() {
                   left: n.x, top: n.y, width: n.w ?? 200,
                   height: kind === "frame" ? (n.h && n.h > 0 ? n.h : 240) : undefined,
                   cursor: connectMode ? "crosshair" : "grab",
+                  // 選択リング。boxShadow は種類ごとに上書きされるので outline を使う
+                  outline: isSel ? "2px solid var(--accent)" : undefined,
+                  outlineOffset: isSel ? 2 : undefined,
                   ...(kind === "sticky" ? {
                     background: c.bg,
                     border: `1px solid ${isConnectSrc ? "var(--accent)" : c.border}`,
@@ -746,13 +851,55 @@ export default function Whiteboard() {
           })}
         </div>
 
+        {/* 範囲選択の枠（Shift+背景ドラッグ中） */}
+        {band && (
+          <div className="pointer-events-none absolute border border-[var(--accent)]"
+            style={{
+              left: Math.min(band.x0, band.x1), top: Math.min(band.y0, band.y1),
+              width: Math.abs(band.x1 - band.x0), height: Math.abs(band.y1 - band.y0),
+              background: "rgba(0,243,255,0.08)",
+            }} />
+        )}
+
+        {/* 選択中のまとめ操作。何件選んでいるかと、できることを出す。 */}
+        {sel.size > 0 && (
+          <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 flex-wrap items-center gap-1.5 rounded-forge border border-[var(--line)] bg-[rgba(8,11,18,0.92)] px-2 py-1.5">
+            <span className="text-[10px] text-fg-strong label-mono">{sel.size}件選択</span>
+            {Object.entries(COLORS).map(([key, col]) => (
+              <button key={key} type="button" aria-label={`選択中を${key}にする`}
+                onClick={() => {
+                  snapshot();
+                  setNodes((p) => p.map((n) => (sel.has(n.id) ? { ...n, color: key } : n)));
+                }}
+                className="h-4 w-4 rounded-full border"
+                style={{ background: col.bg, borderColor: col.border }} />
+            ))}
+            <button type="button" aria-label="選択中をまとめて削除" onClick={() => {
+              snapshot();
+              // 選択したノードと、それに繋がる線も一緒に消す（線だけ残らないように）
+              setNodes((p) => p.filter((n) => !sel.has(n.id)));
+              setEdges((p) => p.filter((e) => !sel.has(e.from) && !sel.has(e.to)));
+              flash(`${sel.size}件を削除`);
+              setSel(new Set());
+            }}
+              className="rounded border border-panel px-2 py-0.5 text-[10px] text-muted transition hover:text-[#ff9b9b] label-mono">
+              削除
+            </button>
+            <button type="button" aria-label="選択を解除" onClick={() => setSel(new Set())}
+              className="rounded border border-panel px-2 py-0.5 text-[10px] text-muted transition hover:text-fg-strong label-mono">
+              選択解除
+            </button>
+          </div>
+        )}
+
         {/* empty hint */}
         {loaded && nodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
             <p className="text-center text-[11px] leading-relaxed tracking-[0.14em] text-muted/60 label-mono">
               ダブルクリックで付箋を追加<br />
               ＋付箋 / Ｔテキスト / ▭フレーム · 🔗で矢印接続 · ↩︎↪︎で取り消し<br />
-              エージェントに「ボードに◯◯を書いて」と頼むこともできます
+              Shift+ドラッグで範囲選択 · Shift+クリックで複数選択<br />
+              線はクリックで種類切替 / Shift+クリックでラベル / Alt+クリックで削除
             </p>
           </div>
         )}

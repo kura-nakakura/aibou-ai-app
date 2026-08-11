@@ -61,20 +61,29 @@ def list_schedules(limit: int = 100) -> List[dict]:
     return list(_mem[:limit])
 
 
-def add(instruction: str, time: str = "08:00", days="daily") -> dict:
+def add(instruction: str, time: str = "08:00", days="daily", automation_id: str = "") -> dict:
+    """定期実行を登録する。
+
+    automation_id を渡すと、エージェントへの指示ではなく BOARD の自動化
+    （automations）を時刻で回す。BOARDの自動化は今まで手動実行しかできず、
+    「毎朝〜する」と書いてあるのに発火する仕組みが無かった。
+    """
     instruction = (instruction or "").strip()
-    if not instruction:
+    automation_id = (automation_id or "").strip()
+    if not instruction and not automation_id:
         return {"error": "instruction is empty"}
     time = (time or "08:00").strip()
     sched = {
         "id": str(uuid.uuid4()),
-        "instruction": instruction,
+        "instruction": instruction or f"自動化を実行（{automation_id[:8]}）",
         "time": time,
         "days": _normalize_days(days),
         "enabled": True,
         "last_run": "",
         "created_at": _now().isoformat(),
     }
+    if automation_id:
+        sched["automation_id"] = automation_id
     c = config.get_supabase()
     if c:
         try:
@@ -133,10 +142,21 @@ def tick() -> dict:
     ran = []
     for s in _due(list_schedules(1000)):
         final = ""
+        auto_id = (s.get("automation_id") or "").strip()
         try:
-            for ev in agent.run_stream(s.get("instruction", ""), approval=False):
-                if ev.get("phase") == "final":
-                    final = ev.get("text", "")
+            if auto_id:
+                # BOARDの自動化を時刻で回す（担当AI・根拠資料・条件も効く）
+                import automations
+                res = automations.run_flow(auto_id)
+                final = res.get("error") or res.get("final_output") or ""
+                if not res.get("error"):
+                    skipped = res.get("skipped") or 0
+                    final = (f"[{res.get('name', '自動化')}] 実行 {res.get('ran', 0)}"
+                             + (f" / スキップ {skipped}" if skipped else "") + "\n" + final)
+            else:
+                for ev in agent.run_stream(s.get("instruction", ""), approval=False):
+                    if ev.get("phase") == "final":
+                        final = ev.get("text", "")
         except Exception as e:
             final = f"(実行エラー: {e})"
         _mark_ran(s.get("id"))

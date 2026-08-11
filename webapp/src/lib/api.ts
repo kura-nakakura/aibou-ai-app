@@ -517,7 +517,15 @@ export interface BoardNode {
   h?: number;      // 0/undefined = auto height
   kind?: "sticky" | "text" | "frame";
 }
-export interface BoardEdge { id: string; from: string; to: string }
+export interface BoardEdge {
+  id: string;
+  from: string;
+  to: string;
+  /** 線の見た目。未指定は矢印（従来の保存データもそのまま表示できる）。 */
+  style?: "arrow" | "line" | "dashed";
+  /** 線の中央に出すラベル（「〜のため」「原因」など関係の説明）。 */
+  label?: string;
+}
 export interface BoardData { nodes: BoardNode[]; edges: BoardEdge[] }
 export interface BoardMeta { id: string; name: string; updated_at?: string; count?: number }
 
@@ -603,6 +611,7 @@ export interface ScheduleItem {
   days?: string;        // "daily" | "mon,wed,fri"
   enabled?: boolean;
   last_run?: string;
+  automation_id?: string;   // 指定時は BOARD の自動化を回す
 }
 
 export async function schedulesList(): Promise<ScheduleItem[]> {
@@ -612,11 +621,15 @@ export async function schedulesList(): Promise<ScheduleItem[]> {
   return data.items ?? [];
 }
 
-export async function scheduleAdd(instruction: string, time: string, days = "daily"): Promise<ScheduleItem> {
+/** POST /scheduler — 定期実行を登録する。
+ *  automationId を渡すと、指示ではなく BOARD の自動化を時刻で回す。 */
+export async function scheduleAdd(
+  instruction: string, time: string, days = "daily", automationId = "",
+): Promise<ScheduleItem> {
   const res = await fetch(`${requireApiUrl()}/scheduler`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ instruction, time, days }),
+    body: JSON.stringify({ instruction, time, days, automation_id: automationId }),
   });
   if (!res.ok) throw new Error(`Schedule add failed (${res.status})`);
   return (await res.json()) as ScheduleItem;
