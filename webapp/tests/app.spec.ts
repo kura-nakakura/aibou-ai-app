@@ -284,6 +284,46 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── ⑪ HOME: ウィジェットの並べ替え・表示切替（ロック画面のようなカスタム性） ── */
+test("HOME widgets can be reordered, hidden, restored and remembered", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "HOME");
+  const ids = () => page.locator("[data-widget]").evaluateAll(
+    (els) => els.map((e) => e.getAttribute("data-widget")));
+  await expect(page.locator("[data-widget]").first()).toBeVisible({ timeout: 8_000 });
+  expect((await ids())[0]).toBe("agent");
+
+  // カスタマイズに入る
+  await page.getByRole("button", { name: /カスタマイズ/ }).click();
+  await expect(page.getByText("非表示（タップで戻す）")).toBeVisible({ timeout: 5_000 });
+
+  // 計器盤を先頭へ
+  await page.getByLabel("計器盤を前へ").click();
+  await expect.poll(async () => (await ids())[0]).toBe("dials");
+
+  // 通知を隠す → トレイから戻すと元の位置に返る
+  const before = await ids();
+  await page.getByLabel("通知を隠す").click();
+  await expect.poll(async () => (await ids()).includes("notifications")).toBe(false);
+  await page.getByLabel("通知を表示する").click();
+  await expect.poll(async () => await ids()).toEqual(before);
+
+  // 完了すると操作バーは消える
+  await page.getByRole("button", { name: /✓ 完了/ }).click();
+  await expect(page.getByLabel("計器盤を前へ")).toHaveCount(0);
+
+  // 再読込しても並びは残る
+  await page.reload();
+  await enterApp(page);
+  await expect.poll(async () => (await ids())[0], { timeout: 10_000 }).toBe("dials");
+
+  // 既定に戻せる
+  await page.getByRole("button", { name: /カスタマイズ/ }).click();
+  await page.getByRole("button", { name: /既定の並びに戻す/ }).click();
+  await expect.poll(async () => (await ids())[0]).toBe("agent");
+});
+
 /* ── ⑩ CHAT: 会話 / 司令塔（実行）の切替（offlineでも切替とヒントは確認できる） ── */
 test("CHAT can switch between conversation and agent (司令塔) mode", async ({ page }) => {
   await page.goto("/");

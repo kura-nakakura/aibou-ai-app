@@ -36,6 +36,10 @@ import {
 } from "@/lib/api";
 import type { ChatSettings } from "@/components/Chat";
 import ArtifactViewer from "@/components/ArtifactViewer";
+import {
+  WIDGET_META, defaultLayout, loadLayout, saveLayout, visible, move,
+  toggleHidden, toggleWide, isWide, type HomeLayout, type WidgetId,
+} from "@/lib/homeLayout";
 import Markdown from "@/components/Markdown";
 
 type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
@@ -60,6 +64,12 @@ export default function Home({
   const [notes, setNotes] = useState<AppNotification[]>([]);
   const [arts, setArts] = useState<ArtifactMeta[]>([]);
   const [offline, setOffline] = useState(false);
+  // ⑪ ロック画面のように、並び・表示/非表示・幅を自分で決められるようにする
+  const [layout, setLayout] = useState<HomeLayout>(defaultLayout);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => { setLayout(loadLayout()); }, []);
+  const apply = (next: HomeLayout) => { setLayout(next); saveLayout(next); };
 
   const refresh = useCallback(async () => {
     if (!API_URL) { setOffline(true); return; }
@@ -91,9 +101,47 @@ export default function Home({
       ]
     : [];
 
+  const shown = visible(layout);
+
+  /** ウィジェットIDから中身を作る（並びは layout が決める）。 */
+  const renderWidget = (id: WidgetId) => {
+    switch (id) {
+      case "agent":
+        return <AgentConsole settings={settings} offline={offline} onDidAct={refresh} onNavigate={onNavigate} />;
+      case "dials":
+        return <InstrumentCluster dials={dials} loading={!summary && !offline} />;
+      case "agenda":
+        return <AgendaPanel events={events} offline={offline} onChange={refresh} setEvents={setEvents} />;
+      case "notifications":
+        return <NotificationsPanel notes={notes} offline={offline}
+          onRead={async () => { await notificationsMarkRead(); await refresh(); }} />;
+      case "artifacts":
+        // 生成物はバックエンド接続時のみ意味があるので、未接続なら案内に差し替える
+        return offline
+          ? <div className="glass-silver p-3 text-[11px] leading-relaxed text-muted">
+              生成物はバックエンド接続後に表示されます。
+            </div>
+          : <ArtifactsPanel arts={arts} onChange={refresh} />;
+      case "connect":
+        return <ConnectCard onNavigate={onNavigate} />;
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pb-2">
-      <CockpitHeader name={settings.name} />
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1"><CockpitHeader name={settings.name} /></div>
+        {/* ロック画面のように、並び・表示・幅をその場で編集する */}
+        <button type="button" onClick={() => setEditing((v) => !v)} aria-pressed={editing}
+          className="mt-1 shrink-0 rounded-forge border px-2.5 py-1.5 text-[10px] tracking-[0.12em] label-mono"
+          style={{
+            borderColor: editing ? "var(--accent)" : "var(--panel-bd)",
+            color: editing ? "var(--fg-strong)" : "var(--muted)",
+            background: editing ? "var(--btn-bg)" : "transparent",
+          }}>
+          {editing ? "✓ 完了" : "⌗ カスタマイズ"}
+        </button>
+      </div>
 
       {offline && (
         <div className="glass-silver p-3 text-[11px] leading-relaxed text-muted">
@@ -102,25 +150,74 @@ export default function Home({
         </div>
       )}
 
-      {/* Hero: agent console (wide) + instrument cluster */}
+      {/* ウィジェットは保存した並びで出す。編集中は各枠に操作バーが付く。 */}
       <div className="grid gap-3 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <AgentConsole settings={settings} offline={offline} onDidAct={refresh} onNavigate={onNavigate} />
-        </div>
-        <InstrumentCluster dials={dials} loading={!summary && !offline} />
+        {shown.map((id) => (
+          <div key={id} data-widget={id} className={isWide(layout, id) ? "lg:col-span-2" : ""}>
+            {editing && (
+              <div className="mb-1 flex flex-wrap items-center gap-1 rounded-forge border border-[var(--line)] bg-[rgba(8,11,18,0.6)] px-2 py-1">
+                <span className="text-[10px] text-fg-strong label-mono">{WIDGET_META[id].label}</span>
+                <div className="flex-1" />
+                <button type="button" aria-label={`${WIDGET_META[id].label}を前へ`}
+                  onClick={() => apply(move(layout, id, -1))} disabled={shown[0] === id}
+                  className="rounded border border-panel px-1.5 text-[10px] text-muted transition hover:text-fg-strong disabled:opacity-30">↑</button>
+                <button type="button" aria-label={`${WIDGET_META[id].label}を後へ`}
+                  onClick={() => apply(move(layout, id, 1))} disabled={shown[shown.length - 1] === id}
+                  className="rounded border border-panel px-1.5 text-[10px] text-muted transition hover:text-fg-strong disabled:opacity-30">↓</button>
+                <button type="button" aria-label={`${WIDGET_META[id].label}の幅を変える`}
+                  onClick={() => apply(toggleWide(layout, id))}
+                  className="rounded border border-panel px-1.5 text-[10px] label-mono transition"
+                  style={{ color: isWide(layout, id) ? "var(--accent)" : "var(--muted)" }}>
+                  {isWide(layout, id) ? "横長" : "通常"}
+                </button>
+                <button type="button" aria-label={`${WIDGET_META[id].label}を隠す`}
+                  onClick={() => apply(toggleHidden(layout, id))}
+                  className="rounded border border-panel px-1.5 text-[10px] text-muted transition hover:text-[#ff9b9b]">✕</button>
+              </div>
+            )}
+            {renderWidget(id)}
+          </div>
+        ))}
       </div>
 
-      {/* Bento: agenda (wide) + notifications / connect */}
-      <div className="grid gap-3 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <AgendaPanel events={events} offline={offline} onChange={refresh} setEvents={setEvents} />
+      {/* 編集中：隠したウィジェットを戻せるトレイ（戻せないと詰む） */}
+      {editing && (
+        <div className="glass-silver p-3">
+          <div className="mb-1.5 text-[10px] tracking-[0.2em] text-muted label-mono">
+            非表示（タップで戻す）
+          </div>
+          {layout.hidden.length === 0 ? (
+            <p className="text-[11px] text-muted">すべて表示しています。</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {layout.order.filter((id) => layout.hidden.includes(id)).map((id) => (
+                <button key={id} type="button" onClick={() => apply(toggleHidden(layout, id))}
+                  aria-label={`${WIDGET_META[id].label}を表示する`}
+                  className="rounded-forge border border-panel px-2.5 py-1 text-[11px] text-muted transition hover:border-[var(--line)] hover:text-fg-strong">
+                  ＋ {WIDGET_META[id].label}
+                  <span className="ml-1 text-[9px] text-muted/70">{WIDGET_META[id].hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button type="button" onClick={() => apply(defaultLayout())}
+            className="mt-2 rounded-forge border border-panel px-2.5 py-1 text-[10px] text-muted transition hover:text-fg-strong label-mono">
+            ↺ 既定の並びに戻す
+          </button>
         </div>
-        <div className="flex flex-col gap-3">
-          <NotificationsPanel notes={notes} offline={offline} onRead={async () => { await notificationsMarkRead(); await refresh(); }} />
-          {!offline && <ArtifactsPanel arts={arts} onChange={refresh} />}
-          <ConnectCard onNavigate={onNavigate} />
+      )}
+
+      {shown.length === 0 && !editing && (
+        <div className="glass-silver p-4 text-center">
+          <p className="text-[11px] leading-relaxed text-muted">
+            すべてのウィジェットを隠しています。
+            <button type="button" onClick={() => setEditing(true)} className="ml-1 text-[var(--accent)] underline">
+              カスタマイズ
+            </button>
+            から戻せます。
+          </p>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -422,7 +519,7 @@ function AgentConsole({
   };
 
   return (
-    <div className="glass-silver relative flex h-full min-h-[16rem] flex-col overflow-hidden p-0">
+    <div className="glass-silver relative flex min-h-[16rem] flex-col overflow-hidden p-0">
       {/* animated scan line — signals the live agent */}
       <motion.div
         className="h-[2px] w-full"
