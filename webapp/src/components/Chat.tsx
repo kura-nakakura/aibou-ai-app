@@ -24,7 +24,10 @@ import {
 } from "react";
 import type { CoreState } from "./CoreOrb";
 import Markdown from "@/components/Markdown";
-import { streamChat, tts, vision, type ChatTurn } from "@/lib/api";
+import {
+  streamChat, tts, vision, agentActStream, agentExecute,
+  type ChatTurn, type AgentEvent,
+} from "@/lib/api";
 import {
   isSpeechSynthesisSupported,
   playBase64Audio,
@@ -43,6 +46,18 @@ export interface ChatSettings {
   rate?: number;
 }
 
+/** エージェントの実行過程（考えた→道具を使った→結果を見た）。 */
+export interface AgentStep {
+  kind: "thinking" | "tool" | "observation" | "error";
+  tool?: string;
+  note?: string;
+  result?: string;
+  detail?: string;
+}
+
+/** 承認待ちの操作（メール送信など、取り消せないもの）。 */
+interface PendingAct { tool: string; params: Record<string, unknown>; note?: string }
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -51,6 +66,10 @@ interface Message {
   image?: string;
   pending?: boolean;
   error?: boolean;
+  /** エージェントとして動いたターンの実行記録（会話ターンでは undefined）。 */
+  steps?: AgentStep[];
+  /** このターンで承認を待っている操作。 */
+  await?: PendingAct;
 }
 
 export interface ChatProps {
@@ -113,6 +132,24 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  // 司令塔モード：会話ではなく、道具を使って実際に動く（HOMEのエージェントと同じ）
+  const [agentMode, setAgentMode] = useState(false);
+  const [approval, setApproval] = useState(true);   // 取り消せない操作は実行前に確認
+  const actedRef = useRef(false);
+
+  // モードは覚えておく（毎回切り替えるのは面倒）
+  useEffect(() => {
+    try {
+      setAgentMode(localStorage.getItem("forge_chat_agent") === "1");
+      setApproval(localStorage.getItem("forge_chat_approval") !== "0");
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("forge_chat_agent", agentMode ? "1" : "0");
+      localStorage.setItem("forge_chat_approval", approval ? "1" : "0");
+    } catch { /* ignore */ }
+  }, [agentMode, approval]);
   const [pendingImage, setPendingImage] = useState<{ dataUrl: string; base64: string; mime: string } | null>(null);
   const [speaking, setSpeaking] = useState(false);
 
@@ -294,6 +331,66 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
         return;
       }
 
+      // 司令塔モード → 道具を使って実際に動く（会話ではなく実行）。
+      // 実行過程を同じ吹き出しの中に出すので、会話の流れが途切れない。
+      if (agentMode) {
+        actedRef.current = false;
+        const setSteps = (fn: (prev: AgentStep[]) => AgentStep[]) =>
+          setMessages((prev) => prev.map((m) => (
+            m.id === assistantId ? { ...m, steps: fn(m.steps ?? []), pending: false } : m)));
+        cancelRef.current = agentActStream(
+          text, history, settings.name || undefined, approval,
+          (ev: AgentEvent) => {
+            switch (ev.phase) {
+              case "thinking":
+                setSteps((s) => [...s.filter((x) => x.kind !== "thinking"), { kind: "thinking" }]);
+                break;
+              case "tool":
+                actedRef.current = true;
+                setSteps((s) => [...s.filter((x) => x.kind !== "thinking"),
+                  { kind: "tool", tool: ev.tool || "", note: ev.note }]);
+                break;
+              case "observation":
+                setSteps((s) => [...s, { kind: "observation", result: ev.result || "" }]);
+                break;
+              case "approval":
+                setSteps((s) => s.filter((x) => x.kind !== "thinking"));
+                setMessages((prev) => prev.map((m) => (m.id === assistantId
+                  ? { ...m, await: { tool: ev.tool || "", params: ev.params || {}, note: ev.note }, pending: false }
+                  : m)));
+                break;
+              case "error":
+                setSteps((s) => [...s.filter((x) => x.kind !== "thinking"),
+                  { kind: "error", detail: ev.detail || "エラー" }]);
+                break;
+              case "final":
+                setSteps((s) => s.filter((x) => x.kind !== "thinking"));
+                setMessages((prev) => prev.map((m) => (
+                  m.id === assistantId ? { ...m, content: ev.text || "", pending: false } : m)));
+                break;
+            }
+          },
+          (error) => {
+            setStreaming(false);
+            cancelRef.current = null;
+            if (error) {
+              setMessages((prev) => prev.map((m) => (m.id === assistantId
+                ? { ...m, content: m.content || `⚠ ${error}`, pending: false, error: !m.content }
+                : m)));
+              return;
+            }
+            setMessages((prev) => {
+              const done = prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m));
+              const me = done.find((m) => m.id === assistantId);
+              // 音声モードでも結果を読み上げる（会話ターンと同じ扱い）
+              if (me?.content?.trim()) void speakReply(me.content);
+              return done;
+            });
+          },
+        ).cancel;
+        return;
+      }
+
       // Text path → SSE streaming.
       let acc = "";
       const handlers = streamChat(
@@ -322,8 +419,37 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
       );
       cancelRef.current = handlers.cancel;
     },
-    [settings, speakReply],
+    [settings, speakReply, agentMode, approval],
   );
+
+  /** 承認待ちの操作を実行する（メール送信など、取り消せないもの）。 */
+  const approveAct = useCallback(async (msgId: string) => {
+    let act: PendingAct | undefined;
+    setMessages((prev) => prev.map((m) => {
+      if (m.id !== msgId) return m;
+      act = m.await;
+      return { ...m, await: undefined,
+        steps: [...(m.steps ?? []), { kind: "tool" as const, tool: act?.tool ?? "", note: act?.note }] };
+    }));
+    if (!act) return;
+    try {
+      const result = await agentExecute(act.tool, act.params);
+      setMessages((prev) => prev.map((m) => (m.id === msgId
+        ? { ...m, steps: [...(m.steps ?? []), { kind: "observation" as const, result }] } : m)));
+      actedRef.current = true;
+    } catch {
+      setMessages((prev) => prev.map((m) => (m.id === msgId
+        ? { ...m, steps: [...(m.steps ?? []), { kind: "error" as const, detail: "実行に失敗しました" }] } : m)));
+    }
+  }, []);
+
+  /** 承認待ちの操作をやめる（実行しない）。 */
+  const rejectAct = useCallback((msgId: string) => {
+    setMessages((prev) => prev.map((m) => (m.id === msgId
+      ? { ...m, await: undefined,
+          steps: [...(m.steps ?? []), { kind: "observation" as const, result: "（実行しませんでした）" }] }
+      : m)));
+  }, []);
 
   /** Send a text turn (optionally with an attached image → /vision). */
   const send = useCallback(async () => {
@@ -557,6 +683,8 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
                   ? regenerate
                   : undefined
               }
+              onApprove={m.await ? () => void approveAct(m.id) : undefined}
+              onReject={m.await ? () => rejectAct(m.id) : undefined}
             />
           ))}
         </AnimatePresence>
@@ -564,6 +692,35 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
 
       {/* Composer */}
       <div className="mt-2 shrink-0">
+        {/* 会話 / 司令塔（実行）の切替。何ができるモードなのかを明示する。 */}
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+          <div className="flex overflow-hidden rounded-forge border border-panel">
+            {([[false, "💬 会話"], [true, "⚙ 実行（司令塔）"]] as const).map(([on, label]) => (
+              <button key={label} type="button" onClick={() => setAgentMode(on)}
+                aria-pressed={agentMode === on}
+                className="px-3 py-1 text-[10px] tracking-[0.12em] label-mono"
+                style={{
+                  background: agentMode === on ? "var(--btn-bg)" : "transparent",
+                  color: agentMode === on ? "var(--fg-strong)" : "var(--muted)",
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {agentMode && (
+            <>
+              <label className="flex cursor-pointer items-center gap-1.5">
+                <input type="checkbox" checked={approval} onChange={(e) => setApproval(e.target.checked)}
+                  className="accent-[var(--accent)]" />
+                <span className="text-[10px] text-muted label-mono">取り消せない操作は確認する</span>
+              </label>
+              <span className="text-[9px] text-muted">
+                タスク・予定・資料作成・メール・検索など30種の道具を使って実際に動きます
+              </span>
+            </>
+          )}
+        </div>
+
         {pendingImage && (
           <div className="mb-2 flex items-center gap-3 rounded-forge border border-panel bg-[var(--panel)] p-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -618,7 +775,9 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
             onKeyDown={onKeyDown}
             onPaste={onPasteImage}
             rows={1}
-            placeholder={listening ? "聞き取り中…" : "THE FORGE OS にメッセージ… (スクショはCtrl+Vで貼付)"}
+            placeholder={listening ? "聞き取り中…"
+              : agentMode ? "やってほしいことを指示…（例：明日15時に歯医者の予定を入れて）"
+              : "THE FORGE OS にメッセージ… (スクショはCtrl+Vで貼付)"}
             className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-fg-strong placeholder:text-muted focus:outline-none"
             style={{ scrollbarWidth: "none" }}
           />
@@ -1009,7 +1168,12 @@ function MicIcon() {
   );
 }
 
-function MessageBubble({ message, onRegenerate }: { message: Message; onRegenerate?: () => void }) {
+function MessageBubble({ message, onRegenerate, onApprove, onReject }: {
+  message: Message;
+  onRegenerate?: () => void;
+  onApprove?: () => void;
+  onReject?: () => void;
+}) {
   const isUser = message.role === "user";
   const settled = !isUser && !message.pending && (message.content.trim().length > 0 || message.error);
   return (
@@ -1039,6 +1203,51 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
             className="mb-2 max-h-56 w-full rounded-lg object-cover"
           />
         )}
+        {/* エージェントとして動いたターンは、何をしたかを本文の前に出す。
+            結果だけ見せると「勝手に何かした」ように見えるので、必ず経過を残す。 */}
+        {message.steps && message.steps.length > 0 && (
+          <div className="mb-2 flex flex-col gap-1 border-b border-panel pb-2">
+            {message.steps.map((st, i) => (
+              <div key={i} className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                {st.kind === "thinking" ? (
+                  <span className="text-muted label-mono">◈ 考えています…</span>
+                ) : st.kind === "tool" ? (
+                  <span className="text-[var(--accent)] label-mono">
+                    ⚙ {st.tool}{st.note ? ` — ${st.note}` : ""}
+                  </span>
+                ) : st.kind === "observation" ? (
+                  <span className="whitespace-pre-wrap text-muted">↳ {(st.result || "").slice(0, 300)}</span>
+                ) : (
+                  <span className="text-[#ff9b9b]">⚠ {st.detail}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 承認待ち — 取り消せない操作は必ず確認してから実行する */}
+        {message.await && (
+          <div className="mb-2 rounded-forge border border-[#ffd06055] bg-[rgba(255,208,96,0.06)] p-2">
+            <div className="text-[10px] text-[#ffd060] label-mono">確認が必要な操作</div>
+            <div className="mt-0.5 text-[11px] text-fg-strong">
+              {message.await.tool}{message.await.note ? ` — ${message.await.note}` : ""}
+            </div>
+            <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap text-[10px] text-muted">
+              {JSON.stringify(message.await.params, null, 1)}
+            </pre>
+            <div className="mt-1.5 flex gap-1.5">
+              <button type="button" onClick={onApprove}
+                className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-3 py-1 text-[10px] text-fg-strong label-mono">
+                実行する
+              </button>
+              <button type="button" onClick={onReject}
+                className="rounded-forge border border-panel px-3 py-1 text-[10px] text-muted transition hover:text-fg-strong label-mono">
+                やめる
+              </button>
+            </div>
+          </div>
+        )}
+
         {message.pending && !message.content ? (
           <TypingDots />
         ) : isUser || message.error ? (

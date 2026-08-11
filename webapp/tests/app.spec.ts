@@ -284,6 +284,26 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── ⑩ CHAT: 会話 / 司令塔（実行）の切替（offlineでも切替とヒントは確認できる） ── */
+test("CHAT can switch between conversation and agent (司令塔) mode", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  // 既定は会話モード（エージェントの説明は出ていない）
+  await expect(page.getByRole("button", { name: "💬 会話" })).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText(/30種の道具/)).toBeHidden();
+
+  // 司令塔モードにすると、何ができるかと承認の設定が出る
+  await page.getByRole("button", { name: /実行（司令塔）/ }).click();
+  await expect(page.getByText(/30種の道具/)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText("取り消せない操作は確認する")).toBeVisible();
+  await expect(page.getByPlaceholder(/やってほしいことを指示/)).toBeVisible();
+
+  // 選んだモードは記憶される
+  await page.reload();
+  await enterApp(page);
+  await expect(page.getByText(/30種の道具/)).toBeVisible({ timeout: 8_000 });
+});
+
 /* ── ⑨ BOARD: multi-select + edge styles (works offline) ──
    既定のビューポートはスマホ幅なのでキャンバスが狭く、座標指定が枠外に出る。
    範囲選択の検証にはPC幅が必要なのでここだけ広げる。 */
