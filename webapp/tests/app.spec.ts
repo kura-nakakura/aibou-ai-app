@@ -284,6 +284,26 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── CODE: cross-file search (works offline) ── */
+test("CODE searches across the workspace files", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "CODE");
+  await page.getByText("WEBアプリ (index.html)").click();
+  await expect(page.getByText("index.html").first()).toBeVisible({ timeout: 8_000 });
+
+  // 別ファイルを足して、その中身を検索で引く
+  page.once("dialog", (d) => void d.accept("notes.js"));
+  await page.getByLabel("Add file").click();
+  await page.locator('textarea[aria-label^="Edit"]').fill("const marker = 'findMeHere';");
+
+  await page.getByLabel("ファイルを検索").fill("findMeHere");
+  await expect(page.getByText(/notes\.js:1/)).toBeVisible({ timeout: 5_000 });
+  // 見つからない語では正直に伝える
+  await page.getByLabel("ファイルを検索").fill("zzz-not-present");
+  await expect(page.getByText("見つかりません")).toBeVisible();
+});
+
 /* ── ⑧ CODE: run + test in a browser sandbox (works offline) ── */
 test("CODE can run the workspace and execute tests in the sandbox", async ({ page }) => {
   await page.goto("/");

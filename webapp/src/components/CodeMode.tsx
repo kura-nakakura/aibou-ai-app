@@ -18,6 +18,7 @@ import {
   buildRunDoc, buildTestDoc, testFiles, RUN_SANDBOX, RUN_CHANNEL,
   type ConsoleLine, type TestSummary,
 } from "@/lib/runner";
+import { diffLines, collapseDiff, changedFiles, type FileChange } from "@/lib/diff";
 
 const LS_WORKSPACES = "forge_code_workspaces";
 const WS_LIMIT = 12;
@@ -109,6 +110,12 @@ export default function CodeMode() {
   const [deep, setDeep] = useState(false);                        // 深く考えるモード
   const [changed, setChanged] = useState<Set<string>>(new Set());
   const [undoSnap, setUndoSnap] = useState<CodeFile[] | null>(null);
+  // チェックポイント（適用前の状態を積む）。1段だけの undo では実用に足りない。
+  const [checkpoints, setCheckpoints] = useState<{ id: string; label: string; at: number; files: CodeFile[] }[]>([]);
+  // 直前の適用の差分レビュー（受け入れる前に何が変わったか見る）
+  const [review, setReview] = useState<{ before: CodeFile[]; changes: FileChange[] } | null>(null);
+  const [diffPath, setDiffPath] = useState<string | null>(null);
+  const [query, setQuery] = useState("");        // ファイル横断検索
   const [preview, setPreview] = useState(false);
   const [copied, setCopied] = useState(false);
   // 実行（CONSOLE / TESTS）— サンドボックスiframe内で本当に動かす
@@ -351,11 +358,16 @@ export default function CodeMode() {
     const summary = `${r.explanation ?? ""}\n\n変更: ${changeList}`;
     patchWs(wsId, { files, log: [...log, { role: "assistant" as const, content: summary.trim() }] });
     setChanged(touched);
+    // 「見てから受け入れる」ための差分。適用は済んでいるが、
+    // 何が変わったかを一覧＋行単位で確認し、ファイル単位で戻せる。
+    const chs = changedFiles(baseFiles, files);
+    setReview(chs.length ? { before: baseFiles, changes: chs } : null);
+    setDiffPath(chs[0]?.path ?? null);
     const first = (r.files ?? []).find((f) => f.action !== "delete");
-    if (first) {
-      setSelected(first.path);
-      setPreview(/\.html?$/i.test(first.path));
-    }
+    if (first) setSelected(first.path);
+    // 変更があるときは差分を最初に見せる（プレビューは ▶ PREVIEW で1クリック）。
+    // ここで先にプレビューを出すと「見てから受け入れる」が成立しない。
+    setPreview(chs.length === 0 && !!first && /\.html?$/i.test(first.path));
   };
 
   /** エージェント実行（SSE）→ 進捗を実況しつつ、完了時に適用。 */
@@ -389,6 +401,11 @@ export default function CodeMode() {
           return;
         }
         setUndoSnap(baseFiles);
+        // 適用前をチェックポイントとして残す（あとから何段でも戻せる）
+        setCheckpoints((prev) => [
+          { id: uid(), label: text.slice(0, 40), at: Date.now(), files: baseFiles },
+          ...prev,
+        ].slice(0, 10));
         applyResult(wsId, log, baseFiles, r);
       },
     ).cancel;
@@ -399,7 +416,66 @@ export default function CodeMode() {
     patchWs(ws.id, { files: undoSnap });
     setUndoSnap(null);
     setChanged(new Set());
+    setReview(null);
   };
+
+  /** チェックポイントまで戻す（何段でも遡れる）。 */
+  const restore = (id: string) => {
+    const cp = checkpoints.find((c) => c.id === id);
+    if (!ws || !cp) return;
+    if (!window.confirm(`「${cp.label}」の直前に戻しますか？（それ以降の変更は失われます）`)) return;
+    patchWs(ws.id, { files: cp.files });
+    setCheckpoints((prev) => prev.slice(prev.findIndex((c) => c.id === id) + 1));
+    setChanged(new Set());
+    setUndoSnap(null);
+    setReview(null);
+  };
+
+  /** 差分レビューから1ファイルだけ元に戻す。 */
+  const revertFile = (path: string) => {
+    if (!ws || !review) return;
+    const was = review.before.find((f) => f.path === path);
+    let files = ws.files.filter((f) => f.path !== path);
+    if (was) files = [...files, { ...was }];
+    files.sort((a, b) => a.path.localeCompare(b.path));
+    patchWs(ws.id, { files });
+    const rest = review.changes.filter((c) => c.path !== path);
+    setReview(rest.length ? { ...review, changes: rest } : null);
+    setDiffPath(rest[0]?.path ?? null);
+    setChanged((prev) => { const n = new Set(prev); n.delete(path); return n; });
+  };
+
+  /** 失敗したテストをそのまま修正指示にする（書く→試す→直すの往復）。 */
+  const fixTests = () => {
+    if (!tests || !tests.failed) return;
+    const failed = tests.cases.filter((c) => !c.ok)
+      .map((c) => `- ${c.name}: ${c.error ?? "失敗"}`).join("\n");
+    setInstruction(
+      `テストが ${tests.failed} 件失敗しています。原因を直してください。\n`
+      + `テストファイル自体は変更せず、実装側を修正してください。\n\n【失敗したテスト】\n${failed}`,
+    );
+  };
+
+  /** コンソールのエラーをそのまま修正指示にする。 */
+  const fixErrors = () => {
+    const errs = logs.filter((l) => l.level === "error").map((l) => `- ${l.text}`).join("\n");
+    if (!errs) return;
+    setInstruction(`実行時にエラーが出ています。原因を直してください。\n\n【エラー】\n${errs}`);
+  };
+
+  /** ワークスペース横断の検索（該当ファイルと行を返す）。 */
+  const hits = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || !ws) return [];
+    const out: { path: string; line: number; text: string }[] = [];
+    for (const f of ws.files) {
+      const lines = (f.content || "").split("\n");
+      for (let i = 0; i < lines.length && out.length < 60; i += 1) {
+        if (lines[i].toLowerCase().includes(q)) out.push({ path: f.path, line: i + 1, text: lines[i].trim().slice(0, 120) });
+      }
+    }
+    return out;
+  }, [query, ws]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing) return;
@@ -697,6 +773,26 @@ export default function CodeMode() {
             {running ? "…" : "✓ テスト"}
           </button>
           <div className="flex-1" />
+          {review && (
+            <button type="button" onClick={() => setPreview(false)}
+              className="rounded-forge border border-[var(--accent)] px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-fg-strong label-mono"
+              title="変更内容を確認する">
+              ± 差分 {review.changes.length}
+            </button>
+          )}
+          {checkpoints.length > 0 && (
+            <select
+              aria-label="チェックポイントに戻す"
+              value=""
+              onChange={(e) => { if (e.target.value) restore(e.target.value); }}
+              className="rounded-forge border border-panel bg-transparent px-2 py-1.5 text-[10px] text-muted label-mono"
+            >
+              <option value="">↩ 履歴 ({checkpoints.length})</option>
+              {checkpoints.map((c) => (
+                <option key={c.id} value={c.id}>{c.label || "変更"} の直前</option>
+              ))}
+            </select>
+          )}
           {undoSnap && (
             <button type="button" onClick={undo} className="rounded-forge border border-[#ffd06044] px-2.5 py-1.5 text-[10px] tracking-[0.12em] text-[#ffd060] label-mono">
               ↩ 元に戻す
@@ -717,12 +813,42 @@ export default function CodeMode() {
               <span className="text-[9px] tracking-[0.2em] text-muted label-mono">FILES</span>
               <button type="button" onClick={addFile} className="text-[11px] text-muted transition hover:text-fg-strong" aria-label="Add file">＋</button>
             </div>
+            {/* 横断検索 — 大きくなったワークスペースで目的の行に飛ぶため */}
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="検索"
+              aria-label="ファイルを検索"
+              className="mb-1 w-full rounded-md border border-[var(--input-bd)] bg-[var(--input-bg)] px-1.5 py-1 text-[10px] text-fg-strong placeholder:text-muted focus:outline-none"
+            />
+            {query.trim() && (
+              <div className="mb-1 flex flex-col gap-0.5 border-b border-panel pb-1">
+                {hits.length === 0 && <p className="px-1 text-[10px] text-muted">見つかりません</p>}
+                {hits.map((h, i) => (
+                  <button key={i} type="button"
+                    onClick={() => { setSelected(h.path); setPreview(false); }}
+                    className="rounded px-1 py-0.5 text-left text-[9px] leading-tight text-muted transition hover:text-fg-strong"
+                    title={`${h.path}:${h.line}`}>
+                    <span className="text-[var(--accent)]">{h.path}:{h.line}</span> {h.text}
+                  </button>
+                ))}
+              </div>
+            )}
             {ws.files.length === 0 && <p className="px-1 text-[10px] text-muted">まだファイルがありません</p>}
             {ws.files.map((f) => (
               <div key={f.path} className="group flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={() => { setSelected(f.path); setPreview(/\.html?$/i.test(f.path) && preview); }}
+                  onClick={() => {
+                    setSelected(f.path);
+                    setPreview(/\.html?$/i.test(f.path) && preview);
+                    // 差分レビュー中は、選んだファイルの差分に合わせる。
+                    // 変更が無いファイルを選んだら差分表示から抜けて編集に戻る。
+                    if (review) {
+                      if (review.changes.some((c) => c.path === f.path)) setDiffPath(f.path);
+                      else setReview(null);
+                    }
+                  }}
                   className="min-w-0 flex-1 truncate rounded-md px-1.5 py-1 text-left text-[11px] transition"
                   style={{
                     background: selected === f.path ? "rgba(255,255,255,0.06)" : "transparent",
@@ -744,6 +870,10 @@ export default function CodeMode() {
               <div className="grid flex-1 place-items-center p-6 text-center text-[11px] leading-relaxed text-muted">
                 左の指示ボックスから作りたいものを伝えるか、＋でファイルを追加してください。
               </div>
+            ) : review && !preview ? (
+              <DiffPane review={review} path={diffPath} onPick={setDiffPath}
+                onRevert={revertFile} onClose={() => setReview(null)}
+                onEdit={() => { setReview(null); }} />
             ) : preview && isHtml ? (
               <iframe
                 key={`prev-${htmlEntry}-${runNonce}`}
@@ -788,6 +918,19 @@ export default function CodeMode() {
                 </span>
               )}
               <div className="flex-1" />
+              {/* 失敗・エラーをそのまま指示にする（書く→試す→直すの往復） */}
+              {runTab === "tests" && tests && tests.failed > 0 && (
+                <button type="button" onClick={fixTests}
+                  className="rounded border border-[var(--line)] px-2 py-0.5 text-[9px] text-fg-strong label-mono">
+                  ✎ 失敗を直す
+                </button>
+              )}
+              {runTab === "console" && logs.some((l) => l.level === "error") && (
+                <button type="button" onClick={fixErrors}
+                  className="rounded border border-[var(--line)] px-2 py-0.5 text-[9px] text-fg-strong label-mono">
+                  ✎ エラーを直す
+                </button>
+              )}
               <button type="button" onClick={() => { setLogs([]); setTests(null); }}
                 className="text-[9px] text-muted transition hover:text-fg-strong label-mono">クリア</button>
               <button type="button" onClick={() => setRunTab(null)} aria-label="実行結果を閉じる"
@@ -843,6 +986,93 @@ export default function CodeMode() {
             className="hidden"
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ── 差分レビュー ──────────────────────────────────────────────────
+   エージェントの変更を行単位で確認し、納得できないファイルだけ戻す。
+   生成AIに任せるうえで「何が変わったか分からない」のが一番危ないので、
+   適用後すぐこの画面に切り替わる。 */
+function DiffPane({
+  review, path, onPick, onRevert, onClose, onEdit,
+}: {
+  review: { before: CodeFile[]; changes: FileChange[] };
+  path: string | null;
+  onPick: (p: string) => void;
+  onRevert: (p: string) => void;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const cur = review.changes.find((c) => c.path === path) ?? review.changes[0];
+  const d = useMemo(
+    () => (cur ? diffLines(cur.before ?? "", cur.after ?? "") : null),
+    [cur],
+  );
+  const rows = useMemo(() => (d ? collapseDiff(d.lines, 3) : []), [d]);
+  if (!cur || !d) return null;
+
+  const kind = cur.before === null ? "新規" : cur.after === null ? "削除" : "変更";
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* 変更ファイルの一覧 */}
+      <div className="flex flex-wrap items-center gap-1 border-b border-panel p-1.5">
+        <span className="text-[9px] tracking-[0.16em] text-muted label-mono">変更 {review.changes.length}件</span>
+        {review.changes.map((c) => (
+          <button key={c.path} type="button" onClick={() => onPick(c.path)}
+            className="rounded-full border px-2 py-0.5 text-[9px] label-mono"
+            style={{
+              borderColor: c.path === cur.path ? "var(--accent)" : "var(--panel-bd)",
+              color: c.path === cur.path ? "var(--fg-strong)" : "var(--muted)",
+            }}
+            title={`${c.path} +${c.added} -${c.removed}`}>
+            {c.path} <span style={{ color: "#60d394" }}>+{c.added}</span>{" "}
+            <span style={{ color: "#ff9b9b" }}>-{c.removed}</span>
+          </button>
+        ))}
+        <div className="flex-1" />
+        <button type="button" onClick={() => onRevert(cur.path)}
+          className="rounded border border-[#ffd06044] px-2 py-0.5 text-[9px] text-[#ffd060] label-mono"
+          title="このファイルだけ変更前に戻す">↩ この1件を戻す</button>
+        <button type="button" onClick={onEdit}
+          className="rounded border border-panel px-2 py-0.5 text-[9px] text-muted transition hover:text-fg-strong label-mono">
+          ✓ 受け入れて編集へ
+        </button>
+        <button type="button" onClick={onClose} aria-label="差分を閉じる"
+          className="px-1 text-[10px] text-muted transition hover:text-fg-strong">✕</button>
+      </div>
+
+      <div className="flex items-center gap-2 border-b border-panel px-2 py-1">
+        <span className="truncate text-[10px] text-fg-strong">{cur.path}</span>
+        <span className="text-[9px] text-muted label-mono">{kind}</span>
+        {d.truncated && (
+          <span className="text-[9px] text-[#ffcf8b] label-mono">※ 大きすぎるため全置換として表示</span>
+        )}
+      </div>
+
+      {/* 行差分 */}
+      <div className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-relaxed">
+        {rows.map((r, i) => r.kind === "gap" ? (
+          <div key={i} className="px-2 py-0.5 text-[9px] text-muted"
+            style={{ background: "rgba(255,255,255,0.02)" }}>
+            ⋯ {r.count}行省略
+          </div>
+        ) : (
+          <div key={i} className="flex gap-2 px-2"
+            style={{
+              background: r.line.op === "add" ? "rgba(96,211,148,0.10)"
+                : r.line.op === "del" ? "rgba(255,155,155,0.10)" : "transparent",
+            }}>
+            <span className="w-8 shrink-0 select-none text-right text-[9px] text-muted">{r.line.a ?? ""}</span>
+            <span className="w-8 shrink-0 select-none text-right text-[9px] text-muted">{r.line.b ?? ""}</span>
+            <span className="w-3 shrink-0 select-none"
+              style={{ color: r.line.op === "add" ? "#60d394" : r.line.op === "del" ? "#ff9b9b" : "var(--muted)" }}>
+              {r.line.op === "add" ? "+" : r.line.op === "del" ? "-" : ""}
+            </span>
+            <span className="whitespace-pre-wrap break-all text-fg">{r.line.text || " "}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
