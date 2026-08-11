@@ -116,6 +116,11 @@ export default function CodeMode() {
   const [review, setReview] = useState<{ before: CodeFile[]; changes: FileChange[] } | null>(null);
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const [query, setQuery] = useState("");        // ファイル横断検索
+  // エージェントに渡すファイルを絞る（Claude Code の @file 指定に相当）。空＝全部。
+  const [ctx, setCtx] = useState<Set<string>>(new Set());
+  // テストが通るまで自動で直す（回数上限つき）
+  const [autoFix, setAutoFix] = useState<{ round: number; max: number } | null>(null);
+  const autoRef2 = useRef(false);
   const [preview, setPreview] = useState(false);
   const [copied, setCopied] = useState(false);
   // 実行（CONSOLE / TESTS）— サンドボックスiframe内で本当に動かす
@@ -370,14 +375,18 @@ export default function CodeMode() {
     setPreview(chs.length === 0 && !!first && /\.html?$/i.test(first.path));
   };
 
-  /** エージェント実行（SSE）→ 進捗を実況しつつ、完了時に適用。 */
-  const send = () => {
-    const text = instruction.trim();
+  /** エージェント実行（SSE）→ 進捗を実況しつつ、完了時に適用。
+   *  text を渡すと指示欄ではなくその内容で実行する（自動修正ループ用）。 */
+  const sendText = (raw?: string) => {
+    const text = (raw ?? instruction).trim();
     if (!text || busy || !ws) return;
     const wsId = ws.id;
-    const baseFiles = ws.files.map((f) => ({ ...f }));
+    // 対象ファイルを絞っているときは、その分だけを渡す（大きなワークスペースで
+    // 関係ないファイルに引きずられないように）。未選択なら全部。
+    const all = ws.files.map((f) => ({ ...f }));
+    const baseFiles = ctx.size ? all.filter((f) => ctx.has(f.path)) : all;
     setBusy(true);
-    setInstruction("");
+    if (raw === undefined) setInstruction("");
     setProgress(deep ? "🧭 計画中…" : "🚀 開始…");
     const log: LogTurn[] = [...ws.log, { role: "user" as const, content: text }].slice(-LOG_LIMIT);
     patchWs(wsId, { log });
@@ -400,16 +409,21 @@ export default function CodeMode() {
           patchWs(wsId, { log: [...log, { role: "assistant" as const, content: `⚠ ${r.error}`, error: true }] });
           return;
         }
-        setUndoSnap(baseFiles);
-        // 適用前をチェックポイントとして残す（あとから何段でも戻せる）
+        // 差分・undo・履歴は「送った分」ではなくワークスペース全体を基準にする
+        // （絞り込み送信でも、他のファイルが消えたように見えないように）
+        setUndoSnap(all);
         setCheckpoints((prev) => [
-          { id: uid(), label: text.slice(0, 40), at: Date.now(), files: baseFiles },
+          { id: uid(), label: text.slice(0, 40), at: Date.now(), files: all },
           ...prev,
         ].slice(0, 10));
-        applyResult(wsId, log, baseFiles, r);
+        applyResult(wsId, log, all, r);
+        // 自動修正中なら、適用直後にテストを回して結果を見る
+        if (autoRef2.current) window.setTimeout(() => runTests(), 300);
       },
     ).cancel;
   };
+
+  const send = () => sendText();
 
   const undo = () => {
     if (!ws || !undoSnap) return;
@@ -448,12 +462,7 @@ export default function CodeMode() {
   /** 失敗したテストをそのまま修正指示にする（書く→試す→直すの往復）。 */
   const fixTests = () => {
     if (!tests || !tests.failed) return;
-    const failed = tests.cases.filter((c) => !c.ok)
-      .map((c) => `- ${c.name}: ${c.error ?? "失敗"}`).join("\n");
-    setInstruction(
-      `テストが ${tests.failed} 件失敗しています。原因を直してください。\n`
-      + `テストファイル自体は変更せず、実装側を修正してください。\n\n【失敗したテスト】\n${failed}`,
-    );
+    setInstruction(fixInstruction(tests));
   };
 
   /** コンソールのエラーをそのまま修正指示にする。 */
@@ -461,6 +470,51 @@ export default function CodeMode() {
     const errs = logs.filter((l) => l.level === "error").map((l) => `- ${l.text}`).join("\n");
     if (!errs) return;
     setInstruction(`実行時にエラーが出ています。原因を直してください。\n\n【エラー】\n${errs}`);
+  };
+
+  /** 失敗内容から修正指示文を組み立てる（手動ボタンと自動ループで共用）。 */
+  const fixInstruction = (t: TestSummary) => {
+    const failed = t.cases.filter((c) => !c.ok)
+      .map((c) => `- ${c.name}: ${c.error ?? "失敗"}`).join("\n");
+    return `テストが ${t.failed} 件失敗しています。原因を直してください。\n`
+      + `テストファイル自体は変更せず、実装側を修正してください。\n\n【失敗したテスト】\n${failed}`;
+  };
+
+  useEffect(() => { autoRef2.current = !!autoFix; }, [autoFix]);
+
+  /** 自動修正ループ：テスト結果が届くたびに、通っていなければもう一度直す。
+   *  上限回数を必ず設ける（際限なくAPIを消費しないため）。 */
+  useEffect(() => {
+    if (!autoFix || !tests || running || busy) return;
+    if (tests.failed === 0) {
+      setAutoFix(null);
+      setProgress(`✓ 自動修正: ${tests.total}件すべて成功しました`);
+      window.setTimeout(() => setProgress(null), 4000);
+      return;
+    }
+    if (autoFix.round >= autoFix.max) {
+      setAutoFix(null);
+      setProgress(`自動修正を${autoFix.max}回試しましたが、まだ${tests.failed}件失敗しています`);
+      window.setTimeout(() => setProgress(null), 6000);
+      return;
+    }
+    const next = autoFix.round + 1;
+    setAutoFix({ ...autoFix, round: next });
+    setProgress(`⟳ 自動修正 ${next}/${autoFix.max} 回目…`);
+    sendText(fixInstruction(tests));
+    // sendText / fixInstruction は毎レンダーで作られるため依存に入れない
+    // （入れるとループが止まらなくなる）。tests の更新だけを起点にする。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tests, autoFix, running, busy]);
+
+  const startAutoFix = () => {
+    if (!tests || !tests.failed) return;
+    setAutoFix({ round: 0, max: 3 });
+  };
+
+  const stopAutoFix = () => {
+    setAutoFix(null);
+    setProgress(null);
   };
 
   /** ワークスペース横断の検索（該当ファイルと行を返す）。 */
@@ -732,6 +786,17 @@ export default function CodeMode() {
             {busy ? "■" : "▶"}
           </button>
         </div>
+        {/* 対象を絞っているときは、それが見えていないと事故になる */}
+        {ctx.size > 0 && (
+          <p className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted">
+            <span className="text-[var(--accent)] label-mono">対象 {ctx.size}件のみ送信</span>
+            <span className="min-w-0 flex-1 truncate">{Array.from(ctx).join(" · ")}</span>
+            <button type="button" onClick={() => setCtx(new Set())}
+              className="rounded border border-panel px-1.5 text-[9px] transition hover:text-fg-strong label-mono">
+              全部に戻す
+            </button>
+          </p>
+        )}
         {!API_URL && (
           <p className="text-[10px] leading-relaxed text-muted">
             ⚠ バックエンド未接続のため、エージェント実行は接続後に使えます（編集・プレビュー・ZIPは可）。
@@ -785,11 +850,15 @@ export default function CodeMode() {
               aria-label="チェックポイントに戻す"
               value=""
               onChange={(e) => { if (e.target.value) restore(e.target.value); }}
-              className="rounded-forge border border-panel bg-transparent px-2 py-1.5 text-[10px] text-muted label-mono"
+              /* select は最長のoptionに合わせて広がるため、幅を明示しないと
+                 長い指示ラベルでスマホ幅を突き抜ける */
+              className="max-w-[8.5rem] shrink-0 truncate rounded-forge border border-panel bg-transparent px-2 py-1.5 text-[10px] text-muted label-mono"
             >
               <option value="">↩ 履歴 ({checkpoints.length})</option>
               {checkpoints.map((c) => (
-                <option key={c.id} value={c.id}>{c.label || "変更"} の直前</option>
+                <option key={c.id} value={c.id}>
+                  {(c.label || "変更").replace(/\s+/g, " ").slice(0, 16)} の直前
+                </option>
               ))}
             </select>
           )}
@@ -859,6 +928,19 @@ export default function CodeMode() {
                   {f.path}
                   {changed.has(f.path) && <span className="ml-1 text-[8px] text-[var(--accent)] label-mono">●</span>}
                 </button>
+                {/* エージェントに渡す対象の指定（◉=含める）。未選択なら全部渡す。 */}
+                <button type="button"
+                  onClick={() => setCtx((prev) => {
+                    const n = new Set(prev);
+                    if (n.has(f.path)) n.delete(f.path); else n.add(f.path);
+                    return n;
+                  })}
+                  aria-label={`${f.path} を対象に${ctx.has(f.path) ? "しない" : "する"}`}
+                  title="エージェントに渡す対象にする"
+                  className="shrink-0 px-1 text-[10px] transition"
+                  style={{ color: ctx.has(f.path) ? "var(--accent)" : "var(--muted)" }}>
+                  {ctx.has(f.path) ? "◉" : "○"}
+                </button>
                 <button type="button" onClick={() => deleteFile(f.path)} className="shrink-0 px-1 text-[10px] text-muted opacity-60 transition hover:text-[#ff8888] sm:opacity-0 sm:group-hover:opacity-100" aria-label={`Delete ${f.path}`}>✕</button>
               </div>
             ))}
@@ -919,10 +1001,24 @@ export default function CodeMode() {
               )}
               <div className="flex-1" />
               {/* 失敗・エラーをそのまま指示にする（書く→試す→直すの往復） */}
-              {runTab === "tests" && tests && tests.failed > 0 && (
-                <button type="button" onClick={fixTests}
-                  className="rounded border border-[var(--line)] px-2 py-0.5 text-[9px] text-fg-strong label-mono">
-                  ✎ 失敗を直す
+              {runTab === "tests" && tests && tests.failed > 0 && !autoFix && (
+                <>
+                  <button type="button" onClick={fixTests}
+                    className="rounded border border-[var(--line)] px-2 py-0.5 text-[9px] text-fg-strong label-mono">
+                    ✎ 失敗を直す
+                  </button>
+                  {/* 通るまで自動で回す。上限3回で必ず止まる。 */}
+                  <button type="button" onClick={startAutoFix} disabled={busy}
+                    title="テストが通るまで、最大3回まで自動で修正を試みます"
+                    className="rounded border border-[var(--line)] bg-[var(--btn-bg)] px-2 py-0.5 text-[9px] text-fg-strong disabled:opacity-40 label-mono">
+                    ⟳ 通るまで直す
+                  </button>
+                </>
+              )}
+              {autoFix && (
+                <button type="button" onClick={stopAutoFix}
+                  className="rounded border border-[#ffd06044] px-2 py-0.5 text-[9px] text-[#ffd060] label-mono">
+                  ■ 自動修正を止める（{autoFix.round}/{autoFix.max}）
                 </button>
               )}
               {runTab === "console" && logs.some((l) => l.level === "error") && (
