@@ -284,6 +284,16 @@ test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
    バックエンド接続時のみ表示されるため、この offline スイートでは到達できない。
    実UIの検証はモックバックエンドを使ったスクショ検証で行っている。 */
 
+/* ── CAPTURE: 文字起こし/ナレーションはバックエンド接続後（offlineでも案内は出る） ── */
+test("CAPTURE explains that transcription needs the backend", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "CAPTURE");
+  await expect(page.getByText("画面録画・録音")).toBeVisible({ timeout: 5_000 });
+  // 録る前はAIパネルを出さない（対象が無いのにボタンだけあるのを避ける）
+  await expect(page.getByText(/AI — 文字起こし/)).toHaveCount(0);
+});
+
 /* ── ⑪ HOME: ウィジェットの並べ替え・表示切替（ロック画面のようなカスタム性） ── */
 test("HOME widgets can be reordered, hidden, restored and remembered", async ({ page }) => {
   await page.goto("/");

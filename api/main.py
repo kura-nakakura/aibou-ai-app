@@ -62,6 +62,7 @@ import sns as sns_mod
 import studio
 import tasks as tasks_module
 import tools
+import transcribe as transcribe_mod
 import vault
 import video_script
 from memory_store import mem_add, mem_recall, mem_recent
@@ -389,6 +390,13 @@ class SlidesExportRequest(BaseModel):
     title: str = ""
     slides: list = Field(default_factory=list)
     theme: str = ""
+
+
+class NarrateRequest(BaseModel):
+    source: str
+    style: str = "explain"
+    seconds: int = 0
+    instruction: str = ""
 
 
 class ShellRunRequest(BaseModel):
@@ -852,6 +860,74 @@ async def code_generate(req: CodeGenerateRequest, _auth: None = Depends(require_
             yield _sse(ev)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ── CAPTURE：文字起こし / ナレーション ──────────────────────────────
+
+@app.get("/capture/status")
+async def capture_status(_auth: None = Depends(require_auth)):
+    """この環境で文字起こし・ナレーションが使えるか（ffmpegとキーの有無）。"""
+    return transcribe_mod.status()
+
+
+@app.post("/capture/transcribe")
+async def capture_transcribe(file: UploadFile = File(...), _auth: None = Depends(require_auth)):
+    """録画/録音を文字起こしする（サーバーで音声を抽出してからAIに渡す）。"""
+    data = await file.read()
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: transcribe_mod.transcribe(data, file.filename or "rec.webm",
+                                                file.content_type or ""))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.post("/capture/narrate")
+async def capture_narrate(req: NarrateRequest, _auth: None = Depends(require_auth)):
+    """文字起こし（または構成メモ）から読み上げ台本を作る。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: transcribe_mod.narration_script(
+            req.source, req.style, req.seconds, req.instruction))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.post("/capture/voiceover")
+async def capture_voiceover(file: UploadFile = File(...), script: str = Form(...),
+                            voice: str = Form(""), rate: str = Form(""),
+                            keep_original: str = Form("0"),
+                            _auth: None = Depends(require_auth)):
+    """台本を読み上げて、録画に重ねた mp4 を返す（base64）。"""
+    text = (script or "").strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "ナレーション台本が空です"})
+    if not transcribe_mod.ffmpeg_available():
+        return JSONResponse(status_code=503, content={
+            "error": "サーバーに ffmpeg が無いためナレーションを重ねられません"})
+
+    video = await file.read()
+    # 台本を音声にする（既存のTTSをそのまま使う）
+    try:
+        audio = await _synthesize_tts(
+            text[:transcribe_mod.MAX_SCRIPT_CHARS],
+            (voice or config.DEFAULT_TTS_VOICE).strip() or config.DEFAULT_TTS_VOICE,
+            (rate or config.DEFAULT_TTS_RATE).strip() or config.DEFAULT_TTS_RATE)
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"error": f"読み上げに失敗しました: {e}"})
+    if not audio:
+        return JSONResponse(status_code=503, content={"error": "読み上げ音声を作れませんでした"})
+
+    keep = str(keep_original).strip() in ("1", "true", "yes", "on")
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: transcribe_mod.voiceover(video, audio, keep))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return {"ok": True, "video_base64": base64.b64encode(res["data"]).decode("ascii"),
+            "seconds": res.get("seconds"), "mixed": res.get("mixed", False)}
 
 
 @app.get("/code/shell")

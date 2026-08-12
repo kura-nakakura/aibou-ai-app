@@ -506,6 +506,63 @@ export async function agentExecute(tool: string, params: Record<string, unknown>
   return data.result ?? "";
 }
 
+/* ---------------- CAPTURE: 文字起こし / ナレーション ---------------- */
+export interface CaptureStatus {
+  ffmpeg: boolean;
+  transcribe: boolean;      // 文字起こしが使えるか（ffmpeg + Geminiキー）
+  narrate: boolean;
+  voiceover: boolean;
+  styles: { key: string; label: string }[];
+  max_mb: number;
+}
+
+/** GET /capture/status — この環境で何ができるか。 */
+export async function captureStatus(): Promise<CaptureStatus> {
+  const res = await fetch(`${requireApiUrl()}/capture/status`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Capture status failed (${res.status})`);
+  return (await res.json()) as CaptureStatus;
+}
+
+/** POST /capture/transcribe — 録画/録音を文字起こしする（サーバーで音声抽出）。 */
+export async function captureTranscribe(blob: Blob, name = "rec.webm"):
+  Promise<{ ok?: boolean; text?: string; seconds?: number; truncated?: boolean; error?: string }> {
+  const form = new FormData();
+  form.append("file", blob, name);
+  const res = await fetch(`${requireApiUrl()}/capture/transcribe`, {
+    method: "POST", headers: authHeaders(), body: form,
+  });
+  return (await res.json().catch(() => ({ error: "文字起こしに失敗しました" })));
+}
+
+/** POST /capture/narrate — 文字起こし/メモから読み上げ台本を作る。 */
+export async function captureNarrate(opts: {
+  source: string; style?: string; seconds?: number; instruction?: string;
+}): Promise<{ ok?: boolean; script?: string; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/capture/narrate`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      source: opts.source, style: opts.style ?? "explain",
+      seconds: Math.round(opts.seconds ?? 0), instruction: opts.instruction ?? "",
+    }),
+  });
+  return (await res.json().catch(() => ({ error: "台本の生成に失敗しました" })));
+}
+
+/** POST /capture/voiceover — 台本を読み上げて録画に重ねた mp4 を返す。 */
+export async function captureVoiceover(opts: {
+  blob: Blob; script: string; keepOriginal?: boolean; name?: string;
+}): Promise<{ ok?: boolean; video_base64?: string; seconds?: number; mixed?: boolean; error?: string }> {
+  const form = new FormData();
+  form.append("file", opts.blob, opts.name ?? "rec.webm");
+  form.append("script", opts.script);
+  form.append("keep_original", opts.keepOriginal ? "1" : "0");
+  const res = await fetch(`${requireApiUrl()}/capture/voiceover`, {
+    method: "POST", headers: authHeaders(), body: form,
+  });
+  return (await res.json().catch(() => ({ error: "ナレーションの合成に失敗しました" })));
+}
+
 /* ---------------- CODE: server-side command run (opt-in) ---------------- */
 export interface ShellStatus {
   enabled: boolean;
