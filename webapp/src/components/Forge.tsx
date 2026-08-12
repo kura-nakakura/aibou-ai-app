@@ -264,7 +264,7 @@ function ForgeResultView({ result, prompt }: { result: ForgeResult; prompt: stri
 
   if (result.kind === "app" && result.code) {
     const projectName = (prompt.trim().slice(0, 30) || "forge_app").replace(/[^\w가-힣ぁ-んァ-ヶ一-龠]+/g, "_");
-    const readme = `# ${prompt.trim() || "Forge App"}\n\nTHE FORGE OS で生成した Streamlit アプリです。\n\n## 実行方法\n\n\`\`\`bash\npip install -r requirements.txt\nstreamlit run app.py\n\`\`\`\n${result.note ? `\n## メモ\n\n${result.note}\n` : ""}`;
+    const readme = `# ${prompt.trim() || "Forge App"}\n\nAIbou（THE FORGE OS）で生成した Streamlit アプリです。\n\n## 実行方法\n\n\`\`\`bash\npip install -r requirements.txt\nstreamlit run app.py\n\`\`\`\n${result.note ? `\n## メモ\n\n${result.note}\n` : ""}`;
     const exportFolder = () =>
       downloadZip(
         {

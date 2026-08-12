@@ -777,7 +777,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
             rows={1}
             placeholder={listening ? "聞き取り中…"
               : agentMode ? "やってほしいことを指示…（例：明日15時に歯医者の予定を入れて）"
-              : "THE FORGE OS にメッセージ… (スクショはCtrl+Vで貼付)"}
+              : "AIbou にメッセージ… (スクショはCtrl+Vで貼付)"}
             className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-fg-strong placeholder:text-muted focus:outline-none"
             style={{ scrollbarWidth: "none" }}
           />

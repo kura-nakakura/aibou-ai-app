@@ -1,7 +1,7 @@
 {
-  "name": "THE FORGE OS",
-  "short_name": "FORGE",
-  "description": "Your personal JARVIS-like AI assistant — THE FORGE OS.",
+  "name": "AIbou — THE FORGE OS",
+  "short_name": "AIbou",
+  "description": "AIbou（相棒）— あなた専属のAIアシスタント。THE FORGE OS で動きます。",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

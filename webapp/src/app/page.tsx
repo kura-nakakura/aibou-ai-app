@@ -217,8 +217,11 @@ function Hud() {
               style={{ paddingBottom: view === "chat" || view === "home" ? "0.5rem" : "0.25rem", paddingTop: view === "chat" || view === "home" ? "0.25rem" : "0" }}
             >
               <CoreOrb size={view === "chat" || view === "home" ? 108 : 72} state={coreState} />
-              <h1 className="label-mono text-glow mt-3 text-[13px] font-normal text-fg-strong sm:text-sm">
-                THE FORGE OS
+              {/* ブランド＋システム名を1行に。AIbou は小文字を含むので
+                  uppercase になる label-mono ではなく brand-wordmark を使う。 */}
+              <h1 className="text-glow mt-3 flex items-baseline gap-2 text-fg-strong">
+                <span className="brand-wordmark text-[17px] sm:text-[19px]">AIbou</span>
+                <span className="brand-sub text-[9px] text-muted">THE FORGE OS</span>
               </h1>
               <p className="mt-0.5 text-[10px] tracking-[0.28em] text-muted/80 label-mono">
                 {loaded ? `${settings.name} · ${stateLabel(coreState)}` : "INITIALIZING"}

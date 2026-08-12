@@ -203,7 +203,7 @@ export default function CodeMode() {
     const branch = window.prompt("プッシュ先の新ブランチ名", defBranch);
     if (!branch?.trim()) return;
     const lastAsk = [...ws.log].reverse().find((t) => t.role === "user")?.content ?? "";
-    const message = window.prompt("コミットメッセージ", lastAsk.slice(0, 72) || "Update via THE FORGE OS / CODE mode");
+    const message = window.prompt("コミットメッセージ", lastAsk.slice(0, 72) || "Update via AIbou / CODE mode");
     if (message === null) return;
     setPushBusy(true);
     try {
@@ -211,7 +211,7 @@ export default function CodeMode() {
         repo: ws.repo,
         base: ws.baseRef || "main",
         branch: branch.trim(),
-        message: message.trim() || "Update via THE FORGE OS / CODE mode",
+        message: message.trim() || "Update via AIbou / CODE mode",
         files: ws.files,
       });
       const pr = r.pr_url ? `

@@ -91,7 +91,7 @@ test("CHAT is the default view; HOME shows the cockpit", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
   // Default landing is CHAT — its message placeholder is unique to that view
-  await expect(page.getByPlaceholder("THE FORGE OS にメッセージ…")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByPlaceholder("AIbou にメッセージ…")).toBeVisible({ timeout: 5_000 });
   // Navigating to HOME renders the cockpit
   await goMode(page, "HOME");
   await expect(page.getByText("PERSONAL COCKPIT")).toBeVisible({ timeout: 5_000 });
@@ -824,7 +824,7 @@ test.describe("desktop layout", () => {
     const newChat = page.getByText("＋ 新しいチャット");
     await expect(newChat).toBeVisible({ timeout: 5_000 });
     const panelBox = await newChat.boundingBox();
-    const inputBox = await page.getByPlaceholder("THE FORGE OS にメッセージ…").boundingBox();
+    const inputBox = await page.getByPlaceholder("AIbou にメッセージ…").boundingBox();
     // Panel hugs the left edge (well left of the centred conversation) and is tall
     expect(panelBox!.x).toBeLessThan(inputBox!.x);
     expect(panelBox!.x).toBeLessThan(120);

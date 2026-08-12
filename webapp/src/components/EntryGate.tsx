@@ -147,10 +147,12 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
             >
               <CoreOrb size={120} state="idle" />
 
-              <h1 className="label-mono text-glow mt-6 text-[16px] font-normal tracking-[0.42em] text-fg-strong">
-                THE FORGE OS
+              {/* ブランド（AIbou 相棒）を主、システム名（THE FORGE OS）を従にする。 */}
+              <h1 className="brand-wordmark text-glow mt-6 flex items-baseline gap-2 text-[22px] text-fg-strong">
+                AIbou
+                <span className="brand-wordmark text-[12px] text-muted">相棒</span>
               </h1>
-              <p className="mt-2 text-[10px] tracking-[0.32em] text-muted label-mono">PERSONAL AI CORE</p>
+              <p className="brand-sub mt-2 text-[9px] text-muted">THE FORGE OS · PERSONAL AI CORE</p>
 
               {supabaseEnabled ? (
                 <div className="mt-7 w-full space-y-2">

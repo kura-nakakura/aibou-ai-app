@@ -22,14 +22,16 @@ const shareTechMono = Share_Tech_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "THE FORGE OS",
-  description: "Your personal JARVIS-like AI assistant — THE FORGE OS.",
-  applicationName: "THE FORGE OS",
+  // ブランドは AIbou（相棒）、その中で動くシステムが THE FORGE OS。
+  // 2つ名で並べる（ホーム画面のラベルは短い方＝AIbou を使う）。
+  title: "AIbou — THE FORGE OS",
+  description: "AIbou（相棒）— あなた専属のAIアシスタント。THE FORGE OS で動きます。",
+  applicationName: "AIbou",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "FORGE",
+    title: "AIbou",
   },
   // アイコンは AIbou のロゴマーク（（ ・ ））。ホーム画面用は余白入り、
   // タブ用は小さくても読めるよう寄せたものを別に用意している。
