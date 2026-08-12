@@ -15,7 +15,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { imageAspects, imageGenerate, API_URL, type ImageAspect, type ImageVariant } from "@/lib/api";
+import { imageAspects, imageEngines, imageGenerate, API_URL, type ImageAspect, type ImageEngine, type ImageVariant } from "@/lib/api";
 
 /** アスペクト比の既定値（/image/aspects が取れないときのフォールバック）。 */
 const FALLBACK_ASPECTS: ImageAspect[] = [
@@ -37,6 +37,8 @@ const LOOKS = [
   { label: "レトロ", add: "retro print, muted palette, film grain" },
 ];
 
+const HF_MAX = 2;   // サーバー側 imagegen.HF_MAX_VARIANTS と合わせる
+
 const EXAMPLES = [
   "朝もやの中の静かな湖、対岸に杉林、水面に反射した空",
   "木のテーブルに置かれた一杯のコーヒーと開いた文庫本、窓からの斜光",
@@ -54,12 +56,26 @@ export default function ImageStudio() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number | null>(null);
+  // エンジン：無料(Pollinations) / HFに割り当てたモデル。HFは遅いので枚数上限が別。
+  const [engs, setEngs] = useState<Record<string, ImageEngine>>({});
+  const [engine, setEngine] = useState("pollinations");
+
+  // HFへ切り替えたら枚数も上限に合わせる（押せない枚数が選ばれたままにしない）
+  useEffect(() => { if (engine === "hf" && n > HF_MAX) setN(HF_MAX); }, [engine, n]);
 
   useEffect(() => {
     let alive = true;
     imageAspects()
       .then((a) => { if (alive && a.length) setAspects(a); })
       .catch(() => { /* フォールバックのままで使える */ });
+    imageEngines()
+      .then((e) => {
+        if (!alive) return;
+        setEngs(e);
+        // HFにモデルを割り当てていれば、そちらを既定にする（意図して入れたはずなので）
+        if (e.hf?.ready) setEngine("hf");
+      })
+      .catch(() => { /* 無料エンジンのままで使える */ });
     return () => { alive = false; };
   }, []);
 
@@ -72,14 +88,16 @@ export default function ImageStudio() {
     setBusy(true);
     setNote(opts?.reroll ? "別案を生成中…" : "生成中…");
     try {
-      const r = await imageGenerate({ prompt: text, aspect, n, offset: nextOffset });
+      const r = await imageGenerate({ prompt: text, aspect, n, offset: nextOffset, engine });
       if (r.error || !r.images?.length) {
         setNote(`⚠ ${r.error ?? "生成できませんでした"}`);
       } else {
         setImages(r.images);
         setShown(text);
         setOffset(nextOffset);
-        setNote(`✓ ${r.images.length}案（${r.width}×${r.height}）`);
+        const via = r.engine === "hf" && r.model ? ` · ${r.model.split("/").pop()}` : "";
+        setNote(`✓ ${r.images.length}案（${r.width}×${r.height}）${via}`
+          + (r.partial_error ? ` ／ 一部失敗: ${r.partial_error}` : ""));
       }
     } catch {
       setNote("⚠ 通信に失敗しました");
@@ -93,7 +111,7 @@ export default function ImageStudio() {
     setBusy(true);
     setNote("保存中…");
     try {
-      const r = await imageGenerate({ prompt: shown, aspect, n: images.length, offset, save: true });
+      const r = await imageGenerate({ prompt: shown, aspect, n: images.length, offset, save: true, engine });
       setNote(r.artifacts?.length ? `✓ ${r.artifacts.length}枚を生成物に保存しました` : `⚠ ${r.error ?? "保存に失敗"}`);
     } catch { setNote("⚠ 保存に失敗しました"); } finally { setBusy(false); }
   };
@@ -151,11 +169,40 @@ export default function ImageStudio() {
           </div>
           <p className="mt-1 text-[9px] text-muted">{cur.label} · {cur.w}×{cur.h}</p>
 
+          <div className="mt-2.5 text-[9px] tracking-[0.16em] text-muted label-mono">エンジン</div>
+          <div className="mt-1 flex gap-1">
+            {[["pollinations", "無料"], ["hf", "HF"]].map(([key, label]) => {
+              const e = engs[key];
+              const ready = key === "pollinations" ? true : !!e?.ready;
+              return (
+                <button key={key} type="button" onClick={() => ready && setEngine(key)}
+                  disabled={!ready} aria-pressed={engine === key}
+                  title={ready ? (e?.model || e?.label || "キー不要の無料エンジン") : (e?.hint || "未設定")}
+                  className="flex-1 min-w-0 truncate rounded-forge border px-2 py-1 text-[10px] label-mono disabled:opacity-30"
+                  style={{
+                    borderColor: engine === key ? "var(--accent)" : "var(--panel-bd)",
+                    color: engine === key ? "var(--fg-strong)" : "var(--muted)",
+                  }}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[9px] leading-relaxed text-muted">
+            {engine === "hf"
+              ? `${engs.hf?.model ?? ""}（1枚ずつ数秒〜数十秒。枚数は2までに絞られます）`
+              : engs.hf?.ready === false
+                ? "HFを使うには 設定 → HF で「画像生成」にモデルを割り当ててください"
+                : "キー不要・すぐ出る"}
+          </p>
+
           <div className="mt-2.5 text-[9px] tracking-[0.16em] text-muted label-mono">枚数</div>
           <div className="mt-1 flex gap-1">
             {[1, 2, 3, 4].map((v) => (
               <button key={v} type="button" onClick={() => setN(v)} aria-pressed={n === v}
-                className="flex-1 rounded-forge border py-1 text-[10px] label-mono"
+                disabled={engine === "hf" && v > HF_MAX}
+                title={engine === "hf" && v > HF_MAX ? "HFのモデルは時間がかかるため2枚までです" : undefined}
+                className="flex-1 rounded-forge border py-1 text-[10px] disabled:opacity-25 label-mono"
                 style={{
                   borderColor: n === v ? "var(--accent)" : "var(--panel-bd)",
                   color: n === v ? "var(--fg-strong)" : "var(--muted)",

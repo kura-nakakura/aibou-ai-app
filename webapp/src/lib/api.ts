@@ -509,11 +509,13 @@ export async function agentExecute(tool: string, params: Record<string, unknown>
 /* ---------------- CAPTURE: 文字起こし / ナレーション ---------------- */
 export interface CaptureStatus {
   ffmpeg: boolean;
-  transcribe: boolean;      // 文字起こしが使えるか（ffmpeg + Geminiキー）
+  transcribe: boolean;      // 文字起こしが使えるか（ffmpeg + Gemini または HFのASRモデル）
   narrate: boolean;
   voiceover: boolean;
   styles: { key: string; label: string }[];
   max_mb: number;
+  engines?: { gemini: boolean; hf: boolean };
+  asr_model?: string;       // HFに割り当てた文字起こしモデル（未設定なら空）
 }
 
 /** GET /capture/status — この環境で何ができるか。 */
@@ -523,11 +525,14 @@ export async function captureStatus(): Promise<CaptureStatus> {
   return (await res.json()) as CaptureStatus;
 }
 
-/** POST /capture/transcribe — 録画/録音を文字起こしする（サーバーで音声抽出）。 */
-export async function captureTranscribe(blob: Blob, name = "rec.webm"):
-  Promise<{ ok?: boolean; text?: string; seconds?: number; truncated?: boolean; error?: string }> {
+/** POST /capture/transcribe — 録画/録音を文字起こしする（サーバーで音声抽出）。
+ *  engine: auto（既定・HFにASRを割り当ててあればHF）/ gemini / hf。 */
+export async function captureTranscribe(blob: Blob, name = "rec.webm", engine = "auto"):
+  Promise<{ ok?: boolean; text?: string; seconds?: number; truncated?: boolean;
+            engine?: string; model?: string; error?: string }> {
   const form = new FormData();
   form.append("file", blob, name);
+  form.append("engine", engine);
   const res = await fetch(`${requireApiUrl()}/capture/transcribe`, {
     method: "POST", headers: authHeaders(), body: form,
   });
@@ -762,11 +767,19 @@ export interface DbStatus {
   error?: string;
 }
 
-/** GET /admin/db/status — which tables exist (persistence readiness). */
+/** GET /admin/db/status — which tables exist (persistence readiness).
+ *  配列が欠けた応答でも設定画面を落とさない（normalizeAiConfig と同じ理由）。 */
 export async function dbStatus(): Promise<DbStatus> {
   const res = await fetch(`${requireApiUrl()}/admin/db/status`, { headers: authHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`DB status failed (${res.status})`);
-  return (await res.json()) as DbStatus;
+  const d = (await res.json().catch(() => ({}))) as Partial<DbStatus>;
+  return {
+    connected: Boolean(d.connected),
+    db_url_set: Boolean(d.db_url_set),
+    present: Array.isArray(d.present) ? d.present : [],
+    missing: Array.isArray(d.missing) ? d.missing : [],
+    error: d.error,
+  };
 }
 
 /** POST /admin/migrate — create missing tables via SUPABASE_DB_URL. */
@@ -864,10 +877,20 @@ export async function lpGenerate(opts: {
 
 /* ---------------- Image studio (multi-variant) ---------------- */
 export interface ImageAspect { key: string; w: number; h: number; label: string }
-export interface ImageVariant { url: string; seed: number }
+export interface ImageVariant { url: string; seed: number; provider?: string }
 export interface ImageResult {
   ok?: boolean; images?: ImageVariant[]; aspect?: string; width?: number; height?: number;
   prompt?: string; offset?: number; artifacts?: { id: string }[]; error?: string;
+  engine?: string; model?: string; max_variants?: number; partial_error?: string;
+}
+export interface ImageEngine { label: string; ready: boolean; model: string; hint?: string }
+
+/** GET /image/engines — 無料エンジン / HFの割り当てモデル、それぞれ使えるか。 */
+export async function imageEngines(): Promise<Record<string, ImageEngine>> {
+  const res = await fetch(`${requireApiUrl()}/image/engines`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Engines failed (${res.status})`);
+  const d = (await res.json()) as { engines?: Record<string, ImageEngine> };
+  return d.engines ?? {};
 }
 
 /** GET /image/aspects — aspect-ratio presets (1:1, 4:5, 9:16, 16:9, 3:2). */
@@ -881,7 +904,7 @@ export async function imageAspects(): Promise<ImageAspect[]> {
 /** POST /image/generate — n variants of one prompt (save=true → artifacts).
  *  offset shifts the seeds so the same prompt can yield further alternatives. */
 export async function imageGenerate(opts: {
-  prompt: string; aspect?: string; n?: number; save?: boolean; offset?: number;
+  prompt: string; aspect?: string; n?: number; save?: boolean; offset?: number; engine?: string;
 }): Promise<ImageResult> {
   const res = await fetch(`${requireApiUrl()}/image/generate`, {
     method: "POST",
@@ -889,6 +912,7 @@ export async function imageGenerate(opts: {
     body: JSON.stringify({
       prompt: opts.prompt, aspect: opts.aspect ?? "1:1",
       n: opts.n ?? 2, save: !!opts.save, offset: opts.offset ?? 0,
+      engine: opts.engine ?? "auto",
     }),
   });
   return (await res.json().catch(() => ({ error: "生成に失敗しました" }))) as ImageResult;
@@ -996,11 +1020,31 @@ export interface AiConfig {
   presets: { chat: string[]; code: string[] };
 }
 
+/** バックエンドの応答に欠けた項目を埋める。
+ *  フロント(Vercel)とバックエンド(Render)は別々に配るので、片方が古いと
+ *  presets などが無い応答が来ることがある。そのとき設定画面が丸ごと落ちて
+ *  KEYCHAINタブにも入れなくなる（＝直せなくなる）ので、必ず既定で埋める。 */
+function normalizeAiConfig(raw: unknown): AiConfig {
+  const d = (raw ?? {}) as Partial<AiConfig> & { presets?: Partial<AiConfig["presets"]> };
+  return {
+    provider: d.provider ?? "auto",
+    hf_model: d.hf_model ?? "",
+    code_model: d.code_model ?? "",
+    active: d.active ?? "none",
+    gemini_ready: Boolean(d.gemini_ready),
+    hf_ready: Boolean(d.hf_ready),
+    presets: {
+      chat: Array.isArray(d.presets?.chat) ? d.presets!.chat : [],
+      code: Array.isArray(d.presets?.code) ? d.presets!.code : [],
+    },
+  };
+}
+
 /** GET /ai/config — current provider/model + options. */
 export async function aiConfigGet(): Promise<AiConfig> {
   const res = await fetch(`${requireApiUrl()}/ai/config`, { headers: authHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`AI config failed (${res.status})`);
-  return (await res.json()) as AiConfig;
+  return normalizeAiConfig(await res.json().catch(() => ({})));
 }
 
 /** POST /ai/config — set provider/model. */
@@ -1011,7 +1055,7 @@ export async function aiConfigSet(patch: { provider?: string; hf_model?: string;
     body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`AI config save failed (${res.status})`);
-  return (await res.json()) as AiConfig;
+  return normalizeAiConfig(await res.json().catch(() => ({})));
 }
 
 /* ---------------- Life (ME mode — personal partner) ---------------- */
@@ -1967,4 +2011,132 @@ export async function getBriefing(): Promise<{ text: string }> {
   const data = (await res.json().catch(() => ({}))) as { text?: string };
   if (!res.ok) throw new Error(`Briefing failed (${res.status})`);
   return { text: data.text ?? "" };
+}
+
+/* ---------------- HF MODELS（HuggingFaceのモデル台帳） ---------------- */
+export interface HfTask {
+  key: string; label: string; hf_task: string;
+  input: "text" | "audio"; output: "text" | "image" | "audio" | "labels" | "vector";
+  wired: string;        // 空なら「お試し実行だけ」＝まだ機能には組み込まれていない
+  note: string;
+}
+export interface HfRole {
+  key: string; label: string; task: string; where: string; model: string;
+}
+export interface HfModel {
+  id: string; model: string; task: string; label: string; note: string;
+  verified?: boolean; last_error?: string; checked_at?: string | null; created_at?: string;
+}
+export interface HfStatus {
+  token_ready: boolean;
+  tasks: HfTask[];
+  roles: HfRole[];
+  assignments: Record<string, string>;
+  registered: number;
+  by_task: Record<string, string[]>;
+  suggested: Record<string, string[]>;
+}
+export interface HfTestResult {
+  ok?: boolean; sample?: string; endpoint?: string;
+  error?: string; retry?: boolean; detail?: string;
+}
+export interface HfRunResult {
+  ok?: boolean; kind?: "text" | "image" | "audio" | "labels" | "vector";
+  text?: string; url?: string; mime?: string; bytes?: number;
+  labels?: { label: string; score: number }[];
+  dim?: number; head?: number[]; audio_base64?: string;
+  error?: string; retry?: boolean; detail?: string;
+}
+
+/** GET /hf/status — 扱えるタスク・役割の割り当て・登録数。
+ *  aiConfigGet と同じ理由で、欠けた配列は空で埋める（画面を落とさない）。 */
+export async function hfStatus(): Promise<HfStatus> {
+  const res = await fetch(`${requireApiUrl()}/hf/status`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`HF status failed (${res.status})`);
+  const d = (await res.json().catch(() => ({}))) as Partial<HfStatus>;
+  return {
+    token_ready: Boolean(d.token_ready),
+    tasks: Array.isArray(d.tasks) ? d.tasks : [],
+    roles: Array.isArray(d.roles) ? d.roles : [],
+    assignments: d.assignments ?? {},
+    registered: d.registered ?? 0,
+    by_task: d.by_task ?? {},
+    suggested: d.suggested ?? {},
+  };
+}
+
+/** GET /hf/models — 登録済みモデルの台帳。 */
+export async function hfModels(): Promise<HfModel[]> {
+  const res = await fetch(`${requireApiUrl()}/hf/models`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`HF models failed (${res.status})`);
+  const d = (await res.json()) as { models?: HfModel[] };
+  return d.models ?? [];
+}
+
+/** POST /hf/models — モデルを台帳に登録する。 */
+export async function hfModelAdd(opts: { model: string; task: string; label?: string; note?: string }):
+  Promise<{ ok?: boolean; model?: HfModel; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/hf/models`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ model: opts.model, task: opts.task, label: opts.label ?? "", note: opts.note ?? "" }),
+  });
+  return (await res.json().catch(() => ({ error: "登録に失敗しました" })));
+}
+
+/** DELETE /hf/models/{id} — 台帳から削除（割り当ても外れる）。 */
+export async function hfModelDelete(id: string): Promise<{ ok?: boolean; cleared_roles?: string[] }> {
+  const res = await fetch(`${requireApiUrl()}/hf/models/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  return (await res.json().catch(() => ({ ok: false })));
+}
+
+/** POST /hf/models/{id}/test — 台帳のモデルを実際に叩いて確かめる。 */
+export async function hfModelTest(id: string): Promise<HfTestResult> {
+  const res = await fetch(`${requireApiUrl()}/hf/models/${encodeURIComponent(id)}/test`, {
+    method: "POST", headers: authHeaders(),
+  });
+  return (await res.json().catch(() => ({ error: "テストに失敗しました" })));
+}
+
+/** POST /hf/test — 登録前にモデルIDとタスクの組み合わせを試す。 */
+export async function hfTest(model: string, task: string): Promise<HfTestResult> {
+  const res = await fetch(`${requireApiUrl()}/hf/test`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ model, task }),
+  });
+  return (await res.json().catch(() => ({ error: "テストに失敗しました" })));
+}
+
+/** POST /hf/assign — 役割にモデルを割り当てる（空文字で解除）。 */
+export async function hfAssign(role: string, model: string):
+  Promise<{ ok?: boolean; assignments?: Record<string, string>; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/hf/assign`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ role, model }),
+  });
+  return (await res.json().catch(() => ({ error: "割り当てに失敗しました" })));
+}
+
+/** GET /hf/search — HuggingFace Hub からモデルを探す。 */
+export async function hfSearch(q: string, task: string, limit = 12):
+  Promise<{ ok?: boolean; models?: { id: string; downloads: number; likes: number; task: string }[];
+            error?: string; suggested?: string[] }> {
+  const p = new URLSearchParams({ q, task, limit: String(limit) });
+  const res = await fetch(`${requireApiUrl()}/hf/search?${p}`, { headers: authHeaders(), cache: "no-store" });
+  return (await res.json().catch(() => ({ error: "検索に失敗しました" })));
+}
+
+/** POST /hf/run — お試し実行（結果はテキスト/画像URL/ラベル/ベクトル）。 */
+export async function hfRun(opts: { model: string; task: string; text?: string; labels?: string[] }):
+  Promise<HfRunResult> {
+  const res = await fetch(`${requireApiUrl()}/hf/run`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ model: opts.model, task: opts.task, text: opts.text ?? "", labels: opts.labels ?? null }),
+  });
+  return (await res.json().catch(() => ({ error: "実行に失敗しました" })));
 }

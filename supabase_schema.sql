@@ -284,3 +284,29 @@ CREATE TABLE IF NOT EXISTS schedules (
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS days text DEFAULT 'daily';
 -- BOARDの自動化を時刻で回すための参照（空ならエージェントへの指示として実行）
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS automation_id text DEFAULT '';
+
+-- 🤗 HF MODELS — HuggingFaceのモデル台帳。タスク（text/image/asr/…）ごとに登録し、
+-- アプリの役割（会話/コード/画像/文字起こし）へ割り当てて使う。
+-- verified は「実際に1回叩いて動いた」かどうか。動作未確認と区別するために持つ。
+CREATE TABLE IF NOT EXISTS hf_models (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  model      text NOT NULL,               -- 例: openai/whisper-large-v3
+  task       text NOT NULL,               -- text | image | asr | translate | …
+  label      text DEFAULT '',
+  note       text DEFAULT '',
+  verified   boolean DEFAULT false,
+  last_error text DEFAULT '',
+  checked_at text DEFAULT '',
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_hf_models_task ON hf_models(task, created_at DESC);
+
+-- 🖼 HFで生成した画像。バイト列をbase64で持ち、/hf/image/{id} で配る。
+-- data: URLを履歴に入れると一覧が数MBになるため、URLで配れるようここに置く。
+CREATE TABLE IF NOT EXISTS hf_images (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  mime       text DEFAULT 'image/png',
+  data       text NOT NULL,               -- base64
+  prompt     text DEFAULT '',
+  created_at timestamptz DEFAULT now()
+);

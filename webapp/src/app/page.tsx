@@ -15,6 +15,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import AiProviderSettings from "@/components/AiProviderSettings";
+import HfModels from "@/components/HfModels";
 import IntegrationsSettings from "@/components/IntegrationsSettings";
 import AppArchive from "@/components/AppArchive";
 import Autopilot from "@/components/Autopilot";
@@ -585,7 +586,7 @@ function GearIcon() {
 
 /* ─── Settings Panel (enhanced) ──────────────────────────────────── */
 
-type SettingsTab = "core" | "persona" | "keychain" | "diagnostics";
+type SettingsTab = "core" | "persona" | "keychain" | "hf" | "diagnostics";
 
 function SettingsPanel({
   initial,
@@ -638,7 +639,7 @@ function SettingsPanel({
 
         {/* Tab bar */}
         <div className="flex border-b border-panel">
-          {(["core", "persona", "keychain", "diagnostics"] as SettingsTab[]).map((t) => (
+          {(["core", "persona", "keychain", "hf", "diagnostics"] as SettingsTab[]).map((t) => (
             <button
               key={t}
               type="button"
@@ -758,6 +759,16 @@ function SettingsPanel({
                 未接続時は端末内に暗号化下書き（AES-256）として保存し、接続後に取り込めます。ここで追加・変更・削除できます。
               </div>
               <Keychain />
+            </>
+          )}
+
+          {tab === "hf" && (
+            <>
+              <div className="mb-3 text-[10px] leading-relaxed text-muted">
+                HuggingFace のモデルを登録して、<b className="text-fg">会話・コード・画像生成・文字起こし</b>に
+                割り当てます。登録したら「テスト」で実際に動くか確かめてください。
+              </div>
+              <HfModels />
             </>
           )}
 

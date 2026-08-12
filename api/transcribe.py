@@ -40,17 +40,34 @@ def ffmpeg_available() -> bool:
     return _ffmpeg() is not None
 
 
-def status() -> dict:
-    """UIが「何ができるか」を判断するための状態。鍵の値は返さない。"""
-    ok_key = False
+def _hf_asr() -> str:
+    """文字起こしに割り当てられた HuggingFace モデル（未設定なら空）。"""
+    try:
+        import hfhub
+        model = hfhub.assigned("asr")
+        return model if (model and hfhub.token_ready()) else ""
+    except Exception:
+        return ""
+
+
+def _gemini_ready() -> bool:
     try:
         import config
-        ok_key = config.gemini_configured()
+        return config.gemini_configured()
     except Exception:
-        pass
+        return False
+
+
+def status() -> dict:
+    """UIが「何ができるか」を判断するための状態。鍵の値は返さない。"""
+    gem = _gemini_ready()
+    hf = _hf_asr()
     return {
         "ffmpeg": ffmpeg_available(),
-        "transcribe": bool(ok_key and ffmpeg_available()),
+        # Gemini でも HF のASRモデルでも文字起こしできる（どちらか有ればよい）
+        "transcribe": bool((gem or hf) and ffmpeg_available()),
+        "engines": {"gemini": gem, "hf": bool(hf)},
+        "asr_model": hf,
         "narrate": True,                    # 台本生成はテキストだけなので常に可
         "voiceover": ffmpeg_available(),
         "styles": [{"key": k, "label": v} for k, v in NARRATION_STYLES.items()],
@@ -104,47 +121,92 @@ def extract_audio(data: bytes, name: str = "rec", seconds: int = MAX_AUDIO_SECON
         shutil.rmtree(work, ignore_errors=True)
 
 
-def transcribe(data: bytes, name: str = "rec.webm", mime: str = "") -> dict:
-    """録画/録音を文字起こしする。{ok, text, seconds, truncated} / {error}。"""
-    if not data:
-        return {"error": "ファイルが空です"}
-    if len(data) > MAX_UPLOAD_BYTES:
-        return {"error": f"ファイルが大きすぎます（上限 {MAX_UPLOAD_BYTES // 1_000_000}MB）"}
+TRANSCRIBE_PROMPT = (
+    "この音声を日本語で文字起こししてください。\n"
+    "・聞こえたことだけを書き、内容の要約や補足はしない\n"
+    "・話者が変わったら改行する\n"
+    "・聞き取れない部分は （聞き取れず） と書く\n"
+    "・相槌や言い直しは自然に整えてよい\n"
+    "文字起こしのみを出力してください。"
+)
 
-    audio, total, truncated, err = extract_audio(data, name)
-    if err:
-        return {"error": err}
 
+def _transcribe_gemini(audio: bytes) -> dict:
     try:
         import config
         model = config.get_gemini_model()
     except Exception:
         model = None
     if model is None:
-        return {"error": "文字起こしには Gemini のキーが必要です（設定 → KEYCHAIN）"}
-
-    prompt = (
-        "この音声を日本語で文字起こししてください。\n"
-        "・聞こえたことだけを書き、内容の要約や補足はしない\n"
-        "・話者が変わったら改行する\n"
-        "・聞き取れない部分は （聞き取れず） と書く\n"
-        "・相槌や言い直しは自然に整えてよい\n"
-        "文字起こしのみを出力してください。"
-    )
+        return {"error": "Geminiのキーが未設定です"}
     try:
-        resp = model.generate_content([prompt, {"mime_type": "audio/mp3", "data": audio}])
+        resp = model.generate_content(
+            [TRANSCRIBE_PROMPT, {"mime_type": "audio/mp3", "data": audio}])
         text = (getattr(resp, "text", "") or "").strip()
     except Exception as e:
         return {"error": f"文字起こしに失敗しました: {e}"}
     if not text:
         return {"error": "音声から文字を取り出せませんでした（無音の可能性があります）"}
-    return {
-        "ok": True,
-        "text": text,
-        "seconds": round(total, 1) if total else None,
-        "truncated": truncated,
-        "limit_seconds": MAX_AUDIO_SECONDS,
-    }
+    return {"ok": True, "text": text}
+
+
+def _transcribe_hf(audio: bytes) -> dict:
+    model = _hf_asr()
+    if not model:
+        return {"error": "HuggingFaceの文字起こしモデルが未割り当てです"}
+    try:
+        import hfhub
+        return hfhub.run_asr(model, audio, "audio/mpeg")
+    except Exception as e:
+        return {"error": f"文字起こしに失敗しました: {e}"}
+
+
+def transcribe(data: bytes, name: str = "rec.webm", mime: str = "",
+               engine: str = "auto") -> dict:
+    """録画/録音を文字起こしする。{ok, text, seconds, truncated, engine} / {error}。
+
+    Gemini でも HuggingFace のASRモデルでもできる。engine="auto" は
+    「HFに文字起こしモデルを割り当ててあればHF、無ければGemini」。
+    片方が失敗したらもう片方に切り替え、どちらで通ったかを結果に入れる。
+    """
+    if not data:
+        return {"error": "ファイルが空です"}
+    if len(data) > MAX_UPLOAD_BYTES:
+        return {"error": f"ファイルが大きすぎます（上限 {MAX_UPLOAD_BYTES // 1_000_000}MB）"}
+
+    hf_model = _hf_asr()
+    gem = _gemini_ready()
+    engine = (engine or "auto").strip().lower()
+    if engine == "hf":
+        order = ["hf"]
+    elif engine == "gemini":
+        order = ["gemini"]
+    else:
+        order = ["hf", "gemini"] if hf_model else ["gemini", "hf"]
+        order = [e for e in order if (e == "hf" and hf_model) or (e == "gemini" and gem)]
+    if not order:
+        return {"error": "文字起こしには Gemini のキー、または HuggingFace の"
+                         "文字起こしモデルの割り当てが必要です（設定 → KEYCHAIN / HF MODELS）"}
+
+    audio, total, truncated, err = extract_audio(data, name)
+    if err:
+        return {"error": err}
+
+    last = ""
+    for eng in order:
+        res = _transcribe_hf(audio) if eng == "hf" else _transcribe_gemini(audio)
+        if res.get("ok"):
+            return {
+                "ok": True,
+                "text": res["text"],
+                "engine": eng,
+                "model": hf_model if eng == "hf" else "gemini",
+                "seconds": round(total, 1) if total else None,
+                "truncated": truncated,
+                "limit_seconds": MAX_AUDIO_SECONDS,
+            }
+        last = res.get("error") or last
+    return {"error": last or "文字起こしに失敗しました"}
 
 
 def narration_script(source: str, style: str = "explain", seconds: int = 0,

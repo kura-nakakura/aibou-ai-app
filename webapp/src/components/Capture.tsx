@@ -397,13 +397,20 @@ export default function Capture() {
                 <button type="button" onClick={() => void runTranscribe()}
                   disabled={!!busy || !caps?.transcribe}
                   title={caps?.transcribe ? "録音音声をAIで書き起こす"
-                    : "サーバーの ffmpeg と Gemini のキーが必要です"}
+                    : "サーバーの ffmpeg と、Geminiのキーか HuggingFace の文字起こしモデルが必要です"}
                   className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-3 py-1.5 text-[10px] tracking-[0.12em] text-fg-strong disabled:opacity-40 label-mono">
                   {busy === "stt" ? "…" : "✎ AIで文字起こし"}
                 </button>
                 {caps && !caps.transcribe && (
                   <span className="text-[9px] text-muted">
-                    {caps.ffmpeg ? "Geminiのキーが未設定です" : "サーバーに ffmpeg がありません"}
+                    {caps.ffmpeg
+                      ? "Geminiのキー、または 設定 → HF で文字起こしモデルの割り当てが必要です"
+                      : "サーバーに ffmpeg がありません"}
+                  </span>
+                )}
+                {caps?.transcribe && caps.engines?.hf && caps.asr_model && (
+                  <span className="text-[9px] text-muted label-mono">
+                    via {caps.asr_model.split("/").pop()}
                   </span>
                 )}
                 {liveText && !transcript && (

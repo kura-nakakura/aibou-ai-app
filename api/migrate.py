@@ -17,6 +17,7 @@ EXPECTED_TABLES = [
     "api_keys", "tasks", "events", "notifications", "automations", "missions",
     "studio_ais", "studio_workflows", "vault_notebooks", "income_jobs",
     "agent_memory", "life_entries", "artifacts", "schedules",
+    "hf_models", "hf_images",
 ]
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

@@ -127,14 +127,40 @@ test("Settings gear icon is clickable and opens panel", async ({ page }) => {
   await expect(page.getByText("CORE SETTINGS")).toBeVisible({ timeout: 5_000 });
 });
 
-test("Settings panel has 4 tabs", async ({ page }) => {
+test("Settings panel has 5 tabs", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
   await page.getByLabel("Settings").click();
   await expect(page.getByText("CORE", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("PERSONA", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("KEYCHAIN", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "HF" })).toBeVisible();
   await expect(page.getByText("DIAGNOSTICS", { exact: true })).toBeVisible();
+});
+
+test("Settings HF tab explains it needs the backend when offline", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await page.getByLabel("Settings").click();
+  await page.getByRole("button", { name: "HF" }).click();
+  // 会話・コード・画像・文字起こしに割り当てる、という説明が出る
+  await expect(page.getByText(/会話・コード・画像生成・文字起こし/)).toBeVisible({ timeout: 5_000 });
+  // バックエンド未接続なら、その理由をはっきり出す（黙って空にしない）
+  await expect(page.getByText(/バックエンド接続後に使えます/)).toBeVisible();
+});
+
+test("Settings tab bar does not overflow at phone width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await enterApp(page);
+  await page.getByLabel("Settings").click();
+  await expect(page.getByText("CORE SETTINGS")).toBeVisible({ timeout: 5_000 });
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  // 5つ目のタブも押せる（幅が潰れて隠れていない）
+  await page.getByRole("button", { name: "HF" }).click();
+  await expect(page.getByText(/バックエンド接続後に使えます/)).toBeVisible({ timeout: 5_000 });
 });
 
 test("Settings CORE tab shows voice + talk speed controls", async ({ page }) => {

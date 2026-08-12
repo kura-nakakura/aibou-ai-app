@@ -107,6 +107,7 @@ def test_transcribe_sends_converted_audio_not_the_webm(monkeypatch):
             return R()
 
     import config
+    monkeypatch.setattr(config, "gemini_configured", lambda: True)
     monkeypatch.setattr(config, "get_gemini_model", lambda: FakeModel())
     res = tr.transcribe(webm, "rec.webm")
     assert res["ok"] and "こんにちは" in res["text"]
@@ -135,6 +136,7 @@ def test_transcribe_empty_result_is_reported(monkeypatch):
             return R()
 
     import config
+    monkeypatch.setattr(config, "gemini_configured", lambda: True)
     monkeypatch.setattr(config, "get_gemini_model", lambda: FakeModel())
     res = tr.transcribe(_make_webm(1), "rec.webm")
     assert res.get("error") and "無音" in res["error"]
@@ -296,6 +298,7 @@ def test_transcribe_endpoint(monkeypatch):
             return R()
 
     import config
+    monkeypatch.setattr(config, "gemini_configured", lambda: True)
     monkeypatch.setattr(config, "get_gemini_model", lambda: FakeModel())
     files = {"file": ("rec.webm", _make_webm(2), "video/webm")}
     r = client.post("/capture/transcribe", files=files)

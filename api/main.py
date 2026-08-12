@@ -42,6 +42,7 @@ import fileread
 import forge
 import gh
 import gservice
+import hfhub
 import imagegen
 import income
 import keepalive as keepalive_mod
@@ -289,6 +290,31 @@ class AiConfigRequest(BaseModel):
     code_model: Optional[str] = None
 
 
+class HfModelAddRequest(BaseModel):
+    model: str
+    task: str
+    label: str = ""
+    note: str = ""
+
+
+class HfTestRequest(BaseModel):
+    model: str
+    task: str
+
+
+class HfAssignRequest(BaseModel):
+    role: str                        # chat | code | image | asr
+    model: str = ""                  # 空文字で解除
+
+
+class HfRunRequest(BaseModel):
+    """お試し実行（音声入力のASRは /capture/transcribe 側を使う）。"""
+    model: str
+    task: str
+    text: str = ""
+    labels: Optional[List[str]] = None
+
+
 class AgentActRequest(BaseModel):
     instruction: str
     history: Optional[List[ChatMessage]] = None
@@ -463,6 +489,7 @@ class ImageGenerateRequest(BaseModel):
     n: int = 2
     save: bool = False
     offset: int = 0   # 同じ指示で“さらに別案”を出すためのseedずらし
+    engine: str = "auto"   # auto | pollinations | hf
 
 
 class SnsGenerateRequest(BaseModel):
@@ -871,13 +898,17 @@ async def capture_status(_auth: None = Depends(require_auth)):
 
 
 @app.post("/capture/transcribe")
-async def capture_transcribe(file: UploadFile = File(...), _auth: None = Depends(require_auth)):
-    """録画/録音を文字起こしする（サーバーで音声を抽出してからAIに渡す）。"""
+async def capture_transcribe(file: UploadFile = File(...), engine: str = Form("auto"),
+                             _auth: None = Depends(require_auth)):
+    """録画/録音を文字起こしする（サーバーで音声を抽出してからAIに渡す）。
+
+    engine: auto（既定）/ gemini / hf。auto はHFにASRモデルが割り当ててあればHF。
+    """
     data = await file.read()
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
         None, lambda: transcribe_mod.transcribe(data, file.filename or "rec.webm",
-                                                file.content_type or ""))
+                                                file.content_type or "", engine or "auto"))
     if res.get("error"):
         return JSONResponse(status_code=400, content=res)
     return res
@@ -959,6 +990,45 @@ async def code_scaffold(kind: str = "web", _auth: None = Depends(require_auth)):
     return code_agent.scaffold(kind)
 
 
+def _abs_media_url(request: Request, url: str) -> str:
+    """/hf/image/... のような相対URLを、絶対URLに直す。
+
+    画像URLはフロント(Vercel)の <img src> と「生成物」履歴の両方に載る。
+    相対のままだと Vercel 側のオリジンに解決されて壊れるので、必ず絶対にする。
+    優先度は 明示env → リクエストのホスト。https を強制するのは、Renderの
+    プロキシ配下で base_url が http になり、httpsのページから読めなくなるため
+    （localhost だけは http のまま）。
+    """
+    if not url.startswith("/"):
+        return url
+    base = (os.environ.get("PUBLIC_API_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if not base:
+        b = str(request.base_url).rstrip("/")
+        host = b.split("://")[-1].split(":")[0]
+        if b.startswith("http://") and host not in ("localhost", "127.0.0.1", "testserver"):
+            b = "https://" + b[len("http://"):]
+        base = b
+    return f"{base}{url}"
+
+
+def _hf_text_choices(defaults: List[str]) -> List[str]:
+    """HF MODELS に自分で登録したテキストモデルを、既定候補の先に並べる。
+
+    2箇所（AI PROVIDER と HF MODELS）で別々の一覧が出て混乱しないよう、
+    台帳に入れたものは必ず選択肢に現れるようにする。
+    """
+    try:
+        mine = [m.get("model", "") for m in hfhub.list_models()
+                if m.get("task") == "text" and m.get("model")]
+    except Exception:
+        mine = []
+    out: List[str] = []
+    for m in mine + defaults:
+        if m and m not in out:
+            out.append(m)
+    return out
+
+
 @app.get("/ai/config")
 async def ai_config_get(_auth: None = Depends(require_auth)):
     """AIプロバイダ/モデルの現在設定と選択肢を返す（設定UI用）。"""
@@ -970,18 +1040,18 @@ async def ai_config_get(_auth: None = Depends(require_auth)):
         "gemini_ready": config.gemini_configured(),
         "hf_ready": bool(llm._hf_token()),
         "presets": {
-            "chat": [
+            "chat": _hf_text_choices([
                 "meta-llama/Llama-3.3-70B-Instruct",
                 "Qwen/Qwen2.5-72B-Instruct",
                 "deepseek-ai/DeepSeek-V3-0324",
                 "mistralai/Mistral-Small-24B-Instruct-2501",
                 "meta-llama/Llama-3.1-8B-Instruct",
-            ],
-            "code": [
+            ]),
+            "code": _hf_text_choices([
                 "Qwen/Qwen2.5-Coder-32B-Instruct",
                 "deepseek-ai/DeepSeek-V3-0324",
                 "Qwen/Qwen2.5-Coder-7B-Instruct",
-            ],
+            ]),
         },
     }
 
@@ -996,6 +1066,124 @@ async def ai_config_set(req: AiConfigRequest, _auth: None = Depends(require_auth
     if req.code_model is not None:
         keychain.set_key("CODE_MODEL", req.code_model.strip())
     return await ai_config_get()
+
+
+# ── HF MODELS：HuggingFaceのモデルを登録して役割に割り当てる ──────────
+
+@app.get("/hf/status")
+async def hf_status(_auth: None = Depends(require_auth)):
+    """扱えるタスク・役割の割り当て・登録数。トークンの値は返さない。"""
+    return hfhub.status()
+
+
+@app.get("/hf/models")
+async def hf_models(_auth: None = Depends(require_auth)):
+    """登録済みモデルの台帳。"""
+    loop = asyncio.get_event_loop()
+    return {"models": await loop.run_in_executor(None, hfhub.list_models)}
+
+
+@app.post("/hf/models")
+async def hf_models_add(req: HfModelAddRequest, _auth: None = Depends(require_auth)):
+    """モデルを台帳に登録する（動作確認は別途 /hf/test）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: hfhub.add_model(req.model, req.task, req.label, req.note))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.delete("/hf/models/{model_row_id}")
+async def hf_models_delete(model_row_id: str, _auth: None = Depends(require_auth)):
+    """台帳から削除する（割り当て中の役割も外れる）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: hfhub.delete_model(model_row_id))
+
+
+@app.post("/hf/models/{model_row_id}/test")
+async def hf_models_test(model_row_id: str, _auth: None = Depends(require_auth)):
+    """台帳のモデルを実際に1回叩いて、結果を台帳に記録する。"""
+    loop = asyncio.get_event_loop()
+    row = await loop.run_in_executor(None, lambda: hfhub.get_model(model_row_id))
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "そのモデルは台帳にありません"})
+    res = await loop.run_in_executor(
+        None, lambda: hfhub.test_model(row.get("model", ""), row.get("task", "")))
+    await loop.run_in_executor(
+        None, lambda: hfhub.update_check(model_row_id, bool(res.get("ok")),
+                                        res.get("error", "")))
+    if not res.get("ok"):
+        return JSONResponse(status_code=502, content=res)
+    return res
+
+
+@app.post("/hf/test")
+async def hf_test(req: HfTestRequest, _auth: None = Depends(require_auth)):
+    """台帳に入れる前に、モデルIDとタスクの組み合わせを試す。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: hfhub.test_model(req.model, req.task))
+    if not res.get("ok"):
+        return JSONResponse(status_code=502, content=res)
+    return res
+
+
+@app.post("/hf/assign")
+async def hf_assign(req: HfAssignRequest, _auth: None = Depends(require_auth)):
+    """役割（会話/コード/画像/文字起こし）にモデルを割り当てる。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: hfhub.assign(req.role, req.model))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.get("/hf/search")
+async def hf_search(q: str = "", task: str = "", limit: int = 12,
+                    _auth: None = Depends(require_auth)):
+    """HuggingFace Hub からモデルを探す（トークン不要の公開API）。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: hfhub.search(q, task, limit))
+    if res.get("error"):
+        return JSONResponse(status_code=502, content=res)
+    return res
+
+
+@app.post("/hf/run")
+async def hf_run(req: HfRunRequest, request: Request, _auth: None = Depends(require_auth)):
+    """お試し実行。画像/音声はbase64、それ以外はテキストやラベルを返す。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: hfhub.run(req.task, req.model, text=req.text, labels=req.labels))
+    if res.get("error"):
+        return JSONResponse(status_code=502, content=res)
+    if res.get("kind") == "image":
+        img_id = await loop.run_in_executor(
+            None, lambda: hfhub.save_image(res["data"], res.get("mime", "image/png"), req.text))
+        return {"ok": True, "kind": "image",
+                "url": _abs_media_url(request, hfhub.image_url(img_id)),
+                "mime": res.get("mime"), "bytes": res.get("bytes")}
+    if res.get("kind") == "audio":
+        return {"ok": True, "kind": "audio", "mime": res.get("mime"),
+                "bytes": res.get("bytes"),
+                "audio_base64": base64.b64encode(res["data"]).decode("ascii")}
+    return res
+
+
+@app.get("/hf/image/{img_id}")
+async def hf_image(img_id: str):
+    """生成画像を配る。IDは推測できないUUIDで、一覧は公開しない。
+
+    <img src> はヘッダを付けられないため、ここだけ認証を通さない
+    （中身は自分が生成した画像で、鍵や個人データは含まれない）。
+    """
+    loop = asyncio.get_event_loop()
+    data, mime = await loop.run_in_executor(None, lambda: hfhub.get_image(img_id))
+    if not data:
+        return JSONResponse(status_code=404, content={"error": "画像が見つかりません"})
+    from fastapi.responses import Response
+    return Response(content=data, media_type=mime or "image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/github/repos")
@@ -1804,14 +1992,25 @@ async def image_aspects(_auth: None = Depends(require_auth)):
                         for k, v in imagegen.ASPECTS.items()]}
 
 
+@app.get("/image/engines")
+async def image_engines(_auth: None = Depends(require_auth)):
+    """選べる生成エンジン（無料 / HFの割り当てモデル）と現在使えるか。"""
+    return {"engines": imagegen.engines()}
+
+
 @app.post("/image/generate")
-async def image_generate(req: ImageGenerateRequest, _auth: None = Depends(require_auth)):
+async def image_generate(req: ImageGenerateRequest, request: Request,
+                         _auth: None = Depends(require_auth)):
     """同じ指示で複数バリエーションを作る。save=Trueで生成物（履歴）に保存。"""
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
-        None, lambda: imagegen.generate_variants(req.prompt, req.n, req.aspect, req.offset))
+        None, lambda: imagegen.generate_variants(req.prompt, req.n, req.aspect,
+                                                 req.offset, req.engine))
     if res.get("error"):
         return JSONResponse(status_code=400, content=res)
+    # 履歴に保存する前に絶対URLへ直す（保存後だと相対URLが残ってしまう）
+    for img in res.get("images", []):
+        img["url"] = _abs_media_url(request, img.get("url", ""))
     if req.save:
         def _save():
             import artifacts
