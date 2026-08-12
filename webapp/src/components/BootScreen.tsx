@@ -154,11 +154,10 @@ export default function BootScreen({ children }: { children: React.ReactNode }) 
             >
               <CoreOrb size={170} state={orbState} />
 
-              <h1 className="brand-wordmark text-glow mt-9 flex items-baseline gap-2 text-[21px] text-fg-strong sm:text-[23px]">
-                AIbou
-                <span className="brand-wordmark text-[11px] text-muted">相棒</span>
+              {/* 起動のロード画面はブランド表記を入れず、従来のまま維持する。 */}
+              <h1 className="label-mono text-glow mt-9 text-[15px] font-normal tracking-[0.4em] text-fg-strong sm:text-base">
+                THE FORGE OS
               </h1>
-              <p className="brand-sub mt-1.5 text-[9px] text-muted/80">THE FORGE OS</p>
 
               {phase === "booting" ? (
                 <>
