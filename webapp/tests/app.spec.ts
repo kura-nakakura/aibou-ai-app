@@ -119,6 +119,53 @@ test("Chat: history toggle opens the panel", async ({ page }) => {
   await expect(page.getByText("＋ 新しいチャット")).toBeVisible({ timeout: 5_000 });
 });
 
+
+/* ── 見た目（スキン）の切り替え ─────────────────────────────────── */
+test("Settings CORE has the theme picker with both skins", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await page.getByLabel("Settings").click();
+  await expect(page.getByText("見た目（テーマ）")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole("button", { name: /FORGE（ダーク）/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /AIbou（ライト）/ })).toBeVisible();
+});
+
+test("Switching to the AIbou skin repaints the app light", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  // 既定はダーク
+  expect(await page.evaluate(() => document.documentElement.dataset.skin)).toBe("forge");
+  await page.getByLabel("Settings").click();
+  await page.getByRole("button", { name: /AIbou（ライト）/ }).click();
+  const after = await page.evaluate(() => ({
+    skin: document.documentElement.dataset.skin,
+    bg: getComputedStyle(document.documentElement).backgroundColor,
+    theme: document.querySelector('meta[name="theme-color"]')?.getAttribute("content"),
+  }));
+  expect(after.skin).toBe("aibou");
+  expect(after.bg).toBe("rgb(244, 245, 253)");   // 明るい背景に変わっている
+  expect(after.theme).toBe("#f4f5fd");           // ブラウザのUI色も合わせる
+  // 戻せる
+  await page.getByRole("button", { name: /FORGE（ダーク）/ }).click();
+  expect(await page.evaluate(() => document.documentElement.dataset.skin)).toBe("forge");
+});
+
+test("The chosen skin survives a reload and is applied before React mounts", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => localStorage.setItem("forge_skin", "aibou"));
+  await page.reload({ waitUntil: "commit" });
+  // <head> のスクリプトで立てているので、ハイドレーション前から aibou
+  await expect.poll(async () =>
+    page.evaluate(() => document.documentElement.dataset.skin), { timeout: 5_000 }).toBe("aibou");
+});
+
+test("A broken saved skin falls back to the default", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => localStorage.setItem("forge_skin", "nonsense"));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  expect(await page.evaluate(() => document.documentElement.dataset.skin)).toBe("forge");
+});
+
 /* ── Settings ───────────────────────────────────────────────────── */
 test("Settings gear icon is clickable and opens panel", async ({ page }) => {
   await page.goto("/");

@@ -16,6 +16,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import AiProviderSettings from "@/components/AiProviderSettings";
 import HfModels from "@/components/HfModels";
+import { applySkin, readSkin, setSkin, SKINS, type Skin } from "@/lib/skin";
 import IntegrationsSettings from "@/components/IntegrationsSettings";
 import AppArchive from "@/components/AppArchive";
 import Autopilot from "@/components/Autopilot";
@@ -435,7 +436,7 @@ function MobileNav({ view, onChange }: { view: View; onChange: (v: View) => void
       {/* Bar */}
       <nav
         aria-label="Mobile navigation"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-panel bg-[rgba(10,12,18,0.85)] backdrop-blur-md transition-transform duration-200"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-panel bg-[var(--chrome)] backdrop-blur-md transition-transform duration-200"
         style={{
           paddingBottom: "env(safe-area-inset-bottom)",
           transform: kbOpen ? "translateY(110%)" : "none",
@@ -661,6 +662,7 @@ function SettingsPanel({
         <div className="max-h-[60vh] overflow-y-auto p-5">
           {tab === "core" && (
             <>
+              <SkinSetting />
               <AiProviderSettings />
               <IntegrationsSettings />
               <label className="mb-1 block text-[10px] tracking-[0.2em] text-muted label-mono">ASSISTANT NAME</label>
@@ -895,6 +897,73 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
         }}
       />
     </button>
+  );
+}
+
+/**
+ * 見た目（スキン）の切り替え。反映は <html data-skin> の1属性で、
+ * 色・面・角丸・ラベルの体裁は globals.css 側が持っている。
+ * 選択肢には実際の配色の見本を出して、押す前に分かるようにする。
+ */
+function SkinSetting() {
+  const [skin, setSkinState] = useState<Skin>("forge");
+
+  useEffect(() => {
+    const s = readSkin();
+    setSkinState(s);
+    applySkin(s);          // 保存値と実際の表示がずれないよう、開いた時に必ず揃える
+  }, []);
+
+  const pick = (next: Skin) => {
+    setSkinState(setSkin(next));
+  };
+
+  const SWATCH: Record<Skin, { bg: string; card: string; bd: string; ink: string; accent: string }> = {
+    forge: { bg: "#0a0b0f", card: "#171a21", bd: "#3a3d45", ink: "#e8eaee", accent: "#00f3ff" },
+    aibou: { bg: "#f4f5fd", card: "#ffffff", bd: "#e3e6f5", ink: "#1b2440", accent: "#3b5bfd" },
+  };
+
+  return (
+    <div className="mb-4 rounded-forge border border-panel p-3">
+      <div className="mb-2 text-[10px] tracking-[0.2em] text-muted label-mono">見た目（テーマ）</div>
+      <div className="grid grid-cols-2 gap-2">
+        {SKINS.map((s) => {
+          const active = skin === s.key;
+          const c = SWATCH[s.key];
+          return (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => pick(s.key)}
+              aria-pressed={active}
+              title={s.hint}
+              className="min-w-0 rounded-forge border p-2 text-left transition"
+              style={{
+                borderColor: active ? "var(--accent)" : "var(--panel-bd)",
+                background: active ? "var(--btn-bg)" : "transparent",
+              }}
+            >
+              {/* 配色の見本（実際のトークンの色をそのまま並べる） */}
+              <span
+                className="mb-1.5 flex h-9 items-center gap-1 rounded-forge px-1.5"
+                style={{ background: c.bg, border: `1px solid ${c.bd}` }}
+                aria-hidden
+              >
+                <span className="h-5 flex-1 rounded" style={{ background: c.card, border: `1px solid ${c.bd}` }} />
+                <span className="h-5 w-1.5 rounded" style={{ background: c.accent }} />
+              </span>
+              <span className="block truncate text-[10px] label-mono" style={{ color: active ? "var(--fg-strong)" : "var(--muted)" }}>
+                {s.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+        {SKINS.find((s) => s.key === skin)?.hint}
+        ／ 画面の構成（モードの並びや操作）は変わりません。
+      </p>
+    </div>
   );
 }
 

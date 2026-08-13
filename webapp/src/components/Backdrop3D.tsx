@@ -226,6 +226,13 @@ export default function Backdrop3D() {
     };
 
     const draw = (now: number) => {
+      // AIbou（ライト）では星空・グリッドは描かない。白い背景に星を撒くと
+      // ゴミのように見えるため、1枚消してから抜ける（CSS側でも隠している）。
+      if (document.documentElement.dataset.skin === "aibou") {
+        ctx.clearRect(0, 0, w, h);
+        last = now;
+        return;
+      }
       const dt = Math.min((now - last) / 1000, 0.05);
       last = now;
       t += dt;
@@ -345,7 +352,7 @@ export default function Backdrop3D() {
     <canvas
       ref={ref}
       aria-hidden
-      className="pointer-events-none fixed inset-0"
+      className="forge-backdrop pointer-events-none fixed inset-0"
       style={{ zIndex: -1 }}
     />
   );

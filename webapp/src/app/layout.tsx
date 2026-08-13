@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Share_Tech_Mono } from "next/font/google";
 import "./globals.css";
+import { SKIN_BOOT_SCRIPT } from "@/lib/skin";
 
 /**
  * Fonts (loaded via next/font/google, self-hosted at build time):
@@ -70,6 +71,10 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="mobile-web-app-capable" content="yes" />
+        {/* 見た目（スキン）は最初の描画より前に <html data-skin> を立てる。
+            Reactのマウントを待つと、ダークで一瞬描かれてから白へ切り替わる
+            「ちらつき」が出るため、ここで同期的に実行する。 */}
+        <script dangerouslySetInnerHTML={{ __html: SKIN_BOOT_SCRIPT }} />
       </head>
       {/* No bg on <body> — backgrounds live on <html> (globals.css) so the
           fixed z-index:-1 Backdrop3D starfield paints above them. */}

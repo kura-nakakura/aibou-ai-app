@@ -760,7 +760,7 @@ export default function CodeMode() {
                   "max-w-[92%] whitespace-pre-wrap rounded-forge border px-3 py-2 text-[12px] leading-relaxed",
                   t.role === "user"
                     ? "border-panel-strong bg-[rgba(255,255,255,0.07)] text-fg-strong"
-                    : "border-panel bg-[rgba(150,200,255,0.06)] text-fg",
+                    : "border-panel bg-[var(--tint)] text-fg",
                   t.error ? "border-[rgba(255,120,120,0.45)] text-[#ffb4b4]" : "",
                 ].join(" ")}
               >

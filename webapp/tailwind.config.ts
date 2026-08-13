@@ -14,28 +14,32 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // 色は globals.css のトークンを参照する。ここに実値を書くと
+      // スキン切替（<html data-skin>）で色が変わらない。
+      // muted だけは text-muted/60 のような不透明度指定が使われているので、
+      // Tailwind が alpha を差し込める「チャンネル値」の形にしている。
       colors: {
-        bg: "#0a0b0f",
-        bg2: "#0d0f14",
-        fg: "#c9ccd2",
-        "fg-strong": "#ffffff",
-        muted: "#8b8f97",
-        line: "#c5c6c7",
-        silver: "#c5c6c7",
-        accent: "#00f3ff",
+        bg: "var(--bg)",
+        bg2: "var(--bg2)",
+        fg: "var(--fg)",
+        "fg-strong": "var(--fg-strong)",
+        muted: "rgb(var(--muted-rgb) / <alpha-value>)",
+        line: "var(--line)",
+        silver: "var(--line)",
+        accent: "var(--accent)",
       },
       backgroundColor: {
-        panel: "rgba(255,255,255,0.05)",
+        panel: "var(--panel)",
       },
       borderColor: {
-        panel: "rgba(197,198,199,0.28)",
-        "panel-strong": "rgba(197,198,199,0.50)",
+        panel: "var(--panel-bd)",
+        "panel-strong": "var(--btn-bd)",
       },
       boxShadow: {
-        glow: "0 0 18px rgba(150,200,255,0.30)",
-        "glow-strong": "0 0 28px rgba(150,200,255,0.45)",
+        glow: "0 0 18px var(--glow)",
+        "glow-strong": "0 0 28px var(--glow-strong)",
         cyan: "0 0 18px rgba(0,243,255,0.45)",
-        panel: "0 6px 18px rgba(0,0,0,0.55)",
+        panel: "0 6px 18px var(--shadow)",
       },
       borderRadius: {
         forge: "14px",

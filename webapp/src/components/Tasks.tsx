@@ -541,7 +541,7 @@ export default function Tasks() {
             exit={{ opacity: 0, y: 12 }}
             className="fixed bottom-24 left-1/2 z-50 -translate-x-1/2"
           >
-            <div className="flex items-center gap-3 rounded-full border border-panel bg-[rgba(16,20,28,0.92)] px-4 py-2 shadow-glow backdrop-blur">
+            <div className="flex items-center gap-3 rounded-full border border-panel bg-[var(--chrome)] px-4 py-2 shadow-glow backdrop-blur">
               <span className="text-[11px] text-fg">タスクを完了にしました</span>
               <button type="button" onClick={() => void doUndo()} className="text-[10px] tracking-[0.14em] text-[var(--accent)] label-mono">元に戻す</button>
             </div>
@@ -632,7 +632,7 @@ function KanbanBoard({
                 onPointerDown={(e) => onCardPointerDown(e, task)}
                 onPointerMove={onCardPointerMove}
                 onPointerUp={onCardPointerUp}
-                className="cursor-grab touch-none select-none rounded-forge border border-panel bg-[rgba(10,14,22,0.75)] p-2 transition hover:border-[var(--line)]"
+                className="cursor-grab touch-none select-none rounded-forge border border-panel bg-[var(--chrome-2)] p-2 transition hover:border-[var(--line)]"
                 style={{ opacity: drag?.id === task.id ? 0.35 : 1 }}
               >
                 <div className="flex items-start justify-between gap-1">
@@ -653,7 +653,7 @@ function KanbanBoard({
       {/* Drag ghost (follows the pointer) */}
       {drag && dragTask && (
         <div
-          className="pointer-events-none fixed z-[60] rounded-forge border border-[var(--accent)] bg-[rgba(10,14,22,0.95)] p-2 shadow-glow"
+          className="pointer-events-none fixed z-[60] rounded-forge border border-[var(--accent)] bg-[var(--chrome)] p-2 shadow-glow"
           style={{ left: drag.x + 8, top: drag.y + 8, width: Math.min(drag.w, 240) }}
         >
           <span className="text-[12px] text-fg-strong">{dragTask.title}</span>

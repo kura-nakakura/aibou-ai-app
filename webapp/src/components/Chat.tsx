@@ -1100,7 +1100,7 @@ function ChatHistory({
           type="button"
           onClick={() => onOpenChange(true)}
           aria-label="Chat history"
-          className="fixed bottom-24 left-3 z-40 flex items-center gap-1.5 rounded-full border border-[var(--panel-bd)] bg-[rgba(18,22,30,0.72)] px-3 py-2 text-[10px] tracking-[0.16em] text-fg-strong shadow-glow backdrop-blur transition hover:shadow-glow-strong label-mono"
+          className="fixed bottom-24 left-3 z-40 flex items-center gap-1.5 rounded-full border border-[var(--panel-bd)] bg-[var(--chrome)] px-3 py-2 text-[10px] tracking-[0.16em] text-fg-strong shadow-glow backdrop-blur transition hover:shadow-glow-strong label-mono"
         >
           <HistoryIcon /> 履歴
         </button>
@@ -1191,7 +1191,7 @@ function MessageBubble({ message, onRegenerate, onApprove, onReject }: {
           "backdrop-blur-md",
           isUser
             ? "border-panel-strong bg-[rgba(255,255,255,0.07)] text-fg-strong"
-            : "border-panel bg-[rgba(150,200,255,0.06)] text-fg shadow-glow",
+            : "border-panel bg-[var(--tint)] text-fg shadow-glow",
           message.error ? "border-[rgba(255,120,120,0.45)] text-[#ffb4b4]" : "",
         ].join(" ")}
       >
