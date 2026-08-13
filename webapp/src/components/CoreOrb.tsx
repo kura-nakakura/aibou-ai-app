@@ -3,23 +3,28 @@
 /**
  * CoreOrb — THE FORGE OS centerpiece, a real-time 3D core on a 2D canvas.
  *
- * The look: a segmented chrome shell wrapped around a blinding white-blue
- * singularity, crossed by wide gyroscope rings that pass in front of and
- * behind the sphere. Light escapes through the gaps between the armour
- * plates, and an anamorphic lens flare streaks out of the centre.
+ * A fibonacci-sphere particle shell orbits a glowing pale-blue core, wrapped in
+ * wide chrome gyroscope rings that pass in front of and behind the sphere, with
+ * an anamorphic flare streaking out of the blown-out centre.
  *
- * Everything is drawn per-frame with real 3D projection — no image assets, no
- * WebGL, no dependencies:
- *   1. bloom            — wide pale-blue haze
- *   2. dust (back)      — sparse cyan motes behind the core
- *   3. rings (back)     — ribbon segments whose depth is behind the sphere
- *   4. shell            — inner glow disc, then front-facing armour plates
- *   5. flare            — hot centre + horizontal/vertical streaks (additive)
- *   6. rings (front)    — ribbon segments in front of the sphere
- *   7. dust (front) + halo pings
+ * Draw order (all real 3D projection — no images, no WebGL, no deps):
+ *   1. bloom          — wide pale-blue haze
+ *   2. shell (back)   — the half of the particle shell behind the body
+ *   3. rings (back)   — ribbon segments whose depth is behind the sphere
+ *   4. body           — the core sphere: white centre → deep navy rim
+ *   5. shell (front)  — the bright half of the particle shell
+ *   6. flare          — hot centre + horizontal/vertical streaks (additive)
+ *   7. rings (front)  — ribbon segments in front of the sphere
+ *   8. halo ping      — a soft expanding ring that marks the current state
  *
- * Ring ribbons are depth-sorted per segment, which is what lets a single ring
- * wrap the sphere instead of always sitting on top of it.
+ * Two details are deliberate, learned from versions that looked wrong:
+ *   · Ring ribbons are depth-sorted PER SEGMENT, which is what lets one ring
+ *     wrap the sphere instead of always sitting on top of it. Adjacent segments
+ *     overlap slightly and are filled opaquely, because abutting antialiased
+ *     edges leave hairline seams that read as hatching along the band.
+ *   · The shell is particles, not solid armour plates. Plates big enough to
+ *     read as armour deform the silhouette as they cross it, which makes the
+ *     rotation look like flapping rather than turning.
  *
  * The `state` prop tunes spin / glow / pulse so the core feels alive while
  * listening / speaking / thinking. Pointer movement leans the whole assembly.
@@ -39,7 +44,7 @@ export interface CoreOrbProps {
 }
 
 interface Tune {
-  /** Shell yaw speed (rad/s). */
+  /** Sphere yaw speed (rad/s). */
   spin: number;
   /** Pale-blue bloom alpha. */
   glow: number;
@@ -57,42 +62,27 @@ interface Tune {
 }
 
 const TUNES: Record<CoreState, Tune> = {
-  idle: { spin: 0.14, glow: 0.30, cyan: 0.10, pulseHz: 0.22, pulseAmp: 0.014, orbit: 1.0, ping: 4.5, flare: 1.0 },
-  listening: { spin: 0.30, glow: 0.44, cyan: 0.50, pulseHz: 0.60, pulseAmp: 0.030, orbit: 2.0, ping: 1.8, flare: 1.3 },
-  speaking: { spin: 0.46, glow: 0.52, cyan: 0.40, pulseHz: 1.10, pulseAmp: 0.045, orbit: 2.6, ping: 1.2, flare: 1.5 },
-  thinking: { spin: 0.24, glow: 0.46, cyan: 0.28, pulseHz: 0.42, pulseAmp: 0.024, orbit: 1.4, ping: 2.6, flare: 1.15 },
+  idle: { spin: 0.16, glow: 0.30, cyan: 0.06, pulseHz: 0.22, pulseAmp: 0.014, orbit: 1.0, ping: 4.5, flare: 1.0 },
+  listening: { spin: 0.34, glow: 0.42, cyan: 0.38, pulseHz: 0.60, pulseAmp: 0.030, orbit: 1.9, ping: 1.8, flare: 1.25 },
+  speaking: { spin: 0.52, glow: 0.50, cyan: 0.30, pulseHz: 1.10, pulseAmp: 0.045, orbit: 2.4, ping: 1.2, flare: 1.4 },
+  thinking: { spin: 0.28, glow: 0.45, cyan: 0.20, pulseHz: 0.42, pulseAmp: 0.024, orbit: 1.4, ping: 2.6, flare: 1.1 },
 };
 
 /**
- * Gyroscope rings. Each is a flat annulus (rIn..rOut, as a fraction of `size`)
- * tilted by rx then rotated by rz, so they cross at different angles like the
- * gimbals of a gyroscope. `period` is seconds per revolution (sign = spin
- * direction); `ticks` adds radial notches for the instrument feel.
+ * Gyroscope rings: flat annuli (rIn..rOut as a fraction of `size`) tilted by rx
+ * then rotated by rz, so they cross at different angles like gimbals. `period`
+ * is seconds per revolution (sign = direction). Tilts stay clear of edge-on —
+ * a near-edge-on ring projects to a straight line and reads as a stray streak.
  */
 const RINGS = [
-  { rz: 0.26, rx: 1.16, rIn: 0.385, rOut: 0.478, alpha: 1.0, period: 9 },
-  { rz: -0.62, rx: 1.34, rIn: 0.452, rOut: 0.516, alpha: 0.82, period: -13 },
-  { rz: 1.05, rx: 0.98, rIn: 0.530, rOut: 0.549, alpha: 0.40, period: 19 },
+  { rz: 0.22, rx: 1.10, rIn: 0.392, rOut: 0.462, alpha: 1.0, period: 16, soft: false },
+  { rz: -0.56, rx: 1.22, rIn: 0.444, rOut: 0.498, alpha: 0.78, period: -24, soft: false },
+  { rz: 0.58, rx: 1.30, rIn: 0.498, rOut: 0.546, alpha: 0.40, period: 34, soft: true },
 ] as const;
 
-/**
- * Armour petals — plates ringing the light with the FRONT LEFT OPEN, like an
- * iris. Their axis points at the viewer and they roll around it, so the
- * aperture stays facing us while the shell keeps turning. (A lat/long grid
- * covering the whole sphere just reads as a beach ball; this reads as a shell
- * cracked open around a singularity.)
- *
- * theta = angle off the view axis (0 = straight at the viewer),
- * phi    = position around the ring.
- */
-const PETALS = 7;
-const PETAL_GAP = 0.085;     // radians of phi trimmed each side → seams
-const THETA_IN = 0.60;       // ~34°: inner edge = aperture radius
-const THETA_OUT = 1.52;      // ~87°: outer edge reaches the silhouette
-const DUST = 90;
-const PERSPECTIVE = 4.0;
-/** Light direction (upper-left, towards the viewer) for plate shading. */
-const LX = -0.42, LY = -0.56, LZ = 0.72;
+const PARTICLES = 460;
+const PERSPECTIVE = 3.6;
+const SEG = 60;              // ring segments (also the depth-sort granularity)
 
 export default function CoreOrb({ size = 140, state = "idle", className = "" }: CoreOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -109,7 +99,7 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     // The stage is larger than the layout box so ring ribbons and the flare
-    // aren't clipped. Perspective can push near points out to ~1.33×.
+    // aren't clipped at the edges.
     const stage = Math.ceil(size * 1.5);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = stage * dpr;
@@ -118,47 +108,18 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
 
     const cx = stage / 2;
     const cy = stage / 2;
-    const shellR = size * 0.285;      // armour sphere radius
-    const dustR = size * 0.60;        // dust cloud radius
+    const R = size * 0.325;    // particle-shell radius (just above the body)
+    const coreR = size * 0.31;
 
-    // Sparse motes suspended around the core (fibonacci sphere, jittered out).
+    // Fibonacci sphere — evenly distributed particle shell.
+    const pts: { x: number; y: number; z: number; tw: number }[] = [];
     const golden = Math.PI * (3 - Math.sqrt(5));
-    const dust = Array.from({ length: DUST }, (_, i) => {
-      const y = 1 - (i / (DUST - 1)) * 2;
+    for (let i = 0; i < PARTICLES; i++) {
+      const y = 1 - (i / (PARTICLES - 1)) * 2;
       const r = Math.sqrt(Math.max(0, 1 - y * y));
       const th = golden * i;
-      // Deterministic pseudo-random radius so the cloud isn't a hollow shell.
-      const jitter = 0.55 + ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1 * 0.45;
-      return { x: Math.cos(th) * r, y, z: Math.sin(th) * r, k: jitter, tw: (i % 9) / 9 };
-    });
-
-    // Pre-compute each plate's border in unit-sphere space (border is walked
-    // once per frame and projected, so build it here rather than per frame).
-    /** Unit-sphere point from (theta off the view axis, phi around it). */
-    const on = (th: number, ph: number) => ({
-      x: Math.sin(th) * Math.cos(ph),
-      y: Math.sin(th) * Math.sin(ph),
-      z: Math.cos(th),
-    });
-    // Petal borders, plus the mid-points of the inner and outer edges so each
-    // plate can be lit from the aperture side (the light is inside the shell).
-    const plates = Array.from({ length: PETALS }, (_, k) => {
-      const ph0 = (k / PETALS) * Math.PI * 2 + PETAL_GAP;
-      const ph1 = ((k + 1) / PETALS) * Math.PI * 2 - PETAL_GAP;
-      const N = 6;
-      const pts: { x: number; y: number; z: number }[] = [];
-      for (let i = 0; i <= N; i++) pts.push(on(THETA_IN, ph0 + ((ph1 - ph0) * i) / N));
-      for (let i = 1; i <= N; i++) pts.push(on(THETA_IN + ((THETA_OUT - THETA_IN) * i) / N, ph1));
-      for (let i = 1; i <= N; i++) pts.push(on(THETA_OUT, ph1 - ((ph1 - ph0) * i) / N));
-      for (let i = 1; i < N; i++) pts.push(on(THETA_OUT - ((THETA_OUT - THETA_IN) * i) / N, ph0));
-      const phMid = (ph0 + ph1) / 2;
-      return {
-        pts,
-        inner: on(THETA_IN, phMid),
-        outer: on(THETA_OUT, phMid),
-        normal: on((THETA_IN + THETA_OUT) / 2, phMid),
-      };
-    });
+      pts.push({ x: Math.cos(th) * r, y, z: Math.sin(th) * r, tw: (i % 7) / 7 });
+    }
 
     // Smoothly-lerped live tune + pointer parallax.
     const live: Tune = { ...TUNES[stateRef.current] };
@@ -186,19 +147,16 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
       lpx += (px - lpx) * Math.min(1, dt * 3);
       lpy += (py - lpy) * Math.min(1, dt * 3);
 
-      // The world turns slowly (rings + dust lean with the pointer), while the
-      // petals roll around the view axis so the aperture keeps facing us.
-      const yaw = t * live.spin * 0.5 + lpx * 0.45;
-      const pitch = Math.sin(t * 0.3) * 0.09 + lpy * 0.28;
-      const roll = t * live.spin * 2.2;
+      const yaw = t * live.spin * 2 + lpx * 0.45;
+      const pitch = Math.sin(t * 0.35) * 0.10 + lpy * 0.30;
       const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
       const cosP = Math.cos(pitch), sinP = Math.sin(pitch);
-      const cosR = Math.cos(roll), sinR = Math.sin(roll);
       const pulse = 1 + live.pulseAmp * Math.sin(t * live.pulseHz * Math.PI * 2);
 
       ctx.clearRect(0, 0, stage, stage);
 
-      /** World rotation (yaw then pitch) + perspective projection. */
+      /** Project a point on a sphere of the given radius; returns screen pos,
+       *  depth (-1 far … +1 near) and the perspective scale. */
       const project = (x0: number, y0: number, z0: number, radius: number) => {
         const x1 = x0 * cosY + z0 * sinY;
         const z1 = -x0 * sinY + z0 * cosY;
@@ -207,52 +165,50 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
         const s = PERSPECTIVE / (PERSPECTIVE - z2);
         return { sx: cx + x1 * radius * s, sy: cy + y2 * radius * s, z: z2, s };
       };
-      /** Roll around the view axis — applied to petals before world rotation. */
-      const rollPt = (p: { x: number; y: number; z: number }) => ({
-        x: p.x * cosR - p.y * sinR,
-        y: p.x * sinR + p.y * cosR,
-        z: p.z,
-      });
-      /** Rotate a direction (no projection) — for plate normals. */
-      const rotate = (x0: number, y0: number, z0: number) => {
-        const x1 = x0 * cosY + z0 * sinY;
-        const z1 = -x0 * sinY + z0 * cosY;
-        return { x: x1, y: y0 * cosP - z1 * sinP, z: y0 * sinP + z1 * cosP };
-      };
 
       /* 1 — bloom */
-      const bloom = ctx.createRadialGradient(cx, cy, shellR * 0.2, cx, cy, size * 0.72);
-      bloom.addColorStop(0, `rgba(170,215,255,${(live.glow * 0.5).toFixed(3)})`);
-      bloom.addColorStop(0.5, `rgba(120,180,255,${(live.glow * 0.14).toFixed(3)})`);
+      const bloom = ctx.createRadialGradient(cx, cy, coreR * 0.3, cx, cy, size * 0.70);
+      bloom.addColorStop(0, `rgba(155,205,255,${(live.glow * 0.5).toFixed(3)})`);
+      bloom.addColorStop(0.55, `rgba(120,180,255,${(live.glow * 0.15).toFixed(3)})`);
       bloom.addColorStop(1, "rgba(120,180,255,0)");
       ctx.fillStyle = bloom;
       ctx.fillRect(0, 0, stage, stage);
 
-      /* 2 — dust (behind) */
-      const drawDust = (front: boolean) => {
-        for (const d of dust) {
-          const q = project(d.x, d.y, d.z, dustR * d.k);
+      /* 2/5 — particle shell, split by depth around the body */
+      const shell = (front: boolean) => {
+        for (const p of pts) {
+          const q = project(p.x, p.y, p.z, R * pulse);
           if (front ? q.z < 0 : q.z >= 0) continue;
-          const tw = 0.45 + 0.55 * Math.sin(t * 2.2 + d.tw * Math.PI * 2);
-          const a = (front ? 0.30 + q.z * 0.45 : 0.10 + (q.z + 1) * 0.16) * tw;
-          ctx.fillStyle = d.tw > 0.5
-            ? `rgba(120,235,255,${(a * (0.4 + live.cyan)).toFixed(3)})`
-            : `rgba(225,240,255,${(a * 0.7).toFixed(3)})`;
-          ctx.beginPath();
-          ctx.arc(q.sx, q.sy, Math.max(0.4, size * 0.0055 * q.s), 0, Math.PI * 2);
-          ctx.fill();
+          if (front) {
+            const tw = 0.7 + 0.3 * Math.sin(t * 2.4 + p.tw * Math.PI * 2);
+            const a = (0.18 + q.z * 0.52) * tw;
+            ctx.fillStyle = live.cyan > 0.1 && p.tw > 0.6
+              ? `rgba(120,240,255,${a.toFixed(3)})`
+              : `rgba(225,240,255,${a.toFixed(3)})`;
+            ctx.beginPath();
+            ctx.arc(q.sx, q.sy, Math.max(0.45, size * 0.0052 * q.s), 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            const tw = 0.75 + 0.25 * Math.sin(t * 2 + p.tw * Math.PI * 2);
+            const a = (0.05 + ((q.z + 1) / 2) * 0.30) * tw;
+            ctx.fillStyle = `rgba(140,185,250,${a.toFixed(3)})`;
+            ctx.beginPath();
+            ctx.arc(q.sx, q.sy, Math.max(0.35, size * 0.0038 * q.s), 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
       };
-      drawDust(false);
+      shell(false);
 
-      /* 3/6 — ring ribbons, split by depth so they wrap the sphere.
-         Each segment is a quad between the inner and outer rim. */
-      const SEG = 56;
+      /* 3/7 — ring ribbons. Each segment is a quad between the inner and outer
+         rim, drawn in the pass matching its depth so the band wraps the sphere. */
+      const step = (Math.PI * 2) / SEG;
       const ringSegments = (behind: boolean) => {
         for (const ring of RINGS) {
           const cosRZ = Math.cos(ring.rz), sinRZ = Math.sin(ring.rz);
           const cosRX = Math.cos(ring.rx), sinRX = Math.sin(ring.rx);
           const spin = (t * live.orbit * Math.PI * 2) / ring.period;
+          const rMid = (ring.rIn + ring.rOut) / 2;
           /** Point on the ring plane at angle a and radius fraction rf. */
           const at = (a: number, rf: number) => {
             const lx = Math.cos(a + spin), ly = Math.sin(a + spin);
@@ -261,126 +217,88 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
             const gy = lx * sinRZ + y1 * cosRZ;
             return project(gx, gy, z1, size * rf);
           };
-          const rMid = (ring.rIn + ring.rOut) / 2;
-          let aIn = at(0, ring.rIn), aOut = at(0, ring.rOut), aMid = at(0, rMid);
-          for (let i = 1; i <= SEG; i++) {
-            const ang = (i / SEG) * Math.PI * 2;
-            const bIn = at(ang, ring.rIn);
-            const bOut = at(ang, ring.rOut);
-            const bMid = at(ang, rMid);
-            const depth = (aIn.z + bIn.z) / 2;
-            if (behind === depth >= 0) { aIn = bIn; aOut = bOut; aMid = bMid; continue; }
-            // Chrome band: bright where it faces the light, dim edge-on/behind.
+          for (let i = 0; i < SEG; i++) {
+            const a0 = i * step;
+            // Overlap the next edge slightly: abutting antialiased quads leave
+            // hairline seams that read as hatch marks along the band.
+            const a1 = a0 + step * 1.12;
+            const p0i = at(a0, ring.rIn), p0o = at(a0, ring.rOut);
+            const p1i = at(a1, ring.rIn), p1o = at(a1, ring.rOut);
+            const depth = (p0i.z + p1i.z) / 2;
+            if (behind === depth >= 0) continue;
             const lit = 0.24 + ((depth + 1) / 2) * 0.76;
-            const a = ring.alpha * lit * (behind ? 0.34 : 1);
+            const dim = behind ? 0.34 : 1;
+            // Opaque fill, dimmed via colour: translucent quads would double up
+            // where they overlap and show as bright ridges.
+            const base = Math.round((150 + lit * 95) * dim * ring.alpha);
+            ctx.fillStyle = `rgb(${base},${base + 12},${Math.min(255, base + 38)})`;
             ctx.beginPath();
-            ctx.moveTo(aIn.sx, aIn.sy);
-            ctx.lineTo(aOut.sx, aOut.sy);
-            ctx.lineTo(bOut.sx, bOut.sy);
-            ctx.lineTo(bIn.sx, bIn.sy);
+            ctx.moveTo(p0i.sx, p0i.sy);
+            ctx.lineTo(p0o.sx, p0o.sy);
+            ctx.lineTo(p1o.sx, p1o.sy);
+            ctx.lineTo(p1i.sx, p1i.sy);
             ctx.closePath();
-            // Mid tone for the band face; the highlight line below sells the metal.
-            const base = Math.round(152 + lit * 92);
-            ctx.fillStyle = `rgba(${base},${base + 14},${Math.min(255, base + 40)},${(a * 0.85).toFixed(3)})`;
             ctx.fill();
-            // Specular line down the middle of the band (brushed chrome).
+            // Specular line down the middle (brushed chrome) + cyan outer rim.
+            const m0 = at(a0, rMid), m1 = at(a1, rMid);
+            ctx.lineCap = "butt";
             ctx.beginPath();
-            ctx.moveTo(aMid.sx, aMid.sy);
-            ctx.lineTo(bMid.sx, bMid.sy);
-            ctx.strokeStyle = `rgba(255,255,255,${(a * 0.85).toFixed(3)})`;
-            ctx.lineWidth = Math.max(0.8, size * 0.007);
+            ctx.moveTo(m0.sx, m0.sy);
+            ctx.lineTo(m1.sx, m1.sy);
+            ctx.strokeStyle = `rgba(255,255,255,${(ring.alpha * lit * dim * (ring.soft ? 0.28 : 0.8)).toFixed(3)})`;
+            ctx.lineWidth = Math.max(0.7, size * 0.005);
             ctx.stroke();
-            // Cyan energy line along the outer rim.
             ctx.beginPath();
-            ctx.moveTo(aOut.sx, aOut.sy);
-            ctx.lineTo(bOut.sx, bOut.sy);
-            ctx.strokeStyle = `rgba(120,240,255,${(a * (0.40 + live.cyan * 0.5)).toFixed(3)})`;
-            ctx.lineWidth = Math.max(0.6, size * 0.004);
+            ctx.moveTo(p0o.sx, p0o.sy);
+            ctx.lineTo(p1o.sx, p1o.sy);
+            ctx.strokeStyle = `rgba(120,240,255,${(ring.alpha * lit * dim * (0.30 + live.cyan * 0.45)).toFixed(3)})`;
+            ctx.lineWidth = Math.max(0.6, size * 0.0035);
             ctx.stroke();
-            aIn = bIn;
-            aOut = bOut;
-            aMid = bMid;
           }
         }
       };
       ringSegments(true);
 
-      /* 4 — shell: interior glow, then the armour plates over it */
-      const R = shellR * pulse;
-      const inner = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.02);
-      inner.addColorStop(0, "rgba(255,255,255,1)");
-      inner.addColorStop(0.28, "rgba(226,246,255,0.96)");
-      inner.addColorStop(0.6, "rgba(120,205,255,0.72)");
-      inner.addColorStop(0.85, "rgba(38,120,200,0.55)");
-      inner.addColorStop(1, "rgba(10,40,90,0.35)");
-      ctx.fillStyle = inner;
+      /* 4 — core body: white centre → deep navy rim. Drawn as a plain circle,
+             so the silhouette is always true whatever else is moving. */
+      const bodyR = coreR * pulse;
+      const body = ctx.createRadialGradient(
+        cx - bodyR * 0.22, cy - bodyR * 0.32, bodyR * 0.06,
+        cx, cy, bodyR,
+      );
+      body.addColorStop(0, "rgba(255,255,255,0.98)");
+      body.addColorStop(0.20, "rgba(219,238,255,0.95)");
+      body.addColorStop(0.46, "rgba(150,193,244,0.76)");
+      body.addColorStop(0.70, "rgba(62,110,183,0.66)");
+      body.addColorStop(0.88, "rgba(20,42,84,0.82)");
+      body.addColorStop(1, "rgba(6,12,30,0.94)");
+      ctx.fillStyle = body;
       ctx.beginPath();
-      ctx.arc(cx, cy, R * 1.02, 0, Math.PI * 2);
+      ctx.arc(cx, cy, bodyR, 0, Math.PI * 2);
       ctx.fill();
+      // Thin silver rim so the sphere has an edge against the dark field.
+      ctx.beginPath();
+      ctx.arc(cx, cy, bodyR, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(200,215,235,0.30)";
+      ctx.lineWidth = Math.max(0.6, size * 0.004);
+      ctx.stroke();
 
-      // Aperture instrument rings — screen-facing circles inside the opening,
-      // so the centre reads as a machined iris rather than a plain blob.
-      const apR = R * Math.sin(THETA_IN);
-      for (const [rf, dashes, alpha] of [[0.78, 18, 0.42], [1.0, 30, 0.30]] as const) {
-        const rr = apR * rf;
-        for (let i = 0; i < dashes; i++) {
-          const a0 = (i / dashes) * Math.PI * 2 + roll * 0.5 * (rf > 0.9 ? -1 : 1);
-          ctx.beginPath();
-          ctx.arc(cx, cy, rr, a0, a0 + (Math.PI * 2) / dashes * 0.55);
-          ctx.strokeStyle = `rgba(150,230,255,${(alpha * (0.5 + live.cyan)).toFixed(3)})`;
-          ctx.lineWidth = Math.max(0.5, size * 0.004);
-          ctx.stroke();
-        }
-      }
+      shell(true);
 
-      // Armour petals, far→near so nearer plates overlap correctly.
-      const visible = plates
-        .map((pl) => ({ pl, n: rotate(rollPt(pl.normal).x, rollPt(pl.normal).y, pl.normal.z) }))
-        .filter((v) => v.n.z > 0.02)
-        .sort((a, b) => a.n.z - b.n.z);
-      for (const { pl, n } of visible) {
-        const diff = Math.max(0, n.x * LX + n.y * LY + n.z * LZ);
-        const spec = Math.pow(diff, 9);
-        ctx.beginPath();
-        pl.pts.forEach((p, i) => {
-          const r = rollPt(p);
-          const q = project(r.x, r.y, r.z, R);
-          if (i === 0) ctx.moveTo(q.sx, q.sy);
-          else ctx.lineTo(q.sx, q.sy);
-        });
-        ctx.closePath();
-        // Chrome lit from two sides: the key light outside, and the core's
-        // glare from inside — so the edge facing the aperture is blown out.
-        const ri = project(rollPt(pl.inner).x, rollPt(pl.inner).y, pl.inner.z, R);
-        const ro = project(rollPt(pl.outer).x, rollPt(pl.outer).y, pl.outer.z, R);
-        const hi = Math.round(Math.min(255, 205 + diff * 50 + spec * 40));
-        const lo = Math.round(Math.min(255, 74 + diff * 120));
-        const grad = ctx.createLinearGradient(ri.sx, ri.sy, ro.sx, ro.sy);
-        grad.addColorStop(0, `rgba(255,255,255,${(0.90 + n.z * 0.10).toFixed(3)})`);
-        grad.addColorStop(0.22, `rgba(${hi},${Math.min(255, hi + 4)},255,${(0.88 + n.z * 0.10).toFixed(3)})`);
-        grad.addColorStop(1, `rgba(${lo},${lo + 10},${Math.min(255, lo + 34)},${(0.80 + n.z * 0.16).toFixed(3)})`);
-        ctx.fillStyle = grad;
-        ctx.fill();
-        // Seam edge — light escaping between the plates.
-        ctx.strokeStyle = `rgba(190,240,255,${(0.20 + live.cyan * 0.30).toFixed(3)})`;
-        ctx.lineWidth = Math.max(0.5, size * 0.0032);
-        ctx.stroke();
-      }
-
-      /* 5 — hot centre + anamorphic flare (additive) */
+      /* 6 — hot centre + anamorphic flare (additive) */
       ctx.globalCompositeOperation = "lighter";
-      const hotR = R * 0.62;
+      const hotR = bodyR * 0.72;
       const hot = ctx.createRadialGradient(cx, cy, 0, cx, cy, hotR);
-      hot.addColorStop(0, "rgba(255,255,255,1)");
-      hot.addColorStop(0.22, "rgba(236,250,255,0.85)");
-      hot.addColorStop(0.55, "rgba(140,220,255,0.35)");
+      hot.addColorStop(0, "rgba(255,255,255,0.95)");
+      hot.addColorStop(0.22, "rgba(232,248,255,0.62)");
+      hot.addColorStop(0.55, "rgba(140,215,255,0.22)");
       hot.addColorStop(1, "rgba(90,190,255,0)");
       ctx.fillStyle = hot;
       ctx.beginPath();
       ctx.arc(cx, cy, hotR, 0, Math.PI * 2);
       ctx.fill();
 
-      // Horizontal streak (long) + vertical (short) = the classic lens cross.
+      /** Soft streak: a long thin ellipse that fades out at both ends. */
       const streak = (halfW: number, halfH: number, alpha: number) => {
         const g = ctx.createLinearGradient(cx - halfW, cy, cx + halfW, cy);
         g.addColorStop(0, "rgba(150,220,255,0)");
@@ -391,36 +309,32 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
         ctx.ellipse(cx, cy, halfW, halfH, 0, 0, Math.PI * 2);
         ctx.fill();
       };
-      const fl = live.flare * (0.94 + 0.06 * Math.sin(t * 3.1));
-      // ステージ内で必ずフェードし切る長さに抑える（端で切れると棒に見える）
-      const maxHalf = stage * 0.48;
-      streak(Math.min(size * 0.62 * fl, maxHalf), Math.max(0.7, size * 0.005), 0.90);
-      streak(Math.min(size * 0.28 * fl, maxHalf), Math.max(0.5, size * 0.009), 0.14);
-      // Vertical streak: same helper rotated a quarter turn.
+      const fl = live.flare * (0.95 + 0.05 * Math.sin(t * 3.1));
+      // Clamp inside the stage: a streak cut off at the edge reads as a bar.
+      const maxHalf = stage * 0.47;
+      streak(Math.min(size * 0.56 * fl, maxHalf), Math.max(0.6, size * 0.0045), 0.85);
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(Math.PI / 2);
       ctx.translate(-cx, -cy);
-      streak(size * 0.26 * fl, Math.max(0.6, size * 0.005), 0.45);
+      streak(Math.min(size * 0.24 * fl, maxHalf), Math.max(0.5, size * 0.004), 0.42);
       ctx.restore();
       ctx.globalCompositeOperation = "source-over";
 
-      /* 6 — rings in front */
       ringSegments(false);
 
-      /* 7 — dust in front + halo pings */
-      drawDust(true);
+      /* 8 — halo ping (state marker, deliberately faint) */
       const pingPhase = (t % live.ping) / live.ping;
       ctx.beginPath();
-      ctx.arc(cx, cy, size * (0.50 + pingPhase * 0.12), 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(150,205,255,${(0.12 * (1 - pingPhase)).toFixed(3)})`;
+      ctx.arc(cx, cy, size * (0.55 + pingPhase * 0.14), 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(150,205,255,${(0.16 * (1 - pingPhase)).toFixed(3)})`;
       ctx.lineWidth = 1;
       ctx.stroke();
       if (live.cyan > 0.12) {
         const p2 = ((t + live.ping / 2) % live.ping) / live.ping;
         ctx.beginPath();
-        ctx.arc(cx, cy, size * (0.52 + p2 * 0.14), 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(0,243,255,${(live.cyan * 0.30 * (1 - p2)).toFixed(3)})`;
+        ctx.arc(cx, cy, size * (0.57 + p2 * 0.16), 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(0,243,255,${(live.cyan * 0.35 * (1 - p2)).toFixed(3)})`;
         ctx.stroke();
       }
     };
