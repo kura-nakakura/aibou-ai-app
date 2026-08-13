@@ -65,7 +65,9 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${shareTechMono.variable}`}>
+    // data-skin は下の <script> が描画前に付ける。サーバー出力には無いので、
+    // React の「属性が増えている」警告だけ抑える（意図した差分）。
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${shareTechMono.variable}`}>
       <head>
         {/* iOS PWA niceties (mirrors appleWebApp metadata for older Safari). */}
         <meta name="apple-mobile-web-app-capable" content="yes" />

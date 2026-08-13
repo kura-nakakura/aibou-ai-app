@@ -166,6 +166,32 @@ test("A broken saved skin falls back to the default", async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.dataset.skin)).toBe("forge");
 });
 
+
+test("Settings CORE has the core-shape picker and it persists", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await page.getByLabel("Settings").click();
+  await expect(page.getByText("コアの形")).toBeVisible({ timeout: 5_000 });
+  // 見本は実物のコアを小さく描いている（静止画ではない）
+  await expect(page.getByRole("button", { name: "ピラミッド" })).toBeVisible();
+  await page.getByRole("button", { name: "クリスタル" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("forge_core_type"))).toBe("crystal");
+  // 再読込しても選んだ形のまま
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await enterApp(page);
+  await page.getByLabel("Settings").click();
+  await expect(page.getByRole("button", { name: "クリスタル" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("A broken saved core shape falls back to the default", async ({ page }) => {
+  await page.goto("/");
+  await page.evaluate(() => localStorage.setItem("forge_core_type", "nonsense"));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await enterApp(page);
+  await page.getByLabel("Settings").click();
+  await expect(page.getByRole("button", { name: "コア", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
 /* ── Settings ───────────────────────────────────────────────────── */
 test("Settings gear icon is clickable and opens panel", async ({ page }) => {
   await page.goto("/");

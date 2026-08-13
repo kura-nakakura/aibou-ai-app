@@ -15,7 +15,9 @@
  * while the tab is hidden.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { SHAPE_DRAWERS, type ShapeCtx } from "@/lib/coreShapes";
+import { CORE_TYPE_EVENT, readCoreType, type CoreType } from "@/lib/coreType";
 
 export type CoreState = "idle" | "listening" | "speaking" | "thinking";
 
@@ -25,6 +27,11 @@ export interface CoreOrbProps {
   /** Current assistant state — tunes glow + animation. */
   state?: CoreState;
   className?: string;
+  /**
+   * 形の種類。省略すると設定（localStorage）に従い、切り替えにも追従する。
+   * 設定画面の見本のように「この形を出したい」ときだけ明示する。
+   */
+  type?: CoreType;
 }
 
 interface Tune {
@@ -60,10 +67,21 @@ const RINGS = [
 const PARTICLES = 340;
 const PERSPECTIVE = 3.4;
 
-export default function CoreOrb({ size = 140, state = "idle", className = "" }: CoreOrbProps) {
+export default function CoreOrb({ size = 140, state = "idle", className = "", type }: CoreOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stateRef = useRef<CoreState>(state);
   stateRef.current = state;
+
+  // 設定の形。type を渡された場合はそちらを優先する（設定画面の見本用）。
+  const [saved, setSaved] = useState<CoreType>("orb");
+  useEffect(() => {
+    if (type) return;
+    setSaved(readCoreType());
+    const onChange = (e: Event) => setSaved((e as CustomEvent<CoreType>).detail ?? readCoreType());
+    window.addEventListener(CORE_TYPE_EVENT, onChange);
+    return () => window.removeEventListener(CORE_TYPE_EVENT, onChange);
+  }, [type]);
+  const kind: CoreType = type ?? saved;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -132,6 +150,27 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
 
       ctx.clearRect(0, 0, stage, stage);
 
+      // Project a unit-sphere point; returns screen pos + depth scale.
+      const project = (x0: number, y0: number, z0: number, radius: number) => {
+        const x1 = x0 * cosY + z0 * sinY;
+        const z1 = -x0 * sinY + z0 * cosY;
+        const y2 = y0 * cosP - z1 * sinP;
+        const z2 = y0 * sinP + z1 * cosP;
+        const s = PERSPECTIVE / (PERSPECTIVE - z2);
+        return { sx: cx + x1 * radius * s, sy: cy + y2 * radius * s, z: z2, s };
+      };
+
+      // 既定のコア以外は、形ごとの描画に任せる（舞台づくりはここが持つ）。
+      const drawer = kind === "orb" ? null : SHAPE_DRAWERS[kind];
+      if (drawer) {
+        const shapeCtx: ShapeCtx = {
+          ctx, cx, cy, size, t, pulse,
+          glow: live.glow, cyan: live.cyan, project,
+        };
+        drawer(shapeCtx);
+        return;
+      }
+
       /* 1 — wide bloom */
       const bloom = ctx.createRadialGradient(cx, cy, coreR * 0.3, cx, cy, size * 0.68);
       bloom.addColorStop(0, `rgba(150,200,255,${(live.glow * 0.55).toFixed(3)})`);
@@ -161,16 +200,6 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
         ctx.strokeStyle = `rgba(0,243,255,${(live.cyan * (1 - p2)).toFixed(3)})`;
         ctx.stroke();
       }
-
-      // Project a unit-sphere point; returns screen pos + depth scale.
-      const project = (x0: number, y0: number, z0: number, radius: number) => {
-        const x1 = x0 * cosY + z0 * sinY;
-        const z1 = -x0 * sinY + z0 * cosY;
-        const y2 = y0 * cosP - z1 * sinP;
-        const z2 = y0 * sinP + z1 * cosP;
-        const s = PERSPECTIVE / (PERSPECTIVE - z2);
-        return { sx: cx + x1 * radius * s, sy: cy + y2 * radius * s, z: z2, s };
-      };
 
       /* 3 — back half of the particle shell (dim, behind the body) */
       for (const p of pts) {
@@ -303,7 +332,7 @@ export default function CoreOrb({ size = 140, state = "idle", className = "" }: 
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pointermove", onPointer);
     };
-  }, [size]);
+  }, [size, kind]);
 
   const stagePx = Math.ceil(size * 1.4);
   return (

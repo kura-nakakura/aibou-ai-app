@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import AiProviderSettings from "@/components/AiProviderSettings";
 import HfModels from "@/components/HfModels";
 import { applySkin, readSkin, setSkin, SKINS, type Skin } from "@/lib/skin";
+import { CORE_TYPES, readCoreType, setCoreType, type CoreType } from "@/lib/coreType";
 import IntegrationsSettings from "@/components/IntegrationsSettings";
 import AppArchive from "@/components/AppArchive";
 import Autopilot from "@/components/Autopilot";
@@ -663,6 +664,7 @@ function SettingsPanel({
           {tab === "core" && (
             <>
               <SkinSetting />
+              <CoreTypeSetting />
               <AiProviderSettings />
               <IntegrationsSettings />
               <label className="mb-1 block text-[10px] tracking-[0.2em] text-muted label-mono">ASSISTANT NAME</label>
@@ -905,6 +907,52 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
  * 色・面・角丸・ラベルの体裁は globals.css 側が持っている。
  * 選択肢には実際の配色の見本を出して、押す前に分かるようにする。
  */
+/**
+ * コアの形の切り替え。見本は実物の CoreOrb をそのまま小さく描いているので、
+ * 「押したらどう動くか」がその場で分かる（静止画のサムネイルではない）。
+ */
+function CoreTypeSetting() {
+  const [kind, setKind] = useState<CoreType>("orb");
+  useEffect(() => { setKind(readCoreType()); }, []);
+
+  return (
+    <div className="mb-4 rounded-forge border border-panel p-3">
+      <div className="mb-2 text-[10px] tracking-[0.2em] text-muted label-mono">コアの形</div>
+      <div className="grid grid-cols-3 gap-2">
+        {CORE_TYPES.map((c) => {
+          const active = kind === c.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => setKind(setCoreType(c.key))}
+              aria-pressed={active}
+              aria-label={c.label}
+              title={c.hint}
+              className="min-w-0 rounded-forge border p-1.5 text-center transition"
+              style={{
+                borderColor: active ? "var(--accent)" : "var(--panel-bd)",
+                background: active ? "var(--btn-bg)" : "transparent",
+              }}
+            >
+              <span className="mx-auto block h-[52px] w-[52px]">
+                <CoreOrb size={52} state="idle" type={c.key} />
+              </span>
+              <span className="mt-1 block truncate text-[9px] label-mono"
+                    style={{ color: active ? "var(--fg-strong)" : "var(--muted)" }}>
+                {c.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+        {CORE_TYPES.find((c) => c.key === kind)?.hint}
+      </p>
+    </div>
+  );
+}
+
 function SkinSetting() {
   const [skin, setSkinState] = useState<Skin>("forge");
 
