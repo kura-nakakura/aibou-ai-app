@@ -777,7 +777,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
             rows={1}
             placeholder={listening ? "聞き取り中…"
               : agentMode ? "やってほしいことを指示…（例：明日15時に歯医者の予定を入れて）"
-              : "AIbou にメッセージ… (スクショはCtrl+Vで貼付)"}
+              : "AIbou にメッセージ…"}
             className="max-h-32 min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-fg-strong placeholder:text-muted focus:outline-none"
             style={{ scrollbarWidth: "none" }}
           />
@@ -859,7 +859,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
             <span className="text-[10px] tracking-[0.2em] text-[var(--accent)] label-mono">LISTENING…</span>
           ) : (
             <span className="text-[10px] tracking-[0.18em] text-muted/50 label-mono">
-              {micSupported ? "ENTERで送信 · ハンズフリー対応" : "ENTERで送信"}
+              {micSupported ? "ENTERで送信 · 画像はCtrl+V · ハンズフリー対応" : "ENTERで送信 · 画像はCtrl+V"}
             </span>
           )}
         </div>

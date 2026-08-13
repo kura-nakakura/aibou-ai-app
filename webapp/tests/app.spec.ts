@@ -1005,8 +1005,10 @@ test("HOME agent console renders with action suggestions", async ({ page }) => {
 test("CHAT composer hints screenshot paste", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  // Default view is CHAT; its composer placeholder now mentions Ctrl+V paste.
-  await expect(page.getByPlaceholder(/Ctrl\+V/)).toBeVisible({ timeout: 5_000 });
+  // Default view is CHAT; the composer's hint line mentions Ctrl+V paste.
+  // (It lives under the input, not in the placeholder — a long placeholder
+  //  wraps and gets clipped on phone widths.)
+  await expect(page.getByText(/画像はCtrl\+V/)).toBeVisible({ timeout: 5_000 });
 });
 
 test("HOME agent console has a file-attach button", async ({ page }) => {
