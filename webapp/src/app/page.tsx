@@ -209,6 +209,21 @@ function Hud() {
           </div>
         </div>
 
+        {/* フォーカス中はコアが消えるので、戻し方を文字で出す。
+            アイコン（⛶）だけだと「コアが壊れた」に見え、設定が保存される
+            ぶん再読込しても直らないため、必ず1タップで戻せる導線を置く。 */}
+        {fullscreen && (
+          <div className="flex justify-center pb-1">
+            <button
+              type="button"
+              onClick={() => setFullscreen(false)}
+              className="rounded-full border border-panel bg-[var(--chrome)] px-3 py-1 text-[9px] tracking-[0.12em] text-muted transition hover:border-[var(--line)] hover:text-fg-strong label-mono"
+            >
+              フォーカス中 — コアを表示
+            </button>
+          </div>
+        )}
+
         {/* Core + wordmark (compact when not on chat / home). Hidden in
             fullscreen to give the active mode the whole canvas — the slim
             status row above keeps the restore/modes/settings controls. */}

@@ -192,6 +192,20 @@ test("A broken saved core shape falls back to the default", async ({ page }) => 
   await expect(page.getByRole("button", { name: "コア", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
+
+test("Focus mode hides the core but always offers a labelled way back", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await expect(page.getByRole("img", { name: /core/i }).first()).toBeVisible();
+  await page.getByLabel("Fullscreen").click();
+  // コアは消えるが、戻し方が文字で出ている（アイコンだけにしない）
+  await expect(page.getByRole("img", { name: /core/i })).toHaveCount(0);
+  const back = page.getByRole("button", { name: /コアを表示/ });
+  await expect(back).toBeVisible();
+  await back.click();
+  await expect(page.getByRole("img", { name: /core/i }).first()).toBeVisible();
+});
+
 /* ── Settings ───────────────────────────────────────────────────── */
 test("Settings gear icon is clickable and opens panel", async ({ page }) => {
   await page.goto("/");
