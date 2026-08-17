@@ -42,6 +42,7 @@ import fileread
 import forge
 import gh
 import gservice
+import guide as guide_mod
 import hfhub
 import imagegen
 import income
@@ -539,6 +540,9 @@ def build_system_prompt(name: Optional[str], persona: Optional[str], memory_bloc
     ]
     if persona and persona.strip():
         parts.append(f"\n【ペルソナ / 振る舞いの指針】\n{persona.strip()}")
+    # アプリ自身の説明は guide.py が唯一の出どころ。ここに直接書くと、
+    # 画面のガイドと食い違って古くなる。
+    parts.append(f"\n{guide_mod.prompt_block()}")
     if memory_block:
         parts.append(f"\n{memory_block}")
     return "\n".join(parts)
@@ -1066,6 +1070,12 @@ async def ai_config_set(req: AiConfigRequest, _auth: None = Depends(require_auth
     if req.code_model is not None:
         keychain.set_key("CODE_MODEL", req.code_model.strip())
     return await ai_config_get()
+
+
+@app.get("/guide")
+async def guide(_auth: None = Depends(require_auth)):
+    """アプリの使い方（画面のガイドとCHATが同じ内容を見る）。"""
+    return {"sections": guide_mod.sections(), **guide_mod.status()}
 
 
 # ── HF MODELS：HuggingFaceのモデルを登録して役割に割り当てる ──────────

@@ -206,6 +206,27 @@ test("Focus mode hides the core but always offers a labelled way back", async ({
   await expect(page.getByRole("img", { name: /core/i }).first()).toBeVisible();
 });
 
+
+/* ── 使い方ガイド ───────────────────────────────────────────────── */
+test("GUIDE mode opens and shows how to start even without a backend", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "GUIDE");
+  await expect(page.getByText(/の使い方/)).toBeVisible({ timeout: 5_000 });
+  // 未接続でも「まず何をすればいいか」は必ず出す
+  await expect(page.getByText("まずはここから")).toBeVisible();
+  await expect(page.getByText(/KEYCHAIN/)).toBeVisible();
+});
+
+test("GUIDE is reachable from the mode launcher and survives a reload", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await goMode(page, "GUIDE");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await enterApp(page);
+  await expect(page.getByText(/の使い方/)).toBeVisible({ timeout: 8_000 });
+});
+
 /* ── Settings ───────────────────────────────────────────────────── */
 test("Settings gear icon is clickable and opens panel", async ({ page }) => {
   await page.goto("/");

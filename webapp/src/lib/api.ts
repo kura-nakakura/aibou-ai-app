@@ -2140,3 +2140,34 @@ export async function hfRun(opts: { model: string; task: string; text?: string; 
   });
   return (await res.json().catch(() => ({ error: "実行に失敗しました" })));
 }
+
+/* ---------------- 使い方ガイド ---------------- */
+export interface GuideSection {
+  id: string;
+  title: string;
+  summary: string;
+  steps: string[];
+  notes: string[];
+}
+export interface GuideDoc {
+  app: string;
+  sections: GuideSection[];
+  section_count: number;
+  beta: boolean;
+  /** true = 利用者ごとにデータが分かれていない（共有環境）。 */
+  shared_data: boolean;
+}
+
+/** GET /guide — アプリの説明。CHATが答える内容と同じ出どころ。 */
+export async function guideGet(): Promise<GuideDoc> {
+  const res = await fetch(`${requireApiUrl()}/guide`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`Guide failed (${res.status})`);
+  const d = (await res.json()) as Partial<GuideDoc>;
+  return {
+    app: d.app ?? "AIbou",
+    sections: Array.isArray(d.sections) ? d.sections : [],
+    section_count: d.section_count ?? 0,
+    beta: Boolean(d.beta),
+    shared_data: Boolean(d.shared_data),
+  };
+}

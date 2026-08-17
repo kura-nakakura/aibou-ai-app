@@ -33,6 +33,7 @@ import Workshop from "@/components/Workshop";
 import Capture from "@/components/Capture";
 import SnsMode from "@/components/SnsMode";
 import Home from "@/components/Home";
+import Guide from "@/components/Guide";
 import Income from "@/components/Income";
 import Keychain from "@/components/Keychain";
 import LifeMode from "@/components/LifeMode";
@@ -42,7 +43,7 @@ import { health } from "@/lib/api";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { APP_VERSION } from "@/lib/version";
 
-type View = "chat" | "me" | "sns" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
+type View = "chat" | "me" | "sns" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home" | "guide";
 
 const LS_NAME = "forge_name";
 const LS_PERSONA = "forge_persona";
@@ -105,7 +106,7 @@ function Hud() {
       // Reopen the mode you were using (PWA relaunch lands where you left off).
       let savedView = localStorage.getItem("forge_view") as View | null;
       if (savedView === ("forge" as View)) savedView = "studio"; // 旧FORGEはWORKSHOP(studio)に統合
-      if (savedView && ["chat", "me", "sns", "capture", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home"].includes(savedView)) {
+      if (savedView && ["chat", "me", "sns", "capture", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home", "guide"].includes(savedView)) {
         setView(savedView);
       }
       if (localStorage.getItem("forge_fullscreen") === "1") setFullscreen(true);
@@ -284,6 +285,7 @@ function Hud() {
           {loaded && view === "autopilot" && <Centered><Autopilot /></Centered>}
           {loaded && view === "board" && <Centered><Dashboard /></Centered>}
           {loaded && view === "archive" && <Centered><AppArchive /></Centered>}
+          {loaded && view === "guide" && <Centered><Guide /></Centered>}
         </motion.div>
       </section>
 
@@ -329,6 +331,7 @@ const NAV_ITEMS: { key: View; label: string }[] = [
   { key: "autopilot", label: "AUTO" },
   { key: "board", label: "BOARD" },
   { key: "archive", label: "ARCHIVE" },
+  { key: "guide", label: "GUIDE" },
 ];
 
 /* Silver line-art nav icons (stroke = currentColor → inherits the muted /
