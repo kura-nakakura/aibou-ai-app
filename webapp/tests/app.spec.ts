@@ -212,7 +212,7 @@ test("GUIDE mode opens and shows how to start even without a backend", async ({ 
   await page.goto("/");
   await enterApp(page);
   await goMode(page, "GUIDE");
-  await expect(page.getByText(/の使い方/)).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole("heading", { name: /の説明書/ })).toBeVisible({ timeout: 5_000 });
   // 未接続でも「まず何をすればいいか」は必ず出す
   await expect(page.getByText("まずはここから")).toBeVisible();
   await expect(page.getByText(/KEYCHAIN/)).toBeVisible();
@@ -224,7 +224,7 @@ test("GUIDE is reachable from the mode launcher and survives a reload", async ({
   await goMode(page, "GUIDE");
   await page.reload({ waitUntil: "domcontentloaded" });
   await enterApp(page);
-  await expect(page.getByText(/の使い方/)).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByRole("heading", { name: /の説明書/ })).toBeVisible({ timeout: 8_000 });
 });
 
 

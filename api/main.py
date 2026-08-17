@@ -1171,7 +1171,7 @@ async def account_database_disconnect(user_id: str = Depends(current_user)):
 @app.get("/guide")
 async def guide(_auth: None = Depends(require_auth)):
     """アプリの使い方（画面のガイドとCHATが同じ内容を見る）。"""
-    return {"sections": guide_mod.sections(), **guide_mod.status()}
+    return {"sections": guide_mod.sections(), "modes": guide_mod.modes(), **guide_mod.status()}
 
 
 # ── HF MODELS：HuggingFaceのモデルを登録して役割に割り当てる ──────────

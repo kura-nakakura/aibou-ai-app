@@ -2149,10 +2149,22 @@ export interface GuideSection {
   steps: string[];
   notes: string[];
 }
+/** 全モードの説明書1件（実画面つき）。 */
+export interface GuideMode {
+  id: string;
+  label: string;      // 画面上の名前（CHAT など）
+  name: string;       // 日本語の呼び名
+  image: string;      // /guide/xxx.webp（実際に撮った初期画面）
+  what: string;
+  how: string[];
+  tips: string[];
+}
 export interface GuideDoc {
   app: string;
   sections: GuideSection[];
+  modes: GuideMode[];
   section_count: number;
+  mode_count: number;
   beta: boolean;
   /** true = 利用者ごとにデータが分かれていない（共有環境）。 */
   shared_data: boolean;
@@ -2166,7 +2178,9 @@ export async function guideGet(): Promise<GuideDoc> {
   return {
     app: d.app ?? "AIbou",
     sections: Array.isArray(d.sections) ? d.sections : [],
+    modes: Array.isArray(d.modes) ? d.modes : [],
     section_count: d.section_count ?? 0,
+    mode_count: d.mode_count ?? 0,
     beta: Boolean(d.beta),
     shared_data: Boolean(d.shared_data),
   };

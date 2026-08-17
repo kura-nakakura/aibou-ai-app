@@ -2,16 +2,24 @@
 #
 # ここが壊れると「説明と実物が食い違うアプリ」になる。特に確かめたいのは
 #   ・画面のガイドとCHATの説明が同じ出どころから来ていること
-#   ・ベータの注意（データが利用者ごとに分かれていない）が確実に載ること
+#   ・ベータの注意（データの置き場）が確実に、かつ実際の設定どおりに載ること
 #   ・実装に無い機能を説明していないこと
+#   ・全モードの説明書に、実在する画面写真が全部そろっていること
+
+import os
 
 from fastapi.testclient import TestClient
 
+import config
 import guide
 import main
 from main import app
 
 client = TestClient(app)
+
+# 画面写真の置き場（webapp が配信する public/）。api/ の1つ上がリポジトリ直下。
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PUBLIC_DIR = os.path.join(_REPO, "webapp", "public")
 
 
 def test_sections_have_the_shape_the_ui_expects():
@@ -68,21 +76,80 @@ def test_guide_endpoint():
     r = client.get("/guide")
     assert r.status_code == 200
     d = r.json()
-    assert d["app"] and d["beta"] is True and d["shared_data"] is True
+    assert d["app"] and d["beta"] is True
     assert len(d["sections"]) == d["section_count"] >= 4
+    assert len(d["modes"]) == d["mode_count"] >= 10
     # 件数キーが本体を上書きしていないこと（実際に踏んだ不具合）
-    assert isinstance(d["sections"], list)
+    assert isinstance(d["sections"], list) and isinstance(d["modes"], list)
+
+
+def test_shared_data_follows_the_actual_setup(monkeypatch):
+    """データの置き場の説明が、固定値ではなく実際の設定から出ていること。"""
+    monkeypatch.setattr(config, "SUPABASE_JWT_SECRET", "")
+    assert guide.status()["shared_data"] is True       # 利用者を識別できない=共有
+    monkeypatch.setattr(config, "SUPABASE_JWT_SECRET", "secret")
+    assert guide.status()["shared_data"] is False      # 各自のDBへ振り分けられる
+
+
+# ── 全モードの説明書 ───────────────────────────────────────────────
+def test_modes_have_the_shape_the_ui_expects():
+    for m in guide.modes():
+        assert set(m) >= {"id", "label", "name", "image", "what", "how", "tips"}
+        assert m["label"] and m["name"] and m["what"]
+        assert isinstance(m["how"], list) and isinstance(m["tips"], list)
+
+
+def test_mode_ids_are_unique():
+    ids = [m["id"] for m in guide.modes()]
+    assert len(ids) == len(set(ids))
+
+
+def test_modes_are_a_copy_so_callers_cannot_corrupt_the_source():
+    got = guide.modes()
+    got[0]["what"] = "書き換え"
+    assert guide.modes()[0]["what"] != "書き換え"
+
+
+def test_every_mode_has_a_screenshot_that_actually_ships():
+    """説明書に画像の穴が空くのを防ぐ。
+
+    パスだけ書いてファイルを置き忘れると、画面には alt テキストだけが並ぶ。
+    ブラウザで開くまで気づけないので、ここで落とす。
+    """
+    for m in guide.modes():
+        assert m["image"].startswith("/guide/"), m["image"]
+        path = os.path.join(PUBLIC_DIR, m["image"].lstrip("/"))
+        assert os.path.isfile(path), f"画面写真が無い: {m['image']}"
+        assert os.path.getsize(path) > 2000, f"画面写真が壊れている: {m['image']}"
+
+
+def test_every_screen_in_the_launcher_is_documented():
+    """ランチャーに出る画面は、全部説明書にあること（説明の取りこぼし防止）。"""
+    documented = {m["label"] for m in guide.modes()}
+    for label in ["CHAT", "HOME", "ME", "TASKS", "BOARD", "VAULT", "CODE",
+                  "STUDIO", "CAPTURE", "SNS", "INCOME", "AUTO", "ARCHIVE"]:
+        assert label in documented, f"説明書に無い画面がある: {label}"
 
 
 def test_guide_does_not_promise_features_that_do_not_exist():
     """説明にあるモード名は、実際に画面がある名前だけにする。"""
     text = " ".join(s["summary"] + " ".join(s["steps"]) for s in guide.sections())
+    text += " ".join(m["what"] + " ".join(m["how"]) + " ".join(m["tips"])
+                     for m in guide.modes())
     modes = ["HOME", "CHAT", "ME", "TASKS", "BOARD", "VAULT", "CODE",
              "STUDIO", "CAPTURE", "SNS", "INCOME", "AUTO", "ARCHIVE"]
-    settings_tabs = ["CORE", "PERSONA", "KEYCHAIN", "DIAGNOSTICS"]   # 設定のタブ名
-    # 画面名ではない語（サービス名・略語）
-    other = ["PDF", "AI", "LP", "LINE", "ZIP", "CSV", "URL", "PAT", "API", "OK", "DB"]
+    # 設定のタブ名（app/page.tsx の SettingsTab と同じ）
+    settings_tabs = ["CORE", "PERSONA", "KEYCHAIN", "HF", "DIAGNOSTICS"]
+    # 画面の中にある実在のUI名（押せるタブ・見出し）
+    ui_parts = ["AGENT", "CONSOLE", "WHITEBOARD", "AUTOMATION"]
+    # KEYCHAIN に実在する鍵の名前を分解した断片（GEMINI_API_KEY など）
+    key_names = ["GEMINI", "HUGGINGFACE", "GITHUB", "API", "TOKEN", "KEY"]
+    # 画面名ではない語（キー名・サービス名・一般的な略語）
+    other = ["SHIFT", "PDF", "AI", "LP", "HP", "WEB", "LINE", "ZIP", "CSV",
+             "URL", "PAT", "OK", "DB", "MTG"]
+    allowed = modes + settings_tabs + ui_parts + key_names + other
+    # 日本語に直接くっついた語（「定例MTG」「WEBアプリ」など）も拾う。\b は
+    # 日本語の文字を単語構成文字として扱うため境界が立たず、素通りしてしまう。
     import re
-    for word in re.findall(r"\b[A-Z]{3,}\b", text):
-        assert word in modes + settings_tabs + other, \
-            f"実在しない画面名が説明に出ている: {word}"
+    for word in re.findall(r"(?<![A-Za-z])[A-Z]{2,}(?![A-Za-z])", text):
+        assert word in allowed, f"実在しない画面名が説明に出ている: {word}"

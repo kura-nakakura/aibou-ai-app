@@ -240,12 +240,15 @@ function CockpitHeader({ name }: { name: string }) {
   return (
     <div className="glass-silver relative overflow-hidden p-4">
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ backgroundImage: "radial-gradient(circle at 85% 20%, var(--accent), transparent 45%)" }} aria-hidden />
-      <div className="relative flex items-end justify-between gap-3">
-        <div>
+      {/* 時計は tabular-nums で折り返せないので、横並びのままだと挨拶文だけが
+          潰れて1文字ずつ改行される（スマホ幅＋「カスタマイズ」ボタンで顕著）。
+          狭い画面では縦に積む。 */}
+      <div className="relative flex flex-col gap-1.5 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+        <div className="min-w-0">
           <div className="text-base text-fg-strong sm:text-lg">{greeting()}、{name} です。</div>
           <div className="mt-0.5 text-[10px] tracking-[0.16em] text-muted label-mono">PERSONAL COCKPIT · 本日の状況</div>
         </div>
-        <div className="text-right">
+        <div className="flex shrink-0 items-baseline gap-2 sm:block sm:text-right">
           <div className="text-glow text-xl font-bold tabular-nums text-fg-strong sm:text-2xl label-mono">{hhmmss}</div>
           <div className="text-[9px] tracking-[0.16em] text-muted label-mono">{dateLabel}</div>
         </div>
