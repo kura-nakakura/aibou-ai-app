@@ -43,6 +43,7 @@ import forge
 import gh
 import gservice
 import guide as guide_mod
+import tenancy
 import hfhub
 import imagegen
 import income
@@ -129,20 +130,51 @@ app.add_middleware(
 
 
 # ── 認証（任意のBearerトークン） ─────────────────────────────────
-def _verify_supabase_jwt(token: str) -> bool:
-    """Supabase Auth の access_token (HS256) を検証する。検証不可/失敗は False。"""
+def _decode_supabase_jwt(token: str) -> Optional[dict]:
+    """Supabase Auth の access_token (HS256) を検証して claims を返す。失敗は None。"""
     secret = config.SUPABASE_JWT_SECRET
     if not (secret and token):
-        return False
+        return None
     try:
         import jwt as pyjwt
-        pyjwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
-        return True
+        return pyjwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
     except Exception:
-        return False
+        return None
 
 
-async def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
+def _verify_supabase_jwt(token: str) -> bool:
+    return _decode_supabase_jwt(token) is not None
+
+
+async def current_user(authorization: Optional[str] = Header(default=None)) -> str:
+    """ログイン中の利用者ID（SupabaseのJWTの sub）。特定できなければ空文字。"""
+    if authorization and authorization.strip().lower().startswith("bearer "):
+        claims = _decode_supabase_jwt(authorization.strip()[7:].strip())
+        if claims:
+            return str(claims.get("sub") or "")
+    return ""
+
+
+async def use_own_database(user_id: str = Depends(current_user)):
+    """このリクエストの保存先を「その人のSupabase」に差し替える。
+
+    ・接続済み  … その人のクライアント
+    ・未接続    … None（保存しない）。管理者の共有DBへ黙って書かないため。
+    ・そもそも利用者を特定できない（JWT無し/単独運用）… 差し替えない
+      （従来どおりサーバーの既定Supabaseを使う）
+    """
+    if not user_id:
+        yield ""
+        return
+    token = config.bind_request_client(tenancy.client_for(user_id))
+    try:
+        yield user_id
+    finally:
+        config.reset_request_client(token)
+
+
+async def require_auth(authorization: Optional[str] = Header(default=None),
+                       _db: str = Depends(use_own_database)) -> None:
     """認証。次のいずれかで通過:
       1) APP_TOKEN 設定時: Authorization: Bearer <APP_TOKEN> の一致
       2) SUPABASE_JWT_SECRET 設定時: Supabase ログインの JWT（HS256）が有効
@@ -1070,6 +1102,70 @@ async def ai_config_set(req: AiConfigRequest, _auth: None = Depends(require_auth
     if req.code_model is not None:
         keychain.set_key("CODE_MODEL", req.code_model.strip())
     return await ai_config_get()
+
+
+# ── 自分のデータベース（利用者ごと） ──────────────────────────────
+
+class DatabaseConnectRequest(BaseModel):
+    url: str
+    service_key: str
+    db_url: str = ""     # テーブル自動作成に使う postgresql://…（任意）
+    label: str = ""
+
+
+@app.get("/account/database")
+async def account_database(user_id: str = Depends(current_user)):
+    """自分のDBの接続状態。鍵の値は返さない（マスクのみ）。"""
+    if not user_id:
+        return {"available": False,
+                "reason": "ログインしていないため、個人のデータベースは使えません"}
+    return {"available": True, **tenancy.status(user_id)}
+
+
+@app.post("/account/database/test")
+async def account_database_test(req: DatabaseConnectRequest,
+                                _user: str = Depends(current_user)):
+    """保存せずに、その接続で本当に繋がるかだけ確かめる。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: tenancy.check(req.url, req.service_key))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.post("/account/database")
+async def account_database_connect(req: DatabaseConnectRequest,
+                                   user_id: str = Depends(current_user)):
+    """自分のDBを接続する（繋がることを確かめてから保存）。"""
+    if not user_id:
+        return JSONResponse(status_code=401,
+                            content={"error": "ログインしてから接続してください"})
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: tenancy.connect(user_id, req.url, req.service_key, req.db_url, req.label))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return {**res, **tenancy.status(user_id)}
+
+
+@app.post("/account/database/migrate")
+async def account_database_migrate(user_id: str = Depends(current_user)):
+    """自分のDBに必要なテーブルを作る。"""
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "ログインしてください"})
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: tenancy.create_tables(user_id))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.delete("/account/database")
+async def account_database_disconnect(user_id: str = Depends(current_user)):
+    """接続を外す。以後この人のデータは保存されない（DB自体は消さない）。"""
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "ログインしてください"})
+    return tenancy.disconnect(user_id)
 
 
 @app.get("/guide")

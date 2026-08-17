@@ -310,3 +310,16 @@ CREATE TABLE IF NOT EXISTS hf_images (
   prompt     text DEFAULT '',
   created_at timestamptz DEFAULT now()
 );
+
+-- 👤 利用者ごとの「自分のSupabase」接続台帳。
+-- これは管理者のプロジェクト側にだけ置く（各利用者のDBには作られない）。
+-- service_key / db_url は Fernet で暗号化した文字列のみを保存する。
+CREATE TABLE IF NOT EXISTS user_connections (
+  user_id     text PRIMARY KEY,          -- Supabase Auth の sub
+  url         text NOT NULL,             -- https://xxxx.supabase.co
+  service_key text NOT NULL,             -- enc:v1:…（復号はサーバー内部のみ）
+  db_url      text DEFAULT '',           -- enc:v1:…（テーブル自動作成に使う）
+  label       text DEFAULT '',
+  verified_at text DEFAULT '',
+  created_at  timestamptz DEFAULT now()
+);

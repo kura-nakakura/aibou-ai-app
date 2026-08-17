@@ -227,6 +227,16 @@ test("GUIDE is reachable from the mode launcher and survives a reload", async ({
   await expect(page.getByText(/の使い方/)).toBeVisible({ timeout: 8_000 });
 });
 
+
+test("KEYCHAIN explains where your data is stored before you connect a database", async ({ page }) => {
+  await page.goto("/");
+  await enterApp(page);
+  await page.getByLabel("Settings").click();
+  await page.getByText("KEYCHAIN", { exact: true }).click();
+  // 未接続の人がまず見る場所に、自分のDBの設定があること
+  await expect(page.getByText("自分のデータベース")).toBeVisible({ timeout: 5_000 });
+});
+
 /* ── Settings ───────────────────────────────────────────────────── */
 test("Settings gear icon is clickable and opens panel", async ({ page }) => {
   await page.goto("/");

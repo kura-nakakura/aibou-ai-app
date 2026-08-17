@@ -16,6 +16,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import AiProviderSettings from "@/components/AiProviderSettings";
 import HfModels from "@/components/HfModels";
+import MyDatabase from "@/components/MyDatabase";
 import { applySkin, readSkin, setSkin, SKINS, type Skin } from "@/lib/skin";
 import { CORE_TYPES, readCoreType, setCoreType, type CoreType } from "@/lib/coreType";
 import IntegrationsSettings from "@/components/IntegrationsSettings";
@@ -783,6 +784,7 @@ function SettingsPanel({
                 APIキーを暗号化して保管します。<b className="text-fg">バックエンド接続時は Supabase にサーバー側で暗号化保存</b>（Fernet・DBは暗号文のみ）。
                 未接続時は端末内に暗号化下書き（AES-256）として保存し、接続後に取り込めます。ここで追加・変更・削除できます。
               </div>
+              <MyDatabase />
               <Keychain />
             </>
           )}

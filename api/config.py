@@ -8,6 +8,7 @@
 # 空を返して優雅に縮退する（graceful degradation）。
 # =====================================================================
 
+import contextvars
 import os
 
 from dotenv import load_dotenv
@@ -202,8 +203,38 @@ _supabase_client = None
 _supabase_tried = False
 
 
+# ── 利用者ごとのDB差し替え ────────────────────────────────────────
+# 各モジュールは get_supabase() 越しにしか Supabase を触らない（83箇所）。
+# そこでリクエストの間だけ「その利用者のクライアント」をここに入れておけば、
+# 保存先が丸ごとその人のDBに向く。ContextVar なので同時アクセスでも混ざらない。
+_request_client: contextvars.ContextVar = contextvars.ContextVar("supabase_request_client", default=None)
+
+
+def bind_request_client(client) -> object:
+    """このリクエストで使うクライアントを差し込む。戻り値は reset 用トークン。
+
+    client=None を渡すと「保存しない（メモリのみ）」になる。未接続の利用者の
+    データを、管理者の共有DBへ黙って書かないための明示的な状態。
+    """
+    return _request_client.set(("set", client))
+
+
+def reset_request_client(token) -> None:
+    try:
+        _request_client.reset(token)
+    except Exception:
+        pass
+
+
 def get_supabase():
-    """Supabaseクライアントを返す。未設定/失敗時は None（記憶・収益系は空で縮退）。"""
+    """Supabaseクライアントを返す。未設定/失敗時は None（記憶・収益系は空で縮退）。
+
+    リクエストごとの差し替えが入っていれば、そちらを優先する。
+    """
+    bound = _request_client.get()
+    if bound is not None:
+        # ("set", client) の形で入っている。client が None なら「保存しない」。
+        return bound[1]
     global _supabase_client, _supabase_tried
     if _supabase_client is not None:
         return _supabase_client

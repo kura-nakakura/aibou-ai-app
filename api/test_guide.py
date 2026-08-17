@@ -32,20 +32,29 @@ def test_sections_are_a_copy_so_callers_cannot_corrupt_the_source():
     assert guide.sections()[0]["title"] != "書き換え"
 
 
-def test_beta_warning_is_present_and_explicit():
-    """共有環境であることは、隠すと事故になる。必ず載っていること。"""
+def test_beta_section_explains_where_data_lives():
+    """データの置き場は、隠すと事故になる。必ず載っていること。"""
     beta = next(s for s in guide.sections() if s["id"] == "beta")
     joined = beta["summary"] + " ".join(beta["notes"])
     assert "ベータ" in joined
-    assert "全員が同じ" in joined or "分かれておらず" in joined
-    assert "APIキー" in joined
+    assert "自分" in joined and "Supabase" in joined
 
 
-def test_chat_prompt_carries_the_same_warning():
-    """CHATが「個人利用として安全です」と嘘をつかないよう、事実を渡す。"""
+def test_guide_tells_people_to_connect_their_own_database_first():
+    """繋ぐまで保存されない、は最初に伝えないと「消えた」事故になる。"""
+    db = next(s for s in guide.sections() if s["id"] == "database")
+    joined = db["summary"] + " ".join(db["steps"]) + " ".join(db["notes"])
+    assert "保存されません" in joined or "保存されない" in joined
+    assert "service_role" in joined
+    assert "設定" in joined and "KEYCHAIN" in joined
+
+
+def test_chat_prompt_carries_the_same_facts():
+    """画面のガイドとCHATの説明が食い違わないこと。"""
     block = guide.prompt_block()
     assert "ベータ" in block
-    assert "共有" in block
+    assert "自分の Supabase" in block or "自分のデータベース" in block
+    assert "保存されない" in block          # 繋ぐまでは保存されない、を必ず言う
     assert "でっち上げ" in block or "あるかのように答えない" in block
 
 
@@ -72,7 +81,7 @@ def test_guide_does_not_promise_features_that_do_not_exist():
              "STUDIO", "CAPTURE", "SNS", "INCOME", "AUTO", "ARCHIVE"]
     settings_tabs = ["CORE", "PERSONA", "KEYCHAIN", "DIAGNOSTICS"]   # 設定のタブ名
     # 画面名ではない語（サービス名・略語）
-    other = ["PDF", "AI", "LP", "LINE", "ZIP", "CSV", "URL", "PAT"]
+    other = ["PDF", "AI", "LP", "LINE", "ZIP", "CSV", "URL", "PAT", "API", "OK", "DB"]
     import re
     for word in re.findall(r"\b[A-Z]{3,}\b", text):
         assert word in modes + settings_tabs + other, \

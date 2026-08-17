@@ -2171,3 +2171,62 @@ export async function guideGet(): Promise<GuideDoc> {
     shared_data: Boolean(d.shared_data),
   };
 }
+
+/* ---------------- 自分のデータベース（利用者ごと） ---------------- */
+export interface MyDatabase {
+  available: boolean;      // ログインしていないと使えない
+  reason?: string;
+  connected?: boolean;
+  url?: string;
+  masked_key?: string;
+  db_url_set?: boolean;
+  label?: string;
+  verified_at?: string | null;
+}
+
+/** GET /account/database — 自分のDBの接続状態（鍵はマスクのみ）。 */
+export async function myDatabase(): Promise<MyDatabase> {
+  const res = await fetch(`${requireApiUrl()}/account/database`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`DB status failed (${res.status})`);
+  return (await res.json()) as MyDatabase;
+}
+
+/** POST /account/database/test — 保存せず接続だけ試す。 */
+export async function myDatabaseTest(body: { url: string; service_key: string }):
+  Promise<{ ok?: boolean; tables_ready?: boolean; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/account/database/test`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  return (await res.json().catch(() => ({ error: "接続を確認できませんでした" })));
+}
+
+/** POST /account/database — 接続して保存する。 */
+export async function myDatabaseConnect(body: {
+  url: string; service_key: string; db_url?: string; label?: string;
+}): Promise<MyDatabase & { ok?: boolean; tables_ready?: boolean; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/account/database`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ ...body, db_url: body.db_url ?? "", label: body.label ?? "" }),
+  });
+  return (await res.json().catch(() => ({ error: "接続に失敗しました" })));
+}
+
+/** POST /account/database/migrate — 自分のDBに必要なテーブルを作る。 */
+export async function myDatabaseMigrate():
+  Promise<{ ok?: boolean; ran?: boolean; skipped?: boolean; tables?: number; error?: string; reason?: string }> {
+  const res = await fetch(`${requireApiUrl()}/account/database/migrate`, {
+    method: "POST", headers: authHeaders(),
+  });
+  return (await res.json().catch(() => ({ error: "テーブル作成に失敗しました" })));
+}
+
+/** DELETE /account/database — 接続を外す。 */
+export async function myDatabaseDisconnect(): Promise<{ ok?: boolean; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/account/database`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  return (await res.json().catch(() => ({ error: "解除に失敗しました" })));
+}
