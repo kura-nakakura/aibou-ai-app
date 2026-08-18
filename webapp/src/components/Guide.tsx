@@ -16,7 +16,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { API_URL, guideGet, type GuideDoc, type GuideMode } from "@/lib/api";
+import { API_URL, guideGet, type GuideDoc, type GuideMode, type GuideSetupStep } from "@/lib/api";
+import { PolicyBody } from "@/components/Policy";
 
 /** 未接続時にだけ出す、最小限の始め方。 */
 const OFFLINE_STEPS = [
@@ -30,6 +31,7 @@ export default function Guide() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [zoom, setZoom] = useState<GuideMode | null>(null);
+  const [policyOpen, setPolicyOpen] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -71,6 +73,20 @@ export default function Guide() {
           </ol>
           {err && <p className="mt-2 text-[10px] text-muted">{err}</p>}
         </div>
+      )}
+
+      {/* はじめる手順 — 渡された人が、自分ひとりで最後まで行けるように */}
+      {doc && doc.setup.length > 0 && (
+        <section className="panel mb-3 p-4">
+          <h3 className="text-[13px] text-fg-strong">はじめる手順（初回だけ）</h3>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
+            上から順にやれば終わります。3の「SQL」は、意味が分からなくても
+            コピーして貼るだけで大丈夫です。
+          </p>
+          <div className="mt-3 grid gap-2.5">
+            {doc.setup.map((s) => <SetupStep key={s.id} step={s} />)}
+          </div>
+        </section>
       )}
 
       {/* 読みもの（はじめに・秘書としての使い方・自分のDB・ベータの注意 など） */}
@@ -184,7 +200,99 @@ export default function Guide() {
         </>
       )}
 
+      {/* データの扱い — 説明書からもいつでも読めるようにする */}
+      <section className="panel mt-3 p-4">
+        <h3 className="text-[13px] text-fg-strong">プライバシーと利用について</h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-muted">
+          データがどこに入るか、外部のどこへ送られるか、管理者に何ができるか。
+        </p>
+        <button
+          type="button"
+          onClick={() => setPolicyOpen((v) => !v)}
+          className="mt-2 min-h-[40px] text-[11px] text-[var(--accent)] underline"
+        >
+          {policyOpen ? "閉じる" : "全文を読む"}
+        </button>
+        {policyOpen && <div className="mt-3"><PolicyBody /></div>}
+      </section>
+
       {zoom && <ZoomOverlay mode={zoom} onClose={() => setZoom(null)} />}
+    </div>
+  );
+}
+
+/**
+ * はじめる手順の1ステップ。
+ *
+ * 貼り付ける中身（SQL）は長いので、既定では畳んでおく。ボタン1つで
+ * クリップボードに入るようにしないと、スマホでは全選択すら難しい。
+ */
+function SetupStep({ step }: { step: GuideSetupStep }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    if (!step.code) return;
+    try {
+      await navigator.clipboard.writeText(step.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setOpen(true);      // コピーできない環境では、せめて中身を出す
+    }
+  };
+
+  return (
+    // min-w-0 が無いと、中の <pre> の長い行が親を押し広げ、画面全体が
+    // 横スクロールしてしまう（グリッド／フレックスの子は既定で縮まないため）。
+    <div className="min-w-0 rounded-forge border border-panel p-3">
+      <h4 className="text-[12px] text-fg-strong">{step.title}</h4>
+      {step.detail && (
+        <p className="mt-1 text-[11px] leading-relaxed text-muted">{step.detail}</p>
+      )}
+      <ol className="mt-2 ml-4 list-decimal space-y-1 text-[12px] leading-relaxed text-fg">
+        {step.steps.map((s) => <li key={s}>{s}</li>)}
+      </ol>
+
+      {step.code && (
+        <div className="mt-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={copy}
+              className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-3 py-1.5 text-[10px] tracking-[0.12em] text-fg-strong label-mono"
+            >
+              {copied ? "✓ コピーしました" : "⧉ SQLをコピー"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="text-[10px] text-muted underline"
+            >
+              {open ? "中身を隠す" : "中身を見る"}
+            </button>
+            <span className="text-[10px] text-muted">
+              {step.code.split("\n").length} 行
+            </span>
+          </div>
+          {step.code_label && (
+            <p className="mt-1 text-[10px] text-muted">{step.code_label}</p>
+          )}
+          {open && (
+            <pre className="mt-2 max-h-64 w-full max-w-full overflow-auto rounded-forge border border-panel bg-[var(--input-bg)] p-2.5 text-[10px] leading-relaxed text-fg">
+              <code>{step.code}</code>
+            </pre>
+          )}
+        </div>
+      )}
+
+      {step.caution && step.caution.length > 0 && (
+        <ul className="mt-2.5 space-y-1 border-t border-panel pt-2.5">
+          {step.caution.map((c) => (
+            <li key={c} className="text-[11px] leading-relaxed text-muted">※ {c}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

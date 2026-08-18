@@ -131,6 +131,56 @@ def test_every_screen_in_the_launcher_is_documented():
         assert label in documented, f"説明書に無い画面がある: {label}"
 
 
+# ── はじめる手順（渡された人が自力で終われること）────────────────
+def test_setup_steps_cover_the_whole_first_run():
+    """途中で「あとは自分で調べて」にならないこと。"""
+    ids = [s["id"] for s in guide.setup_steps()]
+    for need in ["account", "supabase-project", "supabase-sql",
+                 "supabase-keys", "connect", "ai-key"]:
+        assert need in ids, f"はじめる手順に {need} が無い"
+
+
+def test_setup_steps_have_the_shape_the_ui_expects():
+    for s in guide.setup_steps():
+        assert set(s) >= {"id", "title", "steps"}
+        assert s["title"] and isinstance(s["steps"], list) and s["steps"]
+
+
+def test_setup_warns_about_the_service_role_key():
+    """強い鍵であることを必ず伝える。ここを黙ると事故になる。"""
+    step = next(s for s in guide.setup_steps() if s["id"] == "supabase-keys")
+    joined = " ".join(step["steps"]) + " ".join(step.get("caution", []))
+    assert "service_role" in joined
+    assert "人に見せない" in joined or "貼らない" in joined
+
+
+def test_setup_endpoint_ships_the_real_sql(monkeypatch):
+    """説明書に載るSQLが、実際に同梱しているスキーマそのものであること。
+
+    手で書き写すと必ず本物とズレる。実物を読んで返しているかを見る。
+    """
+    import os
+
+    d = client.get("/guide").json()
+    step = next(s for s in d["setup"] if s["id"] == "supabase-sql")
+    sql = step.get("code") or ""
+    assert len(sql) > 2000, "貼り付け用のSQLが載っていない"
+    assert "CREATE TABLE IF NOT EXISTS" in sql
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(os.path.dirname(here), "supabase_schema.sql"), encoding="utf-8") as f:
+        assert sql == f.read(), "説明書のSQLが本物のスキーマと違う"
+
+
+def test_setup_sql_can_be_run_more_than_once():
+    """やり直しても壊れないことを、実際のSQLで確かめる。"""
+    d = client.get("/guide").json()
+    sql = next(s for s in d["setup"] if s["id"] == "supabase-sql")["code"]
+    creates = sql.upper().count("CREATE TABLE")
+    safe = sql.upper().count("CREATE TABLE IF NOT EXISTS")
+    assert creates == safe, "IF NOT EXISTS が付いていないCREATE TABLEがある"
+
+
 def test_guide_does_not_promise_features_that_do_not_exist():
     """説明にあるモード名は、実際に画面がある名前だけにする。"""
     text = " ".join(s["summary"] + " ".join(s["steps"]) for s in guide.sections())

@@ -46,3 +46,26 @@ test("画面写真がHTTPで配信されている", async ({ request }) => {
     expect(res.headers()["content-type"] ?? "").toContain("image/webp");
   }
 });
+
+test("説明書を開いても、画面が横にはみ出さない", async ({ page }) => {
+  // SQLのような長い行を出すと、親を押し広げて画面全体が横スクロールしうる
+  // （グリッド／フレックスの子は既定で縮まないため）。実際に踏んだので見張る。
+  await page.goto("/");
+  await page.waitForSelector("text=ENTER", { timeout: 10_000 });
+  await page.click("text=ENTER");
+  const off = page.getByText("ENTER OFFLINE");
+  const hud = page.getByLabel("Modes", { exact: true });
+  await Promise.race([
+    off.waitFor({ timeout: 8_000 }).then(() => off.click()).catch(() => {}),
+    hud.waitFor({ timeout: 10_000 }),
+  ]);
+  await hud.waitFor({ timeout: 10_000 });
+  await hud.click();
+  await page.locator("nav").filter({ hasText: "MODES" }).getByText("GUIDE", { exact: true }).click();
+  await page.waitForTimeout(1500);
+
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, "説明書の画面が横にはみ出している").toBeLessThanOrEqual(1);
+});

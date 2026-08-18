@@ -18,6 +18,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CoreOrb from "./CoreOrb";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { authNotice, NOTICE_COLOR, validateCredentials, type AuthNotice } from "@/lib/authMessages";
+import { SIGNUP_SUMMARY } from "@/lib/policy";
+import PolicyOverlay from "@/components/Policy";
 import { APP_VERSION } from "@/lib/version";
 
 const SS_KEY = "forge_entered";
@@ -38,6 +40,11 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
   const [showPw, setShowPw] = useState(false);      // スマホは打った文字を確かめたい
   const emailRef = useRef<HTMLInputElement | null>(null);
   const pwRef = useRef<HTMLInputElement | null>(null);
+
+  // 登録の前に、データの扱いを読んで同意してもらう。
+  // 「知らないうちに自分のデータがどこかへ行っていた」を作らないため。
+  const [agreed, setAgreed] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
 
   useEffect(() => {
     if (supabaseEnabled && supabase) {
@@ -83,6 +90,10 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
       (bad.field === "password" ? pwRef : emailRef).current?.focus();
       return;
     }
+    if (authMode === "signup" && !agreed) {
+      setAuthMsg({ text: "データの扱いを確認して、チェックを入れてください", tone: "error" });
+      return;
+    }
     setAuthBusy(true);
     setAuthMsg(null);
     try {
@@ -100,7 +111,7 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
     } finally {
       setAuthBusy(false);
     }
-  }, [authBusy, authMode, email, password]);
+  }, [authBusy, authMode, email, password, agreed]);
 
   /** パスワードを忘れた場合の再設定メール。スマホで詰まりやすいので導線を出す。 */
   const sendReset = useCallback(async () => {
@@ -258,9 +269,46 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
                     </p>
                   )}
 
+                  {/* 登録前に、データの扱いを先に見せる。あとから説明書で
+                      気づいてもらう形にすると、預ける判断ができない。 */}
+                  {authMode === "signup" && (
+                    <div className="rounded-forge border border-panel p-3 text-left">
+                      <div className="mb-1.5 text-[10px] tracking-[0.16em] text-muted label-mono">
+                        データの扱い
+                      </div>
+                      <ul className="space-y-1.5">
+                        {SIGNUP_SUMMARY.map((s) => (
+                          <li key={s} className="flex gap-2 text-[11px] leading-relaxed text-fg">
+                            <span aria-hidden className="mt-[6px] h-1 w-1 shrink-0 rounded-full"
+                                  style={{ background: "var(--accent)" }} />
+                            <span className="min-w-0">{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <button
+                        type="button"
+                        onClick={() => setPolicyOpen(true)}
+                        className="mt-2 min-h-[40px] text-[11px] text-[var(--accent)] underline"
+                      >
+                        くわしく読む（プライバシーと利用について）
+                      </button>
+                      <label className="mt-1 flex cursor-pointer items-start gap-2.5">
+                        <input
+                          type="checkbox"
+                          checked={agreed}
+                          onChange={(e) => setAgreed(e.target.checked)}
+                          className="mt-[3px] h-[18px] w-[18px] shrink-0 accent-[var(--accent)]"
+                        />
+                        <span className="text-[11px] leading-relaxed text-fg">
+                          上記を確認しました
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
                   <button
                     type="submit"
-                    disabled={authBusy}
+                    disabled={authBusy || (authMode === "signup" && !agreed)}
                     className="min-h-[48px] w-full rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] text-[12px] tracking-[0.28em] text-fg-strong shadow-glow transition hover:shadow-glow-strong disabled:opacity-50 label-mono"
                   >
                     {authBusy ? "…" : authMode === "signup" ? "▸ アカウント作成" : "▸ サインイン"}
@@ -328,10 +376,20 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
               <p className="mt-1 text-[8px] tracking-[0.24em] text-muted/40 label-mono">
                 BUILD {APP_VERSION}
               </p>
+              {/* サインイン側からも、いつでも読めるようにしておく */}
+              <button
+                type="button"
+                onClick={() => setPolicyOpen(true)}
+                className="mt-2 min-h-[40px] text-[10px] text-muted underline transition hover:text-fg-strong"
+              >
+                プライバシーと利用について
+              </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {policyOpen && <PolicyOverlay onClose={() => setPolicyOpen(false)} />}
     </>
   );
 }

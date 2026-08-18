@@ -1259,9 +1259,38 @@ async def guide(_auth: None = Depends(require_auth), claims: dict = Depends(curr
     return {
         "sections": guide_mod.sections(owner=owner),
         "modes": guide_mod.modes(owner=owner),
+        "setup": _setup_with_schema(),
         "is_owner": owner,
         **guide_mod.status(owner=owner),
     }
+
+
+def _read_schema_sql() -> str:
+    """貼り付け用のSQL全文。リポジトリ同梱のものをそのまま返す。
+
+    説明書に手で書き写すと、本物のスキーマと必ずズレる。実物を読んで返す。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(here, "supabase_schema.sql"),
+              os.path.join(os.path.dirname(here), "supabase_schema.sql")):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            continue
+    return ""
+
+
+def _setup_with_schema() -> list:
+    """はじめる手順。code:"schema" を実際のSQL全文に差し替える。"""
+    sql = _read_schema_sql()
+    out = []
+    for s in guide_mod.setup_steps():
+        if s.get("code") == "schema":
+            s = {**s, "code": sql, "code_lang": "sql",
+                 "code_label": "Supabase の SQL Editor に貼り付けるSQL"}
+        out.append(s)
+    return out
 
 
 # ── HF MODELS：HuggingFaceのモデルを登録して役割に割り当てる ──────────
