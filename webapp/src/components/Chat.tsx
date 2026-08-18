@@ -33,6 +33,7 @@ import {
 import { useSpeechRecognition } from "@/lib/voice";
 import { speakCore, stopCoreVoice, type CoreVoiceSettings, type VoiceEngine } from "@/lib/coreVoice";
 import { takeCompleteSentences } from "@/lib/speech";
+import { trimHistory } from "@/lib/history";
 
 export interface ChatSettings {
   name: string;
@@ -278,10 +279,14 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
   }, [stopReply]);
 
   const buildHistory = useCallback((): ChatTurn[] => {
-    return messages
-      .filter((m) => !m.pending && !m.error && m.content.trim())
-      .slice(-HISTORY_LIMIT)
-      .map((m) => ({ role: m.role, content: m.content }));
+    // 長さの上限で刈る。返事が出始めるまでの時間は送った文章の長さで伸びる
+    // ので、長い生成物が混じったときだけ古いほうを落とす（普通の会話は素通り）。
+    return trimHistory(
+      messages
+        .filter((m) => !m.pending && !m.error && m.content.trim())
+        .slice(-HISTORY_LIMIT)
+        .map((m) => ({ role: m.role, content: m.content })),
+    ) as ChatTurn[];
   }, [messages]);
 
   // Set when the user stops generation / switches conversations — a reply

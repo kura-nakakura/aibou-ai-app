@@ -18,6 +18,7 @@ Supabase テーブル `api_keys` を使い、未設定ならプロセス内メ�
 import base64
 import hashlib
 import os
+import time
 from typing import Dict, List, Optional
 
 import config
@@ -108,6 +109,48 @@ KNOWN_KEYS: List[Dict[str, str]] = [
 # プロセス内フォールバック（Supabase 未設定時）
 _mem_keys: Dict[str, str] = {}
 
+# ── 「入っていない鍵」を覚えておくための短期メモ ──────────────────────
+# 会話を1回始めるたびに llm.providers_in_order() が HUGGINGFACE_TOKEN と
+# LLM_PROVIDER を見に来る。未設定だと毎回 Supabase まで問い合わせに行って
+# 「無い」と分かるだけで終わり、その往復ぶん返事が遅れていた（しかも
+# providers_in_order は1リクエストで2回呼ばれる）。
+# 無かったことを短時間だけ覚えて、その間は問い合わせない。
+#
+# メモはクライアント自身にぶら下げる。共通の辞書にすると、鍵を入れている
+# 人と入れていない人の判定が混ざる恐れがあるため。
+_MISS_NOTE = "_aibou_key_misses"
+_MISS_TTL = 30.0          # 秒。鍵を入れてから効くまでの待ち時間の上限
+
+
+def _missing_recently(client, name: str) -> bool:
+    notes = getattr(client, _MISS_NOTE, None)
+    if not notes:
+        return False
+    until = notes.get(name)
+    return bool(until and time.monotonic() < until)
+
+
+def _note_missing(client, name: str) -> None:
+    try:
+        notes = getattr(client, _MISS_NOTE, None)
+        if notes is None:
+            notes = {}
+            setattr(client, _MISS_NOTE, notes)
+        notes[name] = time.monotonic() + _MISS_TTL
+    except Exception:
+        pass
+
+
+def _clear_missing(name: str) -> None:
+    """鍵を書き換えたら「無い」の記憶は捨てる（すぐ効くように）。"""
+    try:
+        c = config.get_supabase()
+        notes = getattr(c, _MISS_NOTE, None) if c is not None else None
+        if notes:
+            notes.pop(name, None)
+    except Exception:
+        pass
+
 
 def _mask(value: str) -> str:
     """値をマスクする（先頭2 + ●… + 末尾2）。空なら空文字。"""
@@ -127,6 +170,7 @@ def set_key(name: str, value: str) -> dict:
         return {"error": "name is required"}
 
     _mem_keys[name] = value
+    _clear_missing(name)          # 「無い」の記憶を捨てて、すぐ効くようにする
     # 同プロセスの config / 各モジュールが拾えるよう環境変数にも反映
     os.environ[name] = value
 
@@ -160,6 +204,8 @@ def get_key(name: str) -> str:
         return env
     c = config.get_supabase()
     if c:
+        if _missing_recently(c, name):
+            return ""                       # ついさっき無かった → 問い合わせない
         try:
             rows = (c.table("api_keys").select("value").eq("name", name)
                     .limit(1).execute().data) or []
@@ -167,7 +213,9 @@ def get_key(name: str) -> str:
                 v = _decrypt(rows[0].get("value"))  # DBは暗号文 → ここで復号
                 if v:
                     _mem_keys[name] = v
-                return v
+                    return v
+            _note_missing(c, name)
+            return ""
         except Exception:
             pass
     return ""
@@ -215,6 +263,7 @@ def delete_key(name: str) -> dict:
     if not name:
         return {"error": "name is required"}
     _mem_keys.pop(name, None)
+    _clear_missing(name)
     try:
         if name in os.environ:
             del os.environ[name]

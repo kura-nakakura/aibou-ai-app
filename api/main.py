@@ -596,6 +596,23 @@ def build_conversation(system_prompt: str, history: Optional[List[ChatMessage]],
     return "\n".join(lines)
 
 
+# SSE を「溜めずにその場で流す」ための指示。
+#   X-Accel-Buffering: no … nginx系のプロキシに、まとめずに素通しさせる。
+#     これが無いと、プロキシが数KB貯まるか応答が終わるまで送出を待つことが
+#     あり、「しばらく無反応 → 突然まとめて出る」という遅さになる。
+#   Cache-Control / Connection … 途中のキャッシュや圧縮に触らせない。
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
+
+
+def _sse_response(gen) -> StreamingResponse:
+    """SSE をバッファされない形で返す。"""
+    return StreamingResponse(gen, media_type="text/event-stream", headers=SSE_HEADERS)
+
+
 def _sse(data: dict) -> str:
     """dict を SSE の1イベント（data: <json>\\n\\n）に変換する。"""
     import json
@@ -623,10 +640,15 @@ async def chat(req: ChatRequest, _auth: None = Depends(require_auth)):
         async def err_stream():
             yield _sse({"error": "AI未設定です。Settings → KEYCHAIN に GEMINI_API_KEY か HUGGINGFACE_TOKEN を保存してください。"})
             yield _sse({"done": True})
-        return StreamingResponse(err_stream(), media_type="text/event-stream")
+        return _sse_response(err_stream())
 
-    # 記憶を想起（Supabaseが無ければ空文字）
-    memory_block = mem_recall(req.message, limit=8)
+    # 記憶を想起（Supabaseが無ければ空文字）。
+    # Supabase も埋め込みも同期呼び出しなので、そのまま await 無しで呼ぶと
+    # 返事が始まるまでの間ずっとイベントループを止めてしまう（他の人の
+    # リクエストごと止まる）。別スレッドへ逃がす。
+    memory_block = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: mem_recall(req.message, limit=8)
+    )
     system_prompt = build_system_prompt(req.name, req.persona, memory_block)
     # ツール実行を許可（行動を頼まれた時だけマーカーを使う旨をルール付けする）
     system_prompt += (
@@ -731,7 +753,7 @@ async def chat(req: ChatRequest, _auth: None = Depends(require_auth)):
         except Exception:
             pass
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return _sse_response(event_stream())
 
 
 @app.post("/agent/act")
@@ -742,7 +764,7 @@ async def agent_act(req: AgentActRequest, _auth: None = Depends(require_auth)):
         async def err_stream():
             yield _sse({"phase": "error", "detail": "AI未設定です。Settings → KEYCHAIN に GEMINI_API_KEY か HUGGINGFACE_TOKEN を保存してください。"})
             yield _sse({"phase": "done", "steps": 0})
-        return StreamingResponse(err_stream(), media_type="text/event-stream")
+        return _sse_response(err_stream())
 
     history = [h.model_dump() for h in (req.history or [])]
 
@@ -774,7 +796,7 @@ async def agent_act(req: AgentActRequest, _auth: None = Depends(require_auth)):
         except Exception:
             pass
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return _sse_response(event_stream())
 
 
 @app.post("/agent/execute")
@@ -931,7 +953,7 @@ async def code_generate(req: CodeGenerateRequest, _auth: None = Depends(require_
                 break
             yield _sse(ev)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return _sse_response(event_stream())
 
 
 # ── CAPTURE：文字起こし / ナレーション ──────────────────────────────
@@ -1382,7 +1404,7 @@ async def life_chat(req: ChatRequest, _auth: None = Depends(require_auth)):
         async def err_stream():
             yield _sse({"error": "AI未設定です。Settings → KEYCHAIN に GEMINI_API_KEY か HUGGINGFACE_TOKEN を保存してください。"})
             yield _sse({"done": True})
-        return StreamingResponse(err_stream(), media_type="text/event-stream")
+        return _sse_response(err_stream())
 
     system_prompt = await asyncio.get_event_loop().run_in_executor(
         None, lambda: life.build_life_prompt(req.name or "")
@@ -1417,7 +1439,7 @@ async def life_chat(req: ChatRequest, _auth: None = Depends(require_auth)):
                 yield _sse({"error": f"life chat failed: {e}"})
             yield _sse({"done": True})
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return _sse_response(event_stream())
 
 
 @app.get("/income/jobs")

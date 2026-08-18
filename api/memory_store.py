@@ -13,6 +13,7 @@
 # 例外を出さず空文字 / 空リストを返す。
 # =====================================================================
 
+import time
 from typing import List, Optional
 
 from config import get_supabase, gemini_configured
@@ -22,6 +23,40 @@ DEFAULT_USER_ID = "local"
 
 # Gemini 埋め込みモデル（768次元）。意味記憶のベクトル化に使用。
 EMBED_MODEL = "models/text-embedding-004"
+
+# ── 返答が始まるまでの往復を減らすための覚え書き ──────────────────────
+# 記憶の想起は「返事を書き始める前」に終わらせる必要があるので、ここでの
+# 往復はそのまま利用者の待ち時間になる。素の実装では毎メッセージごとに
+#   ① Gemini へ埋め込み（ネットワーク往復）
+#   ② Supabase の match_memories RPC（往復）
+#   ③ RPCが無ければさらに agent_memory を120行取得（往復）
+# を直列でやっていた。①②はRPCを入れていない環境では毎回まるごと無駄になる。
+#
+# 覚え書きはクライアントごと（＝利用者ごと）に持つ。ここを共通の辞書にすると、
+# 別の人のDBの状態やデータを取り違える恐れがあるため、必ずクライアント自身に
+# ぶら下げる。クライアントが捨てられれば覚え書きも一緒に消える。
+_SEMANTIC_FLAG = "_aibou_semantic_ok"     # match_memories RPC が使えるか
+_ROWS_CACHE = "_aibou_rows_cache"         # (取得時刻, 行) の短期キャッシュ
+_ROWS_TTL = 20.0                          # 秒。会話が続く間の再取得を防ぐ程度
+
+
+def _remember(client, attr: str, value) -> None:
+    """クライアント自身に覚えさせる（付けられない実装なら黙って諦める）。"""
+    try:
+        setattr(client, attr, value)
+    except Exception:
+        pass
+
+
+def _recall_note(client, attr: str, default=None):
+    return getattr(client, attr, default)
+
+
+def _forget_rows_cache() -> None:
+    """記憶を書き換えたら、行のキャッシュは捨てる（古い内容で答えないため）。"""
+    c = get_supabase()
+    if c is not None:
+        _remember(c, _ROWS_CACHE, None)
 
 
 def embed(text: str) -> Optional[list]:
@@ -71,10 +106,15 @@ def mem_add(role: str, content: str, importance: int = 0) -> bool:
             "importance": int(importance or 0),
         }
         # 埋め込みは best-effort。失敗してもベクトル無しで insert を続行する。
-        vec = embed(str(content))
+        # match_memories RPC が無い環境では、書いたベクトルを読む相手がいない。
+        # 1ターンにつき2回（利用者の発言＋返答）のGemini往復がまるごと無駄に
+        # なり、無料枠も削るので、無いと分かっている間は作らない。
+        # （プロセスを再起動すると「不明」に戻り、また試す）
+        vec = embed(str(content)) if _recall_note(c, _SEMANTIC_FLAG, None) is not False else None
         if vec:
             row["embedding"] = vec
         c.table("agent_memory").insert(row).execute()
+        _forget_rows_cache()      # 書いた直後に古い一覧で答えないように
         return True
     except Exception:
         return False
@@ -114,8 +154,11 @@ def mem_recall(query: str = "", limit: int = 8) -> str:
     # ── ① 意味検索（Gemini埋め込み × Supabase RPC） ──────────────
     # まず query をベクトル化し、match_memories RPC でコサイン類似の近いものを取得。
     # RPC未定義 / embed失敗 / 何らかの例外があれば、下のキーワード+直近にフォールバック。
+    #
+    # 一度でも「RPCが無い」と分かったら、以降はベクトル化（Gemini往復）ごと
+    # 飛ばす。RPCを入れていない環境で毎回2往復ぶん待たされるのを防ぐため。
     try:
-        qvec = embed(query) if query else None
+        qvec = embed(query) if (query and _recall_note(c, _SEMANTIC_FLAG, None) is not False) else None
         if qvec:
             res = c.rpc("match_memories", {
                 "query_embedding": qvec,
@@ -132,22 +175,32 @@ def mem_recall(query: str = "", limit: int = 8) -> str:
                 seen_sem.add(cont)
                 tag = "★事実" if (r.get("importance") or 0) >= 1 else (r.get("role") or "")
                 sem_lines.append(f"- ({tag}) {cont[:300]}")
+            _remember(c, _SEMANTIC_FLAG, True)      # RPCは生きている
             if sem_lines:
                 return "【関連する記憶】\n" + "\n".join(sem_lines[:18])
     except Exception:
         # RPC が無い / 失敗した場合は黙ってフォールバックへ。
-        pass
+        # 次回からは埋め込みもRPCも呼ばない（毎回2往復ぶん損をするため）。
+        _remember(c, _SEMANTIC_FLAG, False)
 
     # ── ② フォールバック：重要事実 ＋ 直近 ＋ キーワード一致 ──────
-    try:
-        rows = (c.table("agent_memory")
-                .select("role,content,importance")
-                .eq("user_id", DEFAULT_USER_ID)
-                .order("created_at", desc=True)
-                .limit(120)
-                .execute().data) or []
-    except Exception:
-        return ""
+    # 会話が続く間、同じ行を毎メッセージ取りに行かないよう短時間だけ覚える。
+    # 記憶を書いたときは捨てるので、古い内容のまま答えることはない。
+    cached = _recall_note(c, _ROWS_CACHE, None)
+    rows: Optional[List[dict]] = None
+    if cached and (time.monotonic() - cached[0]) < _ROWS_TTL:
+        rows = cached[1]
+    if rows is None:
+        try:
+            rows = (c.table("agent_memory")
+                    .select("role,content,importance")
+                    .eq("user_id", DEFAULT_USER_ID)
+                    .order("created_at", desc=True)
+                    .limit(120)
+                    .execute().data) or []
+        except Exception:
+            return ""
+        _remember(c, _ROWS_CACHE, (time.monotonic(), rows))
     if not rows:
         return ""
 
