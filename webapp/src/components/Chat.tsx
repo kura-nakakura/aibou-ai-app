@@ -5,7 +5,8 @@
  *
  * - Glassy message bubbles (user right, assistant left).
  * - Streams assistant replies token-by-token over SSE (lib/api.streamChat).
- * - Speaks replies via browser TTS (lib/voice.speak), with an API /tts fallback.
+ * - 返答は lib/coreVoice で読み上げる。受信しながら文単位で喋るので、長い
+ *   返答でも最初の文からすぐ声が出る。記号・絵文字は読み上げない。
  * - Hands-free mic via Web Speech API; 📷 image attach routes to /vision.
  * - Drives a CoreState the parent uses to animate the CoreOrb.
  */
@@ -25,25 +26,27 @@ import {
 import type { CoreState } from "./CoreOrb";
 import Markdown from "@/components/Markdown";
 import {
-  streamChat, tts, vision, agentActStream, agentExecute,
+  API_URL,
+  streamChat, vision, agentActStream, agentExecute,
   type ChatTurn, type AgentEvent,
 } from "@/lib/api";
-import {
-  isSpeechSynthesisSupported,
-  playBase64Audio,
-  speak,
-  stopSpeaking,
-  useSpeechRecognition,
-} from "@/lib/voice";
+import { useSpeechRecognition } from "@/lib/voice";
+import { speakCore, stopCoreVoice, type CoreVoiceSettings, type VoiceEngine } from "@/lib/coreVoice";
+import { takeCompleteSentences } from "@/lib/speech";
 
 export interface ChatSettings {
   name: string;
   persona: string;
-  /** edge-tts voice name for the API fallback (e.g. "ja-JP-NanamiNeural"). */
+  /** サーバー音声（edge-tts）の声。例 "ja-JP-NanamiNeural"。 */
   voice?: string;
-  /** Speech rate multiplier (1.0 = normal). Browser TTS uses it directly;
-      the API fallback converts it to a "+NN%" rate string. */
+  /** 端末に入っている音声の名前（SpeechSynthesisVoice.name）。 */
+  browserVoice?: string;
+  /** 声の出どころ。browser=端末の音声（すぐ鳴る） / server=edge-tts（なめらか）。 */
+  voiceEngine?: VoiceEngine;
+  /** 話す速さ（1.0 が等倍）。 */
   rate?: number;
+  /** 声の高さ（1.0 が標準）。 */
+  pitch?: number;
 }
 
 /** エージェントの実行過程（考えた→道具を使った→結果を見た）。 */
@@ -153,6 +156,26 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
   const [pendingImage, setPendingImage] = useState<{ dataUrl: string; base64: string; mime: string } | null>(null);
   const [speaking, setSpeaking] = useState(false);
 
+  /* ── 読み上げの状態 ────────────────────────────────────────────────
+     受信しながら文単位で喋るので、「いま鳴っている音」と「順番待ち」の
+     両方を持つ。止めるときは必ず両方消すこと（順番待ちが残っていると、
+     止めたはずの返答が後から喋り出す）。                                */
+  const cancelSpeechRef = useRef<(() => void) | null>(null);
+  const spokenUpTo = useRef(0);
+  const speakQueue = useRef<string[]>([]);
+  const speakBusy = useRef(false);
+
+  /** 読み上げを完全に止める（鳴っている音・順番待ち・読んだ位置を全部消す）。 */
+  const stopReply = useCallback(() => {
+    cancelSpeechRef.current?.();
+    cancelSpeechRef.current = null;
+    stopCoreVoice();
+    speakQueue.current = [];
+    speakBusy.current = false;
+    spokenUpTo.current = 0;
+    setSpeaking(false);
+  }, []);
+
   // Conversation history (Gemini-style left sidebar).
   const [convos, setConvos] = useState<Convo[]>([]);
   const [currentId, setCurrentId] = useState<string>(() => uid());
@@ -180,24 +203,24 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
   const newChat = useCallback(() => {
     cancelRef.current?.();
     speechCancelledRef.current = true;
-    stopSpeaking();
+    stopReply();
     setMessages([]);
     setInput("");
     setPendingImage(null);
     setCurrentId(uid());
     setHistoryOpen(false);
-  }, []);
+  }, [stopReply]);
 
   const loadConvo = useCallback((id: string) => {
     const c = loadConvos().find((x) => x.id === id);
     if (!c) return;
     cancelRef.current?.();
     speechCancelledRef.current = true;
-    stopSpeaking();
+    stopReply();
     setMessages(c.messages.map((m) => ({ ...m, pending: false })));
     setCurrentId(c.id);
     setHistoryOpen(false);
-  }, []);
+  }, [stopReply]);
 
   const deleteConvo = useCallback((id: string) => {
     if (!window.confirm("この履歴を削除しますか？（元に戻せません）")) return;
@@ -215,7 +238,6 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
   const cancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const ttsSupported = useMemo(() => isSpeechSynthesisSupported(), []);
 
   const { supported: micSupported, listening, transcript, start: startMic, stop: stopMic, reset: resetMic } =
     useSpeechRecognition("ja-JP");
@@ -251,9 +273,9 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
   useEffect(() => {
     return () => {
       cancelRef.current?.();
-      stopSpeaking();
+      stopReply();
     };
-  }, []);
+  }, [stopReply]);
 
   const buildHistory = useCallback((): ChatTurn[] => {
     return messages
@@ -271,33 +293,79 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
   const voiceModeRef = useRef(false);
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
 
-  /** Speak a completed assistant reply (browser TTS → API /tts fallback). */
-  const speakReply = useCallback(
-    async (text: string) => {
-      if (speechCancelledRef.current) return;
-      // 会話モード中は「SPOKEN REPLIES」設定に関わらず必ず読み上げる（会話が成立しないため）。
-      if (!voiceReplies && !voiceModeRef.current) return;
-      if (!text.trim()) return;
-      setSpeaking(true);
-      const rate = settings.rate ?? 1.0;
-      if (ttsSupported) {
-        speak(text, { lang: "ja-JP", rate, onEnd: () => setSpeaking(false) });
-        return;
-      }
-      // Fallback: ask the backend to synthesize (with chosen voice + rate).
-      try {
-        const pct = Math.round((rate - 1) * 100);
-        const rateStr = `${pct >= 0 ? "+" : ""}${pct}%`;
-        const audio = await tts({ text, voice: settings.voice, rate: rateStr });
-        await playBase64Audio(audio);
-      } catch {
-        /* silent fallback */
-      } finally {
-        setSpeaking(false);
-      }
-    },
-    [voiceReplies, ttsSupported, settings.voice, settings.rate],
+  /** 設定を読み上げ側の形にまとめる。 */
+  const voiceSettings = useMemo<CoreVoiceSettings>(() => ({
+    engine: settings.voiceEngine ?? "browser",
+    browserVoice: settings.browserVoice,
+    serverVoice: settings.voice,
+    rate: settings.rate ?? 1.0,
+    pitch: settings.pitch ?? 1.0,
+  }), [settings.voiceEngine, settings.browserVoice, settings.voice, settings.rate, settings.pitch]);
+
+  /** 読み上げてよい状態か。会話モード中は設定に関わらず読む（会話が成立しないため）。 */
+  const maySpeak = useCallback(
+    () => !speechCancelledRef.current && (voiceReplies || voiceModeRef.current),
+    [voiceReplies],
   );
+
+  /** 返答（またはその一部）を読み上げる。 */
+  const speakReply = useCallback(
+    (text: string) => {
+      if (!maySpeak() || !text.trim()) return;
+      setSpeaking(true);
+      cancelSpeechRef.current = speakCore(
+        text,
+        voiceSettings,
+        { onEnd: () => setSpeaking(false) },
+        Boolean(API_URL),
+      );
+    },
+    [maySpeak, voiceSettings],
+  );
+
+  /* ── 受信しながら読み上げる ────────────────────────────────────────
+     全部受け取ってから読み始めると、長い返答ほど黙っている時間が長くなる。
+     言い切った文が出るたびに順番待ちへ積んで、1文めからすぐ喋り始める。   */
+
+  /** 順番待ちを1つずつ流す。読み終わるたびに次を鳴らす。 */
+  const drainSpeech = useCallback(() => {
+    if (speakBusy.current || !speakQueue.current.length) return;
+    if (!maySpeak()) { speakQueue.current = []; return; }
+    speakBusy.current = true;
+    setSpeaking(true);
+    const next = speakQueue.current.shift() as string;
+    cancelSpeechRef.current = speakCore(
+      next,
+      voiceSettings,
+      {
+        onEnd: () => {
+          speakBusy.current = false;
+          if (speakQueue.current.length) drainSpeech();
+          else setSpeaking(false);
+        },
+      },
+      Boolean(API_URL),
+    );
+  }, [maySpeak, voiceSettings]);
+
+  /** 受信済みの全文を渡す。まだ読んでいない「言い切った文」だけを喋る。 */
+  const feedSpeech = useCallback((acc: string) => {
+    if (!maySpeak()) return;
+    const { chunks, consumed } = takeCompleteSentences(acc.slice(spokenUpTo.current));
+    if (!consumed) return;
+    spokenUpTo.current += consumed;
+    if (chunks.length) { speakQueue.current.push(...chunks); drainSpeech(); }
+  }, [maySpeak, drainSpeech]);
+
+  /** 受信し終わったとき、句点で終わっていない残りを読む。 */
+  const flushSpeech = useCallback((acc: string) => {
+    if (!maySpeak()) return;
+    const rest = acc.slice(spokenUpTo.current);
+    spokenUpTo.current = acc.length;
+    // 末尾に改行を足して「言い切った」扱いにする
+    const { chunks } = takeCompleteSentences(`${rest}\n`);
+    if (chunks.length) { speakQueue.current.push(...chunks); drainSpeech(); }
+  }, [maySpeak, drainSpeech]);
 
   /** Execute one assistant turn (vision or SSE stream) into the given bubble.
       Shared by send() and regenerate(). */
@@ -393,6 +461,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
 
       // Text path → SSE streaming.
       let acc = "";
+      spokenUpTo.current = 0;          // このターンの読み上げ位置を初期化
       const handlers = streamChat(
         { message: text, history, persona: settings.persona || undefined, name: settings.name || undefined },
         (token) => {
@@ -400,6 +469,8 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantId ? { ...m, content: acc, pending: false } : m)),
           );
+          // 言い切った文から順に喋る（受信し終わるまで黙らない）
+          feedSpeech(acc);
         },
         (error) => {
           setStreaming(false);
@@ -412,14 +483,14 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
             );
             return;
           }
-          // Mark complete and speak the final reply.
+          // Mark complete and speak whatever is still unspoken.
           setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)));
-          if (acc.trim()) void speakReply(acc);
+          if (acc.trim()) flushSpeech(acc);
         },
       );
       cancelRef.current = handlers.cancel;
     },
-    [settings, speakReply, agentMode, approval],
+    [settings, speakReply, feedSpeech, flushSpeech, agentMode, approval],
   );
 
   /** 承認待ちの操作を実行する（メール送信など、取り消せないもの）。 */
@@ -458,7 +529,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
 
     if (listening) stopMic();
     resetMic();
-    stopSpeaking();
+    stopReply();
 
     speechCancelledRef.current = false;
     const image = pendingImage;
@@ -477,7 +548,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
 
     const history = buildHistory();
     await runTurn(text, image ? { base64: image.base64, mime: image.mime } : null, assistantMsg.id, history);
-  }, [input, pendingImage, streaming, listening, stopMic, resetMic, buildHistory, runTurn]);
+  }, [input, pendingImage, streaming, listening, stopMic, resetMic, buildHistory, runTurn, stopReply]);
 
   /** 会話モード開始：マイクを開き、以後は 無音→自動送信→読み上げ→再びマイク のループ。 */
   const enterVoiceMode = useCallback(() => {
@@ -493,20 +564,20 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
     setVoiceMode(false);
     stopMic();
     resetMic();
-    stopSpeaking();
+    stopReply();
     setSpeaking(false);
     setInput("");
-  }, [stopMic, resetMic]);
+  }, [stopMic, resetMic, stopReply]);
 
   // 割り込み（バージイン）：AIの発話/生成を止めて、すぐ自分が話せる状態に戻す。
   const interruptVoice = useCallback(() => {
     cancelRef.current?.();               // 生成中なら中断
     speechCancelledRef.current = true;   // 遅れて来る応答を読み上げさせない
-    stopSpeaking();
+    stopReply();
     setSpeaking(false);
     setStreaming(false);
     setTimeout(() => { if (voiceModeRef.current) { resetMic(); startMic(); } }, 150);
-  }, [resetMic, startMic]);
+  }, [resetMic, startMic, stopReply]);
 
   // 会話モード：発話が止まって約1.4秒たったら自動送信（テンポよくラリー）。
   useEffect(() => {
@@ -533,7 +604,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
     const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
     if (lastUserIdx < 0) return;
     const userMsg = messages[lastUserIdx];
-    stopSpeaking();
+    stopReply();
     setSpeaking(false);
     speechCancelledRef.current = false;
 
@@ -561,26 +632,26 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
     }
     const text = userMsg.content === "(image)" ? "" : userMsg.content;
     await runTurn(text, image, assistantMsg.id, history);
-  }, [messages, streaming, runTurn]);
+  }, [messages, streaming, runTurn, stopReply]);
 
   const stopStreaming = useCallback(() => {
     speechCancelledRef.current = true;
     cancelRef.current?.();
     cancelRef.current = null;
     setStreaming(false);
-    stopSpeaking();
+    stopReply();
     setSpeaking(false);
-  }, []);
+  }, [stopReply]);
 
   const toggleMic = useCallback(() => {
     if (!micSupported) return;
     if (listening) {
       stopMic();
     } else {
-      stopSpeaking();
+      stopReply();
       startMic();
     }
-  }, [micSupported, listening, startMic, stopMic]);
+  }, [micSupported, listening, startMic, stopMic, stopReply]);
 
   // Shared: turn a File/Blob (from the picker OR a pasted screenshot) into a
   // downscaled data-URL attachment for /vision + preview.

@@ -645,6 +645,56 @@ def test_tts_invalid_rate_does_not_crash():
     assert "audio_base64" in r.json()
 
 
+# ── 話速・声の高さが本当に edge-tts まで届いているか ──────────────────
+# 「設定を変えても声が変わらない」を防ぐため、受け取った値が実際に合成へ
+# 渡ることを確かめる。ネットワークが要らないよう edge_tts を差し替える。
+def _capture_tts_args(monkeypatch):
+    """edge_tts.Communicate に渡った引数を捕まえる。"""
+    import sys
+    import types
+
+    seen = {}
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, rate="+0%", pitch="+0Hz", **kw):
+            seen.update(text=text, voice=voice, rate=rate, pitch=pitch)
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"\x00\x01"}
+
+    fake = types.ModuleType("edge_tts")
+    fake.Communicate = FakeCommunicate
+    monkeypatch.setitem(sys.modules, "edge_tts", fake)
+    return seen
+
+
+def test_tts_passes_rate_and_pitch_through(monkeypatch):
+    seen = _capture_tts_args(monkeypatch)
+    r = client.post("/tts", json={
+        "text": "テスト", "voice": "ja-JP-KeitaNeural", "rate": "+30%", "pitch": "-20Hz",
+    })
+    assert r.status_code == 200
+    assert r.json()["audio_base64"]                      # 音が返っている
+    assert seen["voice"] == "ja-JP-KeitaNeural"
+    assert seen["rate"] == "+30%"
+    assert seen["pitch"] == "-20Hz"
+
+
+def test_tts_falls_back_to_defaults_on_bad_format(monkeypatch):
+    """書式違いで例外を出して無音になるより、既定値で鳴らす。"""
+    seen = _capture_tts_args(monkeypatch)
+    r = client.post("/tts", json={"text": "テスト", "rate": "はやく", "pitch": "たかく"})
+    assert r.status_code == 200
+    assert seen["rate"] == "+0%"
+    assert seen["pitch"] == "+0Hz"
+
+
+def test_tts_defaults_pitch_when_omitted(monkeypatch):
+    seen = _capture_tts_args(monkeypatch)
+    client.post("/tts", json={"text": "テスト"})
+    assert seen["pitch"] == "+0Hz"
+
+
 # ── /vault/generate, /vault/diagram（NotebookLM風） ─────────────────
 def test_vault_generate_without_supabase():
     r = client.post("/vault/generate", json={"notebook_id": "fake", "instruction": "要約して"})

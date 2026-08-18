@@ -221,6 +221,7 @@ class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None  # 既定は config.DEFAULT_TTS_VOICE
     rate: Optional[str] = None   # 話速 例 "+0%" / "-20%" / "+30%"。既定 config.DEFAULT_TTS_RATE
+    pitch: Optional[str] = None  # 声の高さ 例 "+0Hz" / "-20Hz"。既定 "+0Hz"
 
 
 class KeySetRequest(BaseModel):
@@ -819,9 +820,10 @@ async def tts(req: TTSRequest, _auth: None = Depends(require_auth)):
         return {"audio_base64": "", "error": "text is empty"}
     voice = (req.voice or config.DEFAULT_TTS_VOICE).strip() or config.DEFAULT_TTS_VOICE
     rate = (req.rate or config.DEFAULT_TTS_RATE).strip() or config.DEFAULT_TTS_RATE
+    pitch = (req.pitch or "+0Hz").strip() or "+0Hz"
 
     try:
-        audio_bytes = await _synthesize_tts(text, voice, rate)
+        audio_bytes = await _synthesize_tts(text, voice, rate, pitch)
         if not audio_bytes:
             return {"audio_base64": "", "error": "tts produced no audio"}
         return {"audio_base64": base64.b64encode(audio_bytes).decode("ascii")}
@@ -830,14 +832,21 @@ async def tts(req: TTSRequest, _auth: None = Depends(require_auth)):
         return {"audio_base64": "", "error": f"tts failed: {e}"}
 
 
-async def _synthesize_tts(text: str, voice: str, rate: str = "+0%") -> bytes:
-    """edge-tts で MP3 バイト列を生成する（asyncで実行）。rate は "+0%" 等の文字列。"""
+async def _synthesize_tts(text: str, voice: str, rate: str = "+0%",
+                          pitch: str = "+0Hz") -> bytes:
+    """edge-tts で MP3 バイト列を生成する（asyncで実行）。
+
+    rate は "+0%"、pitch は "+0Hz" の形式。どちらも書式が違うと edge-tts が
+    例外を出すので、その場合は既定値に落とす（声が出ないより既定で出るほうがよい）。
+    """
     import edge_tts
-    # rate が不正フォーマットなら edge-tts が例外を出すので軽くサニタイズ
     r = (rate or "+0%").strip()
-    if not (r.endswith("%") and (r[0] in "+-")):
+    if not (r.endswith("%") and (r[0] in "+-") and r[1:-1].lstrip("-").isdigit()):
         r = "+0%"
-    communicate = edge_tts.Communicate(text, voice, rate=r)
+    p = (pitch or "+0Hz").strip()
+    if not (p.endswith("Hz") and (p[0] in "+-") and p[1:-2].lstrip("-").isdigit()):
+        p = "+0Hz"
+    communicate = edge_tts.Communicate(text, voice, rate=r, pitch=p)
     buf = bytearray()
     async for chunk in communicate.stream():
         if chunk.get("type") == "audio" and chunk.get("data"):

@@ -215,15 +215,45 @@ if (typeof window !== "undefined" && "speechSynthesis" in window) {
   window.speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
 }
 
-/** True when the browser can synthesize speech. */
+/**
+ * True when the browser exposes the speech synthesis API.
+ *
+ * 注意: これが true でも「声が1つも入っていない」端末がある（一部のAndroid
+ * WebView、音声パッケージ未導入のLinux/Windows、法人管理端末など）。その場合
+ * speak() は無音のまま終わり、onend も来ないことがある。「喋らないのに
+ * サーバー音声へも切り替わらない」という詰み方をするので、実際に使えるか
+ * どうかは hasUsableVoice() で見ること。
+ */
 export function isSpeechSynthesisSupported(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
-/** Pick a Japanese voice if available, else the first voice. */
-function pickVoice(lang: string): SpeechSynthesisVoice | undefined {
+/** その言語で実際に使える声の一覧（設定画面で選ばせるために使う）。 */
+export function listVoices(lang = "ja-JP"): SpeechSynthesisVoice[] {
+  const voices = cachedVoices.length ? cachedVoices : loadVoices();
+  const base = lang.split("-")[0].toLowerCase();
+  return voices.filter((v) => v.lang?.toLowerCase().startsWith(base));
+}
+
+/** その言語を実際に喋れるか。API があるかどうかとは別物。 */
+export function hasUsableVoice(lang = "ja-JP"): boolean {
+  return listVoices(lang).length > 0;
+}
+
+/**
+ * 声を選ぶ。名前の指定があればそれを最優先する。
+ *
+ * 以前はここで常に「最初に見つかった日本語の声」を返していたため、設定で
+ * 声を変えても何も変わらなかった（設定はサーバー音声側にしか渡っていな
+ * かった）。名前で引けるようにして、選択が実際に効くようにしている。
+ */
+function pickVoice(lang: string, name?: string): SpeechSynthesisVoice | undefined {
   const voices = cachedVoices.length ? cachedVoices : loadVoices();
   if (!voices.length) return undefined;
+  if (name) {
+    const exact = voices.find((v) => v.name === name);
+    if (exact) return exact;
+  }
   const base = lang.split("-")[0].toLowerCase();
   return (
     voices.find((v) => v.lang?.toLowerCase() === lang.toLowerCase()) ||
@@ -234,6 +264,8 @@ function pickVoice(lang: string): SpeechSynthesisVoice | undefined {
 
 export interface SpeakOptions {
   lang?: string;
+  /** 端末に入っている声の名前（SpeechSynthesisVoice.name）。 */
+  voiceName?: string;
   rate?: number;
   pitch?: number;
   volume?: number;
@@ -260,12 +292,67 @@ export function speak(text: string, opts: SpeakOptions = {}): void {
     utter.rate = opts.rate ?? 1.02;
     utter.pitch = opts.pitch ?? 1.0;
     utter.volume = opts.volume ?? 1.0;
-    const voice = pickVoice(lang);
+    const voice = pickVoice(lang, opts.voiceName);
     if (voice) utter.voice = voice;
     if (opts.onStart) utter.onstart = () => opts.onStart?.();
     utter.onend = () => opts.onEnd?.();
     utter.onerror = () => opts.onEnd?.();
     window.speechSynthesis.speak(utter);
+  } catch {
+    opts.onEnd?.();
+  }
+}
+
+/**
+ * 文の配列を順番に喋る。
+ *
+ * 1つの長い文字列を渡すより、文ごとに分けて続けて流したほうが自然に
+ * 聞こえる。長文を一度に渡すと途中で切れるブラウザがあるのも避けられる。
+ * 戻り値を呼ぶと途中で止められる。
+ */
+export function speakSequence(
+  chunks: string[],
+  opts: SpeakOptions = {},
+): () => void {
+  let cancelled = false;
+  let i = 0;
+
+  const next = () => {
+    if (cancelled) return;
+    if (i >= chunks.length) { opts.onEnd?.(); return; }
+    const part = chunks[i++];
+    speakOne(part, {
+      ...opts,
+      onStart: i === 1 ? opts.onStart : undefined,
+      onEnd: next,
+    });
+  };
+  next();
+  return () => { cancelled = true; stopSpeaking(); };
+}
+
+/** speak() と同じだが、直前の発話を打ち切らない（連続再生用）。 */
+function speakOne(text: string, opts: SpeakOptions): void {
+  const clean = (text || "").trim();
+  if (!isSpeechSynthesisSupported() || !clean) { opts.onEnd?.(); return; }
+  const lang = opts.lang ?? "ja-JP";
+  try {
+    const utter = new SpeechSynthesisUtterance(clean);
+    utter.lang = lang;
+    utter.rate = opts.rate ?? 1.02;
+    utter.pitch = opts.pitch ?? 1.0;
+    utter.volume = opts.volume ?? 1.0;
+    const voice = pickVoice(lang, opts.voiceName);
+    if (voice) utter.voice = voice;
+    if (opts.onStart) utter.onstart = () => opts.onStart?.();
+    // 声が入っていない端末では onend が来ないことがあるため、
+    // 呼び出し側が待ち続けないよう保険をかける。
+    let done = false;
+    const finish = () => { if (!done) { done = true; opts.onEnd?.(); } };
+    utter.onend = finish;
+    utter.onerror = finish;
+    window.speechSynthesis.speak(utter);
+    if (!hasUsableVoice(lang)) setTimeout(finish, 50);
   } catch {
     opts.onEnd?.();
   }
@@ -283,18 +370,33 @@ export function stopSpeaking(): void {
 
 /** Play a base64-encoded mp3 (the API /tts fallback). Resolves when done. */
 export function playBase64Audio(audioBase64: string, mime = "audio/mpeg"): Promise<void> {
-  return new Promise((resolve) => {
-    if (!audioBase64 || typeof window === "undefined") {
-      resolve();
-      return;
-    }
+  return playBase64AudioControllable(audioBase64, mime).done;
+}
+
+/**
+ * 上と同じだが、途中で止められる。
+ * 割り込み（利用者が喋りかける・別の返答が来る）で前の音声を確実に切るために要る。
+ */
+export function playBase64AudioControllable(
+  audioBase64: string,
+  mime = "audio/mpeg",
+): { done: Promise<void>; stop: () => void } {
+  let stop = () => {};
+  const done = new Promise<void>((resolve) => {
+    if (!audioBase64 || typeof window === "undefined") { resolve(); return; }
     try {
       const audio = new Audio(`data:${mime};base64,${audioBase64}`);
-      audio.onended = () => resolve();
-      audio.onerror = () => resolve();
-      void audio.play().catch(() => resolve());
+      const finish = () => resolve();
+      audio.onended = finish;
+      audio.onerror = finish;
+      stop = () => {
+        try { audio.pause(); audio.src = ""; } catch { /* ignore */ }
+        finish();
+      };
+      void audio.play().catch(finish);
     } catch {
       resolve();
     }
   });
+  return { done, stop: () => stop() };
 }

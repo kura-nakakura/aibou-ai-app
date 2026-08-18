@@ -42,6 +42,8 @@ export interface TTSParams {
   voice?: string;
   /** edge-tts rate string, e.g. "+0%", "-20%", "+30%". */
   rate?: string;
+  /** edge-tts pitch string, e.g. "+0Hz", "-20Hz". */
+  pitch?: string;
 }
 
 export interface IncomeSummary {
@@ -267,7 +269,9 @@ export async function tts(params: TTSParams): Promise<string> {
   const res = await fetch(`${requireApiUrl()}/tts`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ text: params.text, voice: params.voice, rate: params.rate }),
+    body: JSON.stringify({
+      text: params.text, voice: params.voice, rate: params.rate, pitch: params.pitch,
+    }),
   });
   const data = (await res.json().catch(() => ({}))) as { audio_base64?: string; error?: string };
   if (!res.ok) throw new Error(data.error || `TTS failed (${res.status})`);

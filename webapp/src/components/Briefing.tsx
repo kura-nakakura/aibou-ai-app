@@ -7,8 +7,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
-import { getBriefing } from "@/lib/api";
-import { speak } from "@/lib/voice";
+import { API_URL, getBriefing } from "@/lib/api";
+import { loadVoiceSettings, speakCore } from "@/lib/coreVoice";
 
 export default function Briefing() {
   const [open, setOpen] = useState(false);
@@ -21,8 +21,8 @@ export default function Briefing() {
     try {
       const r = await getBriefing();
       setText(r.text || "（ブリーフィングを取得できませんでした）");
-      // Read aloud via the shared helper (honours the chosen ja-JP voice).
-      if (r.text) speak(r.text, { lang: "ja-JP" });
+      // 設定した声・速さで読む（CHATと同じ経路。記号や絵文字は読み上げない）
+      if (r.text) speakCore(r.text, loadVoiceSettings(), {}, Boolean(API_URL));
     } catch {
       setText("ブリーフィングの取得に失敗しました。");
     } finally {

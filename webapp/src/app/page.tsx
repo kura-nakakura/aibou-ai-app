@@ -40,7 +40,11 @@ import Keychain from "@/components/Keychain";
 import LifeMode from "@/components/LifeMode";
 import Tasks from "@/components/Tasks";
 import Vault from "@/components/Vault";
-import { health } from "@/lib/api";
+import { API_URL, health } from "@/lib/api";
+import {
+  loadVoiceSettings, saveVoiceSettings, speakCore, stopCoreVoice, type VoiceEngine,
+} from "@/lib/coreVoice";
+import { listVoices } from "@/lib/voice";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { APP_VERSION } from "@/lib/version";
 
@@ -49,13 +53,12 @@ type View = "chat" | "me" | "sns" | "capture" | "code" | "vault" | "income" | "t
 const LS_NAME = "forge_name";
 const LS_PERSONA = "forge_persona";
 const LS_VOICE = "forge_voice_replies";
-const LS_TTS_VOICE = "forge_tts_voice";
-const LS_TTS_RATE = "forge_tts_rate";
 const DEFAULT_NAME = "JARVIS";
 const DEFAULT_TTS_VOICE = "ja-JP-NanamiNeural";
 const DEFAULT_TTS_RATE = 1.0;
 
-// edge-tts ja-JP voices (used by the API fallback; browser TTS auto-picks ja-JP).
+// サーバー音声（edge-tts）の日本語。端末に入っている声は機種ごとに違うので
+// 決め打ちにできず、設定画面で実際に列挙している。
 const VOICE_PRESETS = [
   { label: "NANAMI (女性)", value: "ja-JP-NanamiNeural" },
   { label: "KEITA (男性)", value: "ja-JP-KeitaNeural" },
@@ -99,10 +102,12 @@ function Hud() {
       const name = localStorage.getItem(LS_NAME) || DEFAULT_NAME;
       const persona = localStorage.getItem(LS_PERSONA) || "";
       const voice = localStorage.getItem(LS_VOICE);
-      const ttsVoice = localStorage.getItem(LS_TTS_VOICE) || DEFAULT_TTS_VOICE;
-      const rateRaw = localStorage.getItem(LS_TTS_RATE);
-      const rate = rateRaw ? Number(rateRaw) || DEFAULT_TTS_RATE : DEFAULT_TTS_RATE;
-      setSettings({ name, persona, voice: ttsVoice, rate });
+      const v = loadVoiceSettings();
+      setSettings({
+        name, persona,
+        voice: v.serverVoice, browserVoice: v.browserVoice,
+        voiceEngine: v.engine, rate: v.rate, pitch: v.pitch,
+      });
       if (voice !== null) setVoiceReplies(voice === "1");
       // Reopen the mode you were using (PWA relaunch lands where you left off).
       let savedView = localStorage.getItem("forge_view") as View | null;
@@ -143,9 +148,15 @@ function Hud() {
       localStorage.setItem(LS_NAME, next.name);
       localStorage.setItem(LS_PERSONA, next.persona);
       localStorage.setItem(LS_VOICE, voice ? "1" : "0");
-      localStorage.setItem(LS_TTS_VOICE, next.voice || DEFAULT_TTS_VOICE);
-      localStorage.setItem(LS_TTS_RATE, String(next.rate ?? DEFAULT_TTS_RATE));
     } catch { /* ignore */ }
+    // 声まわりは coreVoice が持つ（設定を持たない画面からも読むため）
+    saveVoiceSettings({
+      engine: next.voiceEngine ?? "browser",
+      browserVoice: next.browserVoice,
+      serverVoice: next.voice || DEFAULT_TTS_VOICE,
+      rate: next.rate ?? DEFAULT_TTS_RATE,
+      pitch: next.pitch ?? 1.0,
+    });
   }, []);
 
   const handleSave = useCallback(
@@ -154,7 +165,10 @@ function Hud() {
         name: next.name.trim() || DEFAULT_NAME,
         persona: next.persona.trim(),
         voice: next.voice || DEFAULT_TTS_VOICE,
+        browserVoice: next.browserVoice,
+        voiceEngine: next.voiceEngine ?? "browser",
         rate: next.rate ?? DEFAULT_TTS_RATE,
+        pitch: next.pitch ?? 1.0,
       };
       setSettings(cleaned);
       setVoiceReplies(voice);
@@ -634,9 +648,58 @@ function SettingsPanel({
   const [host, setHost] = useState("");
   useEffect(() => { try { setHost(window.location.host); } catch { /* ignore */ } }, []);
 
+  /* ── 声の設定 ──────────────────────────────────────────────────────
+     端末に入っている音声は機種ごとに違うので、決め打ちの一覧ではなく実際に
+     列挙する。声が1つも入っていない端末があり、そこで「端末の声」を選ぶと
+     無音になるため、その場合は選ばせずサーバー音声へ寄せる。            */
+  const [engine, setEngine] = useState<VoiceEngine>(initial.voiceEngine ?? "browser");
+  const [browserVoice, setBrowserVoice] = useState(initial.browserVoice ?? "");
+  const [pitch, setPitch] = useState(initial.pitch ?? 1.0);
+  const [deviceVoices, setDeviceVoices] = useState<{ name: string; lang: string }[]>([]);
+  const [previewing, setPreviewing] = useState(false);
+
+  useEffect(() => {
+    const refresh = () => {
+      setDeviceVoices(listVoices("ja-JP").map((v) => ({ name: v.name, lang: v.lang })));
+    };
+    refresh();
+    // 音声一覧は非同期に埋まる（初回は空で返る端末がある）
+    const t = setTimeout(refresh, 600);
+    window.speechSynthesis?.addEventListener?.("voiceschanged", refresh);
+    return () => {
+      clearTimeout(t);
+      window.speechSynthesis?.removeEventListener?.("voiceschanged", refresh);
+    };
+  }, []);
+
+  const noDeviceVoice = deviceVoices.length === 0;
+
+  /** いま選んでいる設定でそのまま喋らせる（効いているか耳で確かめる用）。 */
+  const preview = useCallback(() => {
+    stopCoreVoice();
+    setPreviewing(true);
+    speakCore(
+      `こんにちは。${name.trim() || DEFAULT_NAME} です。この声と速さでお話しします。`,
+      {
+        engine,
+        browserVoice: browserVoice || undefined,
+        serverVoice: ttsVoice,
+        rate,
+        pitch,
+      },
+      { onEnd: () => setPreviewing(false) },
+      Boolean(API_URL),
+    );
+  }, [name, engine, browserVoice, ttsVoice, rate, pitch]);
+
+  // 設定を閉じたら試聴を止める（開きっぱなしで喋り続けないように）
+  useEffect(() => () => { stopCoreVoice(); }, []);
+
   return (
+    // 下のナビと同じ z-40 だと、スマホでは保存ボタンがナビの下に隠れて
+    // 押せなくなる（設定を変えても保存できない）。ナビより前に出す。
     <motion.div
-      className="fixed inset-0 z-40 flex items-end justify-center sm:items-center"
+      className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -699,17 +762,83 @@ function SettingsPanel({
                 <ToggleSwitch checked={voice} onChange={setVoice} />
               </label>
 
-              {/* Voice selection */}
+              {/* 声の出どころ */}
+              <label className="mb-1 block text-[10px] tracking-[0.2em] text-muted label-mono">VOICE SOURCE</label>
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                {([
+                  { key: "browser" as VoiceEngine, label: "端末の声", hint: "すぐ鳴る" },
+                  { key: "server" as VoiceEngine, label: "サーバーの声", hint: "なめらか" },
+                ]).map((o) => {
+                  const disabled = o.key === "browser" ? noDeviceVoice : !API_URL;
+                  const on = engine === o.key;
+                  return (
+                    <button
+                      key={o.key}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => setEngine(o.key)}
+                      className="rounded-forge border px-3 py-2 text-left transition disabled:opacity-40"
+                      style={{
+                        borderColor: on ? "var(--accent)" : "var(--panel-bd)",
+                        background: on ? "var(--btn-bg)" : "transparent",
+                      }}
+                    >
+                      <div className="text-[11px] text-fg-strong">{o.label}</div>
+                      <div className="text-[9px] text-muted">{o.hint}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* 声 */}
               <label className="mb-1 block text-[10px] tracking-[0.2em] text-muted label-mono">CORE VOICE</label>
-              <select
-                value={ttsVoice}
-                onChange={(e) => setTtsVoice(e.target.value)}
-                className="mb-4 w-full rounded-forge border border-[var(--input-bd)] bg-[var(--input-bg)] px-3 py-2.5 text-sm text-fg-strong focus:border-[var(--line)] focus:outline-none"
+              {engine === "browser" ? (
+                <select
+                  aria-label="コアの声"
+                  value={browserVoice}
+                  onChange={(e) => setBrowserVoice(e.target.value)}
+                  disabled={noDeviceVoice}
+                  className="mb-2 w-full rounded-forge border border-[var(--input-bd)] bg-[var(--input-bg)] px-3 py-2.5 text-sm text-fg-strong focus:border-[var(--line)] focus:outline-none disabled:opacity-40"
+                >
+                  <option value="" className="bg-[#0a0e16]">おまかせ（自動で選ぶ）</option>
+                  {deviceVoices.map((v) => (
+                    <option key={v.name} value={v.name} className="bg-[#0a0e16]">{v.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <select
+                  aria-label="コアの声"
+                  value={ttsVoice}
+                  onChange={(e) => setTtsVoice(e.target.value)}
+                  className="mb-2 w-full rounded-forge border border-[var(--input-bd)] bg-[var(--input-bg)] px-3 py-2.5 text-sm text-fg-strong focus:border-[var(--line)] focus:outline-none"
+                >
+                  {VOICE_PRESETS.map((v) => (
+                    <option key={v.value} value={v.value} className="bg-[#0a0e16]">{v.label}</option>
+                  ))}
+                </select>
+              )}
+
+              {/* 使える声が無い／繋がっていない、を隠さない */}
+              {engine === "browser" && noDeviceVoice && (
+                <p className="mb-3 text-[10px] leading-relaxed text-muted">
+                  この端末には音声が入っていないため、端末の声では鳴りません。
+                  {API_URL ? "サーバーの声を選んでください。" : "バックエンドに繋ぐと、サーバーの声が使えます。"}
+                </p>
+              )}
+              {engine === "server" && !API_URL && (
+                <p className="mb-3 text-[10px] leading-relaxed text-muted">
+                  バックエンド未接続のため、サーバーの声は使えません。
+                </p>
+              )}
+
+              {/* 試聴 — 設定が効いているか、その場で耳で確かめられるようにする */}
+              <button
+                type="button"
+                onClick={preview}
+                className="mb-4 w-full rounded-forge border border-panel px-3 py-2 text-[10px] tracking-[0.16em] text-fg-strong transition hover:border-[var(--line)] label-mono"
               >
-                {VOICE_PRESETS.map((v) => (
-                  <option key={v.value} value={v.value} className="bg-[#0a0e16]">{v.label}</option>
-                ))}
-              </select>
+                {previewing ? "◈ 再生中…" : "▶ この声で試聴"}
+              </button>
 
               {/* Talk speed */}
               <div className="mb-4">
@@ -729,9 +858,27 @@ function SettingsPanel({
                 />
               </div>
 
+              {/* 声の高さ */}
+              <div className="mb-4">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[10px] tracking-[0.2em] text-muted label-mono">VOICE PITCH</span>
+                  <span className="text-[10px] text-fg-strong label-mono">{pitch.toFixed(2)}×</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={1.5}
+                  step={0.05}
+                  value={pitch}
+                  onChange={(e) => setPitch(Number(e.target.value))}
+                  className="w-full accent-[var(--accent)]"
+                  aria-label="Voice pitch"
+                />
+              </div>
+
               <button
                 type="button"
-                onClick={() => onSave({ name, persona, voice: ttsVoice, rate }, voice)}
+                onClick={() => onSave({ name, persona, voice: ttsVoice, browserVoice, voiceEngine: engine, rate, pitch }, voice)}
                 className="w-full rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] py-2.5 text-[11px] tracking-[0.2em] text-fg-strong shadow-glow transition hover:shadow-glow-strong label-mono"
               >
                 SAVE & SYNC
@@ -770,7 +917,7 @@ function SettingsPanel({
 
               <button
                 type="button"
-                onClick={() => onSave({ name, persona, voice: ttsVoice, rate }, voice)}
+                onClick={() => onSave({ name, persona, voice: ttsVoice, browserVoice, voiceEngine: engine, rate, pitch }, voice)}
                 className="w-full rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] py-2.5 text-[11px] tracking-[0.2em] text-fg-strong shadow-glow transition hover:shadow-glow-strong label-mono"
               >
                 SAVE & SYNC
