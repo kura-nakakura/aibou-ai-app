@@ -127,9 +127,17 @@ SECTIONS = [
 ]
 
 
-def sections() -> list:
+def _visible(items: list, owner: bool) -> list:
+    """持ち主専用の項目を、持ち主以外には見せない。
+
+    使えない機能の説明が並ぶと「押しても動かない＝壊れている」と受け取られる。
+    """
+    return [dict(x) for x in items if owner or not x.get("owner_only")]
+
+
+def sections(owner: bool = True) -> list:
     """画面のガイドに出す構造化データ。"""
-    return [dict(s) for s in SECTIONS]
+    return _visible(SECTIONS, owner)
 
 # ── 全モードの説明書 ───────────────────────────────────────────────
 # image は webapp/public/guide/ に置いた実画面（初回に開いたときの見た目）。
@@ -249,9 +257,11 @@ MODES = [
     },
     {
         "id": "income", "label": "INCOME", "name": "副業ジョブ", "image": "/guide/income.webp",
+        "owner_only": True,          # 持ち主だけのモード
         "what": "素材づくりなどの作業を積んで、承認してから進める画面。",
         "how": ["テーマを投入すると素案が積まれる", "内容を見て、承認 / 却下する"],
-        "tips": ["承認するまで外部には出ません（勝手に公開はしません）。"],
+        "tips": ["承認するまで外部には出ません（勝手に公開はしません）。",
+                 "このモードは管理者専用です。"],
     },
     {
         "id": "autopilot", "label": "AUTO", "name": "自動運転",
@@ -296,9 +306,9 @@ MODES = [
 ]
 
 
-def modes() -> list:
+def modes(owner: bool = True) -> list:
     """全モードの説明書。"""
-    return [dict(m) for m in MODES]
+    return _visible(MODES, owner)
 
 
 
@@ -327,7 +337,7 @@ def prompt_block() -> str:
     return "\n".join(lines)
 
 
-def status() -> dict:
+def status(owner: bool = True) -> dict:
     """UIが出し分けるための要約。
 
     shared_data は「みんなが同じ置き場を使っている」かどうか。ここを固定値に
@@ -339,8 +349,8 @@ def status() -> dict:
     per_user_db = bool(config.SUPABASE_JWT_SECRET)
     return {
         "app": APP_NAME,
-        "section_count": len(SECTIONS),
-        "mode_count": len(MODES),
+        "section_count": len(sections(owner)),
+        "mode_count": len(modes(owner)),
         "beta": True,
         "shared_data": not per_user_db,
     }

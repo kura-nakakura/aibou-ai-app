@@ -13,7 +13,7 @@
  */
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AiProviderSettings from "@/components/AiProviderSettings";
 import HfModels from "@/components/HfModels";
 import MyDatabase from "@/components/MyDatabase";
@@ -40,7 +40,7 @@ import Keychain from "@/components/Keychain";
 import LifeMode from "@/components/LifeMode";
 import Tasks from "@/components/Tasks";
 import Vault from "@/components/Vault";
-import { API_URL, health } from "@/lib/api";
+import { API_URL, health, profileGet } from "@/lib/api";
 import {
   loadVoiceSettings, saveVoiceSettings, speakCore, stopCoreVoice, type VoiceEngine,
 } from "@/lib/coreVoice";
@@ -96,6 +96,36 @@ function Hud() {
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState<View>("chat");
   const [fullscreen, setFullscreen] = useState(false);
+
+  /* ── 持ち主かどうか ───────────────────────────────────────────────
+     持ち主専用モード（副業・自己進化）の表示を決める。分かるまでは隠す側に
+     倒す（他の人に一瞬でも見せて、押したら403になるほうが分かりにくい）。
+     これは見た目の話で、実際の遮断はサーバーが行っている。            */
+  const [isOwner, setIsOwner] = useState<boolean | null>(null);
+  const [ownerOnlyViews, setOwnerOnlyViews] = useState<View[]>(OWNER_ONLY_VIEWS);
+
+  useEffect(() => {
+    if (!API_URL) { setIsOwner(true); return; }   // 未接続時は制限しない
+    profileGet()
+      .then((p) => {
+        setIsOwner(p.is_owner);
+        if (p.owner_only_modes.length) {
+          setOwnerOnlyViews(p.owner_only_modes.filter((m): m is View =>
+            NAV_ITEMS.some((n) => n.key === m)));
+        }
+      })
+      .catch(() => setIsOwner(true));             // 判定できないときは従来通り
+  }, []);
+
+  const visibleNav = useMemo(
+    () => (isOwner === false ? NAV_ITEMS.filter((i) => !ownerOnlyViews.includes(i.key)) : NAV_ITEMS),
+    [isOwner, ownerOnlyViews],
+  );
+
+  // 持ち主専用の画面を開いたまま権限が変わった／保存されていた場合に備える
+  useEffect(() => {
+    if (isOwner === false && ownerOnlyViews.includes(view)) setView("chat");
+  }, [isOwner, ownerOnlyViews, view]);
 
   useEffect(() => {
     try {
@@ -201,7 +231,7 @@ function Hud() {
           </div>
           <div className="flex items-center gap-2">
             <Briefing />
-            <ModeLauncher view={view} onChange={setView} />
+            <ModeLauncher view={view} onChange={setView} items={visibleNav} />
             <button
               type="button"
               onClick={() => setFullscreen((f) => !f)}
@@ -318,7 +348,7 @@ function Hud() {
       </AnimatePresence>
 
       {/* Mobile thumb-zone nav (hidden on ≥sm; hides while the keyboard is open) */}
-      <MobileNav view={view} onChange={setView} />
+      <MobileNav view={view} onChange={setView} items={visibleNav} />
     </main>
   );
 }
@@ -331,6 +361,10 @@ function stateLabel(state: CoreState): string {
     default: return "ONLINE";
   }
 }
+
+// 持ち主だけのモード。サーバーの /account/profile が正で、ここは
+// 応答が返る前の初期表示に使う控えの一覧（多めに隠す側に倒す）。
+const OWNER_ONLY_VIEWS: View[] = ["income"];
 
 const NAV_ITEMS: { key: View; label: string }[] = [
   { key: "home", label: "HOME" },
@@ -407,7 +441,8 @@ function WaffleIcon() {
 /** Google-apps-style mode launcher: a waffle button → popover grid of modes. */
 /** Bottom thumb-zone nav for phones: 4 primary modes + ⋯ (full grid sheet).
     Slides away while the software keyboard is open (visualViewport). */
-function MobileNav({ view, onChange }: { view: View; onChange: (v: View) => void }) {
+function MobileNav({ view, onChange, items: navItems }:
+  { view: View; onChange: (v: View) => void; items: { key: View; label: string }[] }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [kbOpen, setKbOpen] = useState(false);
 
@@ -420,7 +455,7 @@ function MobileNav({ view, onChange }: { view: View; onChange: (v: View) => void
   }, []);
 
   const PRIMARY: View[] = ["home", "chat", "me", "tasks"];
-  const items = NAV_ITEMS.filter((i) => PRIMARY.includes(i.key));
+  const items = navItems.filter((i) => PRIMARY.includes(i.key));
 
   return (
     <div className="sm:hidden">
@@ -445,7 +480,7 @@ function MobileNav({ view, onChange }: { view: View; onChange: (v: View) => void
             >
               <div className="glass-silver p-3">
                 <div className="grid grid-cols-4 gap-1.5">
-                  {NAV_ITEMS.map((it) => (
+                  {navItems.map((it) => (
                     <button
                       key={it.key}
                       type="button"
@@ -508,7 +543,8 @@ function MobileNav({ view, onChange }: { view: View; onChange: (v: View) => void
   );
 }
 
-function ModeLauncher({ view, onChange }: { view: View; onChange: (v: View) => void }) {
+function ModeLauncher({ view, onChange, items: navItems }:
+  { view: View; onChange: (v: View) => void; items: { key: View; label: string }[] }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -548,7 +584,7 @@ function ModeLauncher({ view, onChange }: { view: View; onChange: (v: View) => v
               <div className="glass-silver p-3">
                 <div className="mb-2 px-1 text-[9px] tracking-[0.22em] text-muted label-mono">MODES</div>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {NAV_ITEMS.map((it) => {
+                  {navItems.map((it) => {
                     const active = it.key === view;
                     return (
                       <button

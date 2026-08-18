@@ -2174,6 +2174,41 @@ export interface GuideDoc {
   shared_data: boolean;
 }
 
+/* ---------------- その人の立場（画面の出し分け用） ---------------- */
+export interface Profile {
+  signed_in: boolean;
+  user_id: string;
+  email: string;
+  /** このアプリの持ち主か。持ち主専用モードの表示可否に使う。 */
+  is_owner: boolean;
+  /** 持ち主だけが使えるモードのキー。 */
+  owner_only_modes: string[];
+  /** サーバーにオーナーが設定されているか（未設定＝1人運用）。 */
+  owner_configured: boolean;
+}
+
+/**
+ * GET /account/profile — 持ち主かどうか。
+ *
+ * 画面から隠すのは「使えない物を見せない」ためで、守りではない。
+ * 実際の遮断はサーバー側（require_owner）が行う。
+ */
+export async function profileGet(): Promise<Profile> {
+  const res = await fetch(`${requireApiUrl()}/account/profile`, {
+    headers: authHeaders(), cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Profile failed (${res.status})`);
+  const d = (await res.json()) as Partial<Profile>;
+  return {
+    signed_in: Boolean(d.signed_in),
+    user_id: d.user_id ?? "",
+    email: d.email ?? "",
+    is_owner: Boolean(d.is_owner),
+    owner_only_modes: Array.isArray(d.owner_only_modes) ? d.owner_only_modes : [],
+    owner_configured: Boolean(d.owner_configured),
+  };
+}
+
 /** GET /guide — アプリの説明。CHATが答える内容と同じ出どころ。 */
 export async function guideGet(): Promise<GuideDoc> {
   const res = await fetch(`${requireApiUrl()}/guide`, { headers: authHeaders(), cache: "no-store" });

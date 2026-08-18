@@ -9,9 +9,12 @@ Supabase テーブル `api_keys` を使い、未設定ならプロセス内メ�
   * フルの値は決して API から返さない（list は必ずマスクして返す）。
   * Supabase に保存する値は **サーバー側で Fernet(AES128-CBC + HMAC) 暗号化**してから
     書き込む。DB には暗号文（`enc:v1:...`）だけが残り、平文は保存されない。
-  * 復号はサーバー内部（利用時）でのみ行う。os.environ / メモリには平文を置き、
-    同プロセスの config / 各モジュールが拾えるようにする。
-  * GEMINI_API_KEY が更新されたら即座に Gemini を再 configure する。
+  * 復号はサーバー内部（利用時）でのみ行う。
+  * **鍵はその人のもの**。保存も読み出しも、その人のDBとその人のクライアント
+    の中で完結させる。利用者の操作でプロセス共有の場所（os.environ など）を
+    書き換えない。書き換えると、その鍵が他の利用者のリクエストでも使われる。
+  * サーバー側だけが決めてよい設定（SERVER_ONLY）は、利用者のDBの値では
+    上書きさせない。暗号鍵や管理用DBの差し替えに繋がるため。
   * 旧データ（平文で保存済み）も読めるよう後方互換。次回保存時に暗号化へ移行する。
 """
 
@@ -106,8 +109,53 @@ KNOWN_KEYS: List[Dict[str, str]] = [
     {"name": "EMAIL_PASSWORD", "label": "メール アプリパスワード", "hint": "Gmailは2段階認証→アプリパスワード"},
 ]
 
-# プロセス内フォールバック（Supabase 未設定時）
+# ── 鍵は「その人のもの」であること ────────────────────────────────────
+# 利用者ごとに自分のSupabaseを繋ぐ方式にしたので、鍵もその人のDBに入る。
+# ところが読み出し側がプロセス共有の辞書と os.environ を先に見ていたため、
+# 先に誰かが使った鍵が、そのまま次の人にも使われてしまう状態だった
+# （Aさんのキーの請求でBさんが動く／Aさんのメール・Notionに繋がる）。
+#
+# 直し方:
+#   ・その人のDBから読んだ値は、その人のクライアントにだけぶら下げる
+#   ・利用者の保存で os.environ を書き換えない（サーバー全体に漏れるため）
+#   ・os.environ / プロセス内辞書は「管理者がサーバーに入れた共通の鍵」
+#     としてだけ読む。自分の鍵があればそちらが優先。
+#
+# 誰のDBにも繋いでいないとき（自分用に立てた1人運用）は、これまで通り
+# プロセス内辞書と環境変数で動く。
 _mem_keys: Dict[str, str] = {}
+
+# その人のクライアントにぶら下げる、復号済みの鍵
+_KEYS_NOTE = "_aibou_keys"
+
+# サーバー側だけが決めてよい設定（利用者のDBの値で上書きさせない）。
+# ここを上書きできると、暗号鍵の差し替えや管理用DBの乗っ取りに繋がる。
+SERVER_ONLY = {
+    "KEYCHAIN_SECRET", "SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_ANON_KEY",
+    "SUPABASE_JWT_SECRET", "APP_TOKEN", "REQUIRE_AUTH", "OWNER_EMAIL", "OWNER_USER_ID",
+}
+
+
+def _tenant():
+    """いま処理している利用者のDBクライアント。1人運用なら None 相当。"""
+    try:
+        return config.get_supabase()
+    except Exception:
+        return None
+
+
+def _tenant_keys(client) -> Optional[Dict[str, str]]:
+    """そのクライアントにぶら下がっている鍵の入れ物（無ければ作る）。"""
+    if client is None:
+        return None
+    notes = getattr(client, _KEYS_NOTE, None)
+    if notes is None:
+        notes = {}
+        try:
+            setattr(client, _KEYS_NOTE, notes)
+        except Exception:
+            return None          # 付けられない実装なら覚えない（毎回DBを見る）
+    return notes
 
 # ── 「入っていない鍵」を覚えておくための短期メモ ──────────────────────
 # 会話を1回始めるたびに llm.providers_in_order() が HUGGINGFACE_TOKEN と
@@ -163,62 +211,81 @@ def _mask(value: str) -> str:
 
 
 def set_key(name: str, value: str) -> dict:
-    """キーを保存する。メモリ + os.environ + Supabase（best-effort）に反映する。"""
+    """鍵を保存する。保存先はその人のDB（繋いでいなければプロセス内）。
+
+    重要: 利用者の保存で os.environ を書き換えない。書き換えると、その鍵が
+    サーバー全体の既定値になり、他の利用者のリクエストでも使われてしまう。
+    """
     name = (name or "").strip()
     value = (value or "").strip()
     if not name:
         return {"error": "name is required"}
 
-    _mem_keys[name] = value
-    _clear_missing(name)          # 「無い」の記憶を捨てて、すぐ効くようにする
-    # 同プロセスの config / 各モジュールが拾えるよう環境変数にも反映
-    os.environ[name] = value
+    c = _tenant()
+    notes = _tenant_keys(c)
 
-    # Gemini キーは即座に再 configure（次のチャット/生成から有効）
-    if name == "GEMINI_API_KEY":
-        try:
-            config.reconfigure_gemini(value)
-        except Exception:
-            pass
-
-    # Supabase 永続化（暗号化してから書く。テーブルが無くても落ちない）
-    c = config.get_supabase()
-    if c:
+    if notes is not None:
+        # その人のDBに繋がっている → その人の場所にだけ入れる
+        notes[name] = value
+        _clear_missing(name)
         try:
             c.table("api_keys").upsert({"name": name, "value": _encrypt(value)}).execute()
         except Exception:
             pass
+    else:
+        # 誰のDBにも繋いでいない（1人運用）→ これまで通りプロセス内に持つ
+        _mem_keys[name] = value
+        os.environ[name] = value
+        if name == "GEMINI_API_KEY":
+            try:
+                config.reconfigure_gemini(value)
+            except Exception:
+                pass
 
     return {"ok": True, "name": name, "masked": _mask(value), "set": bool(value), "encrypted": bool(_get_fernet())}
 
 
 def get_key(name: str) -> str:
-    """フルのキー値を返す（サーバー内部利用専用 / API では返さない）。"""
+    """フルのキー値を返す（サーバー内部利用専用 / API では返さない）。
+
+    探す順番:
+      1. その人が保存した鍵（その人のDB）      ← 自分の鍵が最優先
+      2. 管理者がサーバーに入れた共通の鍵（環境変数）
+    1人運用（誰のDBにも繋いでいない）ときだけ、プロセス内の保存分も見る。
+    """
     name = (name or "").strip()
     if not name:
         return ""
-    if name in _mem_keys:
-        return _mem_keys[name]
-    env = os.environ.get(name, "").strip()
-    if env:
-        return env
-    c = config.get_supabase()
-    if c:
-        if _missing_recently(c, name):
-            return ""                       # ついさっき無かった → 問い合わせない
-        try:
-            rows = (c.table("api_keys").select("value").eq("name", name)
-                    .limit(1).execute().data) or []
-            if rows:
-                v = _decrypt(rows[0].get("value"))  # DBは暗号文 → ここで復号
-                if v:
-                    _mem_keys[name] = v
-                    return v
-            _note_missing(c, name)
-            return ""
-        except Exception:
-            pass
-    return ""
+
+    # サーバーが決める設定は、利用者の値で上書きさせない
+    if name in SERVER_ONLY:
+        return os.environ.get(name, "").strip()
+
+    c = _tenant()
+    notes = _tenant_keys(c)
+
+    if notes is not None:
+        if name in notes:
+            return notes[name]
+        if not _missing_recently(c, name):
+            try:
+                rows = (c.table("api_keys").select("value").eq("name", name)
+                        .limit(1).execute().data) or []
+                if rows:
+                    v = _decrypt(rows[0].get("value"))  # DBは暗号文 → ここで復号
+                    if v:
+                        notes[name] = v
+                        return v
+                _note_missing(c, name)
+            except Exception:
+                pass
+    else:
+        # 1人運用：プロセス内に保存した分
+        if name in _mem_keys:
+            return _mem_keys[name]
+
+    # 管理者がサーバーに入れた共通の鍵（自分の鍵が無いときだけ使われる）
+    return os.environ.get(name, "").strip()
 
 
 def list_keys() -> List[dict]:
@@ -226,13 +293,15 @@ def list_keys() -> List[dict]:
     labels = {k["name"]: k for k in KNOWN_KEYS}
     names: List[str] = [k["name"] for k in KNOWN_KEYS]
 
-    # メモリ保存分を追加
-    for n in _mem_keys:
+    c = _tenant()
+    notes = _tenant_keys(c)
+
+    # その人が保存した分（1人運用ならプロセス内の分）を追加
+    for n in (notes if notes is not None else _mem_keys):
         if n not in names:
             names.append(n)
 
-    # Supabase 保存分を追加
-    c = config.get_supabase()
+    # その人のDBに保存されている分を追加
     if c:
         try:
             rows = (c.table("api_keys").select("name").limit(1000).execute().data) or []
@@ -258,26 +327,41 @@ def list_keys() -> List[dict]:
 
 
 def delete_key(name: str) -> dict:
-    """キーを削除する（メモリ + os.environ + Supabase）。"""
+    """鍵を削除する。消せるのは自分の鍵だけ。
+
+    管理者がサーバーに入れた共通の鍵（環境変数）は、利用者の操作では消さない。
+    消してしまうと他の利用者ごと動かなくなるため。
+    """
     name = (name or "").strip()
     if not name:
         return {"error": "name is required"}
-    _mem_keys.pop(name, None)
+
+    c = _tenant()
+    notes = _tenant_keys(c)
     _clear_missing(name)
-    try:
-        if name in os.environ:
-            del os.environ[name]
-    except Exception:
-        pass
-    if name == "GEMINI_API_KEY":
-        try:
-            config.reconfigure_gemini("")
-        except Exception:
-            pass
-    c = config.get_supabase()
-    if c:
+
+    if notes is not None:
+        notes.pop(name, None)
         try:
             c.table("api_keys").delete().eq("name", name).execute()
         except Exception:
             pass
+    else:
+        # 1人運用：プロセス内と環境変数から消す
+        _mem_keys.pop(name, None)
+        try:
+            if name in os.environ:
+                del os.environ[name]
+        except Exception:
+            pass
+        if name == "GEMINI_API_KEY":
+            try:
+                config.reconfigure_gemini("")
+            except Exception:
+                pass
     return {"ok": True}
+
+
+# config は keychain を import できない（こちらが config を import しているため）。
+# 起動時にここから登録して、config 側から「いまの人の鍵」を引けるようにする。
+config.set_key_resolver(get_key)

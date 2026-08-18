@@ -534,18 +534,18 @@ def test_model_resolution_picks_first_available(monkeypatch):
     import config
     monkeypatch.setattr(config, "_list_available_models",
                         lambda: {"gemini-1.5-flash", "gemini-2.0-flash", "embedding-001"})
-    config._resolved_model = None
+    config._resolved_model = {}   # 鍵ごとに覚える辞書
     assert config._resolve_model() == "gemini-2.0-flash"  # 候補の優先順
-    config._resolved_model = None
+    config._resolved_model = {}   # 鍵ごとに覚える辞書
 
 
 def test_model_resolution_flash_fallback(monkeypatch):
     import config
     # 名前付き候補が全滅でも、使える flash 系を拾う
     monkeypatch.setattr(config, "_list_available_models", lambda: {"gemini-9-flash-exp"})
-    config._resolved_model = None
+    config._resolved_model = {}   # 鍵ごとに覚える辞書
     assert config._resolve_model() == "gemini-9-flash-exp"
-    config._resolved_model = None
+    config._resolved_model = {}   # 鍵ごとに覚える辞書
 
 
 def test_model_resolution_error_fallback(monkeypatch):
@@ -555,9 +555,9 @@ def test_model_resolution_error_fallback(monkeypatch):
         raise RuntimeError("no network / SDK")
 
     monkeypatch.setattr(config, "_list_available_models", _boom)
-    config._resolved_model = None
+    config._resolved_model = {}   # 鍵ごとに覚える辞書
     assert config._resolve_model() == "gemini-flash-latest"  # 候補先頭にフォールバック
-    config._resolved_model = None
+    config._resolved_model = {}   # 鍵ごとに覚える辞書
 
 
 # ── /code（AIコーディングエージェント・SSE） ────────────────────────

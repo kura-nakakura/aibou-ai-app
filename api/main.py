@@ -155,6 +155,36 @@ async def current_user(authorization: Optional[str] = Header(default=None)) -> s
     return ""
 
 
+async def current_claims(authorization: Optional[str] = Header(default=None)) -> dict:
+    """ログイン中の利用者の claims（sub / email など）。分からなければ空dict。"""
+    if authorization and authorization.strip().lower().startswith("bearer "):
+        return _decode_supabase_jwt(authorization.strip()[7:].strip()) or {}
+    return {}
+
+
+def is_owner_claims(claims: Optional[dict]) -> bool:
+    """このアプリの持ち主かどうか。
+
+    OWNER_EMAIL / OWNER_USER_ID をどちらも設定していないときは「1人で使って
+    いる」とみなして True（設定し忘れで自分が締め出されないようにする）。
+    誰かに配るときは、必ずどちらかを設定すること。
+    """
+    if not (config.OWNER_EMAIL or config.OWNER_USER_ID):
+        return True
+    if not claims:
+        return False
+    if config.OWNER_USER_ID and str(claims.get("sub") or "") == config.OWNER_USER_ID:
+        return True
+    email = str(claims.get("email") or "").strip().lower()
+    return bool(config.OWNER_EMAIL and email == config.OWNER_EMAIL)
+
+
+async def require_owner(claims: dict = Depends(current_claims)) -> None:
+    """持ち主専用のAPI。画面を隠すだけでは直接叩けてしまうので、ここでも塞ぐ。"""
+    if not is_owner_claims(claims):
+        raise HTTPException(status_code=403, detail="このモードは管理者専用です")
+
+
 async def use_own_database(user_id: str = Depends(current_user)):
     """このリクエストの保存先を「その人のSupabase」に差し替える。
 
@@ -892,7 +922,7 @@ async def memory_recent(limit: int = 20, _auth: None = Depends(require_auth)):
 
 
 @app.get("/income/summary")
-async def income_summary(_auth: None = Depends(require_auth)):
+async def income_summary(_auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     """副業ジョブ(income_jobs)のステータス別件数＋合計を返す。
     Supabaseが無ければ {} を返す（crashしない）。"""
     c = config.get_supabase()
@@ -1199,10 +1229,39 @@ async def account_database_disconnect(user_id: str = Depends(current_user)):
     return tenancy.disconnect(user_id)
 
 
+@app.get("/account/profile")
+async def account_profile(claims: dict = Depends(current_claims)):
+    """画面が出し分けるための、その人の立場。
+
+    持ち主専用モードはここを見て隠す。ただし隠すだけでは直接APIを叩けて
+    しまうので、各エンドポイント側でも require_owner で塞いでいる。
+    """
+    owner = is_owner_claims(claims)
+    return {
+        "signed_in": bool(claims),
+        "user_id": str(claims.get("sub") or ""),
+        "email": str(claims.get("email") or ""),
+        "is_owner": owner,
+        # 持ち主だけの機能。UIはこの一覧を見て出し分ける
+        "owner_only_modes": ["income", "evolve"],
+        "owner_configured": bool(config.OWNER_EMAIL or config.OWNER_USER_ID),
+    }
+
+
 @app.get("/guide")
-async def guide(_auth: None = Depends(require_auth)):
-    """アプリの使い方（画面のガイドとCHATが同じ内容を見る）。"""
-    return {"sections": guide_mod.sections(), "modes": guide_mod.modes(), **guide_mod.status()}
+async def guide(_auth: None = Depends(require_auth), claims: dict = Depends(current_claims)):
+    """アプリの使い方（画面のガイドとCHATが同じ内容を見る）。
+
+    持ち主専用のモードは、持ち主以外の説明書には出さない
+    （使えない機能の説明が並ぶと、壊れているように見えるため）。
+    """
+    owner = is_owner_claims(claims)
+    return {
+        "sections": guide_mod.sections(owner=owner),
+        "modes": guide_mod.modes(owner=owner),
+        "is_owner": owner,
+        **guide_mod.status(owner=owner),
+    }
 
 
 # ── HF MODELS：HuggingFaceのモデルを登録して役割に割り当てる ──────────
@@ -1443,7 +1502,7 @@ async def life_chat(req: ChatRequest, _auth: None = Depends(require_auth)):
 
 
 @app.get("/income/jobs")
-async def income_jobs(status: Optional[str] = None, limit: int = 50, _auth: None = Depends(require_auth)):
+async def income_jobs(status: Optional[str] = None, limit: int = 50, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     """副業ジョブの一覧（新しい順）。status で絞り込み可。Supabase未設定なら空。"""
     loop = asyncio.get_event_loop()
     items = await loop.run_in_executor(None, lambda: income.list_jobs(status, limit))
@@ -1451,7 +1510,7 @@ async def income_jobs(status: Optional[str] = None, limit: int = 50, _auth: None
 
 
 @app.post("/income/enqueue")
-async def income_enqueue(req: EnqueueRequest, _auth: None = Depends(require_auth)):
+async def income_enqueue(req: EnqueueRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     """テーマから各媒体メタデータを生成し、承認待ち(pending)で積む。"""
     loop = asyncio.get_event_loop()
     job = await loop.run_in_executor(None, lambda: income.enqueue(req.theme))
@@ -1461,13 +1520,13 @@ async def income_enqueue(req: EnqueueRequest, _auth: None = Depends(require_auth
 
 
 @app.post("/income/approve")
-async def income_approve(req: JobActionRequest, _auth: None = Depends(require_auth)):
+async def income_approve(req: JobActionRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     ok = await asyncio.get_event_loop().run_in_executor(None, lambda: income.set_status(req.id, "approved"))
     return {"ok": ok}
 
 
 @app.post("/income/reject")
-async def income_reject(req: JobActionRequest, _auth: None = Depends(require_auth)):
+async def income_reject(req: JobActionRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     ok = await asyncio.get_event_loop().run_in_executor(None, lambda: income.set_status(req.id, "rejected"))
     return {"ok": ok}
 
@@ -1716,13 +1775,13 @@ async def delete_task(task_id: str, _auth: None = Depends(require_auth)):
 # ── AI Studio（カスタムAI・ワークフロー） ──────────────────────────
 
 @app.get("/studio/ais")
-async def studio_list_ais(_auth: None = Depends(require_auth)):
+async def studio_list_ais(_auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     loop = asyncio.get_event_loop()
     return {"items": await loop.run_in_executor(None, studio.list_ais)}
 
 
 @app.post("/studio/ais")
-async def studio_create_ai(req: AiCreateRequest, _auth: None = Depends(require_auth)):
+async def studio_create_ai(req: AiCreateRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     loop = asyncio.get_event_loop()
     ai = await loop.run_in_executor(
         None, lambda: studio.create_ai(req.name, req.persona, req.model, req.rules)
@@ -1733,19 +1792,19 @@ async def studio_create_ai(req: AiCreateRequest, _auth: None = Depends(require_a
 
 
 @app.delete("/studio/ais/{ai_id}")
-async def studio_delete_ai(ai_id: str, _auth: None = Depends(require_auth)):
+async def studio_delete_ai(ai_id: str, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: studio.delete_ai(ai_id))
 
 
 @app.get("/studio/workflows")
-async def studio_list_workflows(_auth: None = Depends(require_auth)):
+async def studio_list_workflows(_auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     loop = asyncio.get_event_loop()
     return {"items": await loop.run_in_executor(None, studio.list_workflows)}
 
 
 @app.post("/studio/workflows")
-async def studio_create_workflow(req: WorkflowCreateRequest, _auth: None = Depends(require_auth)):
+async def studio_create_workflow(req: WorkflowCreateRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     loop = asyncio.get_event_loop()
     wf = await loop.run_in_executor(
         None, lambda: studio.create_workflow(req.name, req.steps)
@@ -1756,14 +1815,15 @@ async def studio_create_workflow(req: WorkflowCreateRequest, _auth: None = Depen
 
 
 @app.delete("/studio/workflows/{wf_id}")
-async def studio_delete_workflow(wf_id: str, _auth: None = Depends(require_auth)):
+async def studio_delete_workflow(wf_id: str, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: studio.delete_workflow(wf_id))
 
 
 @app.post("/studio/workflows/{wf_id}/run")
 async def studio_run_workflow(wf_id: str, req: WorkflowRunRequest,
-                              _auth: None = Depends(require_auth)):
+                              _auth: None = Depends(require_auth),
+                              _own: None = Depends(require_owner)):
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None, lambda: studio.run_workflow(wf_id, req.input)
@@ -2450,7 +2510,7 @@ async def home_summary(_auth: None = Depends(require_auth)):
 # ── Evolve（セルフ進化：指示→提案） ──────────────────────────────
 
 @app.post("/evolve/propose")
-async def evolve_propose(req: EvolveRequest, _auth: None = Depends(require_auth)):
+async def evolve_propose(req: EvolveRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
     """自然言語の指示から、app/custom_ai/automation/answer の提案を返す。"""
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, lambda: evolve.propose(req.instruction))

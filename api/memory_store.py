@@ -71,8 +71,11 @@ def embed(text: str) -> Optional[list]:
     if not text or not gemini_configured():
         return None
     try:
-        import google.generativeai as genai
-        resp = genai.embed_content(model=EMBED_MODEL, content=str(text))
+        # 鍵の扱いは生成と同じ経路に通す（その人の鍵を使い、他と混ざらない）
+        import config as _config
+        resp = _config.embed_with_current_key(text, EMBED_MODEL)
+        if resp is None:
+            return None
         # 返り値は通常 {"embedding": [...]} だが、属性アクセスにも備える。
         vec = None
         if isinstance(resp, dict):

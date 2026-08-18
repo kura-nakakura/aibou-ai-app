@@ -9,16 +9,40 @@
  * 外側タブで切替。選択タブは記憶される。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Forge from "@/components/Forge";
 import Studio from "@/components/Studio";
 import LpBuilder from "@/components/LpBuilder";
+import { API_URL, profileGet } from "@/lib/api";
 
 const TABS = ["forge", "app", "lp", "studio"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function Workshop() {
   const [tab, setTab] = useState<Tab>("forge");
+
+  // AI STUDIO（カスタムAI・ワークフロー・自己進化）は持ち主だけのもの。
+  // 分かるまでは隠す側に倒す。実際の遮断はサーバー側で行っている。
+  const [isOwner, setIsOwner] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!API_URL) { setIsOwner(true); return; }
+    profileGet().then((p) => setIsOwner(p.is_owner)).catch(() => setIsOwner(true));
+  }, []);
+
+  const tabs = useMemo(() => {
+    const all = [
+      { key: "forge" as Tab, label: "✦ FORGE" },
+      { key: "app" as Tab, label: "▣ アプリ" },
+      { key: "lp" as Tab, label: "◫ LP / HP" },
+      { key: "studio" as Tab, label: "⚙ AI STUDIO", ownerOnly: true },
+    ];
+    return isOwner === false ? all.filter((t) => !t.ownerOnly) : all;
+  }, [isOwner]);
+
+  // 持ち主専用タブを開いたまま権限が変わった／保存されていた場合に備える
+  useEffect(() => {
+    if (isOwner === false && tab === "studio") setTab("forge");
+  }, [isOwner, tab]);
 
   useEffect(() => {
     try {
@@ -33,12 +57,7 @@ export default function Workshop() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="mx-auto flex flex-wrap items-center justify-center gap-1.5">
-        {([
-          { key: "forge", label: "✦ FORGE" },
-          { key: "app", label: "▣ アプリ" },
-          { key: "lp", label: "◫ LP / HP" },
-          { key: "studio", label: "⚙ AI STUDIO" },
-        ] as const).map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             type="button"
