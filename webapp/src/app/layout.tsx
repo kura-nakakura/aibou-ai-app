@@ -23,10 +23,10 @@ const shareTechMono = Share_Tech_Mono({
 });
 
 export const metadata: Metadata = {
-  // ブランドは AIbou（相棒）、その中で動くシステムが THE FORGE OS。
+  // ブランドは AIbou、その中で動くシステムが THE FORGE OS。
   // 2つ名で並べる（ホーム画面のラベルは短い方＝AIbou を使う）。
   title: "AIbou — THE FORGE OS",
-  description: "AIbou（相棒）— あなた専属のAIアシスタント。THE FORGE OS で動きます。",
+  description: "AIbou — あなた専属のAIアシスタント。THE FORGE OS で動きます。",
   applicationName: "AIbou",
   manifest: "/manifest.webmanifest",
   appleWebApp: {

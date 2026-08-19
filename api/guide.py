@@ -16,7 +16,7 @@
 
 import config
 
-APP_NAME = "AIbou（相棒）"
+APP_NAME = "AIbou"
 
 # 各節: id / title / summary / steps（手順）/ notes（注意・前提）
 SECTIONS = [

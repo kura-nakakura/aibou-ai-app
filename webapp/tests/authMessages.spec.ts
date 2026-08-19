@@ -11,7 +11,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
-  authNotice, validateCredentials, NOTICE_COLOR,
+  authNotice, validateCredentials, confirmState, NOTICE_COLOR,
 } from "../src/lib/authMessages";
 
 /* ── Supabaseの英語 → 日本語 ────────────────────────────────────── */
@@ -84,9 +84,47 @@ test("valid credentials pass, and whitespace around the address is tolerated", (
 
 test("sign-up requires 6+ characters, sign-in does not", () => {
   // 新規作成のときだけ長さを見る。既存アカウントの短いパスワードを弾かない。
-  expect(validateCredentials("me@example.com", "12345", "signup")?.field).toBe("password");
-  expect(validateCredentials("me@example.com", "123456", "signup")).toBeNull();
+  expect(validateCredentials("me@example.com", "12345", "signup", "12345")?.field).toBe("password");
+  expect(validateCredentials("me@example.com", "123456", "signup", "123456")).toBeNull();
   expect(validateCredentials("me@example.com", "12345", "signin")).toBeNull();
+});
+
+/* ── 確認用パスワード ────────────────────────────────────────────── */
+test("新規登録は確認用の一致を求める", () => {
+  // 1回しか打たないと、打ち間違えたまま登録が通り、次から入れなくなる。
+  // 本人には打ち間違いだと分からないので、ここで必ず止める。
+  const missing = validateCredentials("me@example.com", "pw123456", "signup");
+  expect(missing?.field).toBe("confirm");
+  expect(missing?.text).toContain("確認用");
+
+  const mismatch = validateCredentials("me@example.com", "pw123456", "signup", "pw12345X");
+  expect(mismatch?.field).toBe("confirm");
+  expect(mismatch?.text).toContain("一致しません");
+
+  expect(validateCredentials("me@example.com", "pw123456", "signup", "pw123456")).toBeNull();
+});
+
+test("サインインでは確認用を求めない", () => {
+  // 既存アカウントで入るときに、確認欄を出すのは邪魔なだけ
+  expect(validateCredentials("me@example.com", "pw123456", "signin")).toBeNull();
+  expect(validateCredentials("me@example.com", "pw123456", "signin", "")).toBeNull();
+});
+
+test("長さ不足のほうを先に伝える", () => {
+  // 一致していても短ければ通らない。指摘は1つずつ、直せる順に出す。
+  const r = validateCredentials("me@example.com", "123", "signup", "123");
+  expect(r?.field).toBe("password");
+});
+
+test("確認欄の状態は 空 / 一致 / 不一致 の3つ", () => {
+  expect(confirmState("pw123456", "")).toBe("empty");
+  expect(confirmState("pw123456", "pw123456")).toBe("match");
+  expect(confirmState("pw123456", "pw12345")).toBe("mismatch");
+  // 打っている途中は不一致だが、それを伝えるのは正しい（打ち終わってからでは遅い）
+  expect(confirmState("pw123456", "p")).toBe("mismatch");
+  // 大文字小文字・空白も別物として扱う
+  expect(confirmState("PW123456", "pw123456")).toBe("mismatch");
+  expect(confirmState("pw123456", "pw123456 ")).toBe("mismatch");
 });
 
 /* ── 色 ─────────────────────────────────────────────────────────── */
