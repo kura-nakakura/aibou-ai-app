@@ -13,6 +13,7 @@
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { codeGenerateStream, ghRepos, ghImport, ghPush, API_URL, type CodeFile, type ChatTurn, type GhRepo, type CodeGenerateResult } from "@/lib/api";
+import { explain } from "@/lib/needs";
 import Markdown from "@/components/Markdown";
 import {
   buildRunDoc, buildTestDoc, testFiles, RUN_SANDBOX, RUN_CHANNEL,
@@ -157,7 +158,7 @@ export default function CodeMode() {
     try {
       setGhList(await ghRepos());
     } catch (e) {
-      setGhError(e instanceof Error ? e.message : "リポジトリ一覧の取得に失敗しました");
+      setGhError(explain(e, "リポジトリ一覧の取得"));
     } finally {
       setGhBusy(false);
     }
@@ -189,7 +190,7 @@ export default function CodeMode() {
       setUndoSnap(null);
       setPreview(false);
     } catch (e) {
-      setGhError(e instanceof Error ? e.message : "インポートに失敗しました");
+      setGhError(explain(e, "取り込み"));
     } finally {
       setGhBusy(false);
     }

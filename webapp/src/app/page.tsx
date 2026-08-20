@@ -35,6 +35,7 @@ import Capture from "@/components/Capture";
 import SnsMode from "@/components/SnsMode";
 import Home from "@/components/Home";
 import Guide from "@/components/Guide";
+import NeedsNotice from "@/components/NeedsNotice";
 import Income from "@/components/Income";
 import Keychain from "@/components/Keychain";
 import LifeMode from "@/components/LifeMode";
@@ -315,6 +316,15 @@ function Hud() {
           animate={{ opacity: 1, rotateX: 0, y: 0, scale: 1 }}
           transition={{ type: "spring", stiffness: 320, damping: 30 }}
         >
+          {/* 「この画面を使うには◯◯を設定してください」を、操作より先に出す。
+              押した先で 401 や 503 の数字を見せられても、何をすればいいのか
+              分からないため。足りているときは何も出ない。 */}
+          {loaded && view !== "guide" && (
+            <div className="mx-auto w-full max-w-3xl shrink-0">
+              <NeedsNotice mode={view} />
+            </div>
+          )}
+
           {loaded && view === "home" && <Home settings={settings} onNavigate={setView} />}
           {loaded && view === "chat" && (
             <Chat settings={settings} voiceReplies={voiceReplies} onStateChange={setCoreState} />
