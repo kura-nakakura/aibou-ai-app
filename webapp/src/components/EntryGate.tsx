@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CoreOrb from "./CoreOrb";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import {
-  authErrorFromHash, authNotice, confirmState, NOTICE_COLOR, validateCredentials,
+  authErrorFromHash, authNotice, confirmState, NOTICE_COLOR, signUpOutcome, validateCredentials,
   type AuthNotice,
 } from "@/lib/authMessages";
 import { SIGNUP_SUMMARY } from "@/lib/policy";
@@ -113,13 +113,24 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
       if (authMode === "signup") {
         // 戻り先を明示する。指定しないと Supabase 側の Site URL
         // （初期値は http://localhost:3000）へ飛ばされ、確認リンクが死ぬ。
-        const { error: e } = await supabase.auth.signUp({
+        const { data, error: e } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: { emailRedirectTo: window.location.origin },
         });
-        if (e) setAuthMsg(authNotice(e.message));
-        else setAuthMsg({ text: "確認メールを送りました。リンクを開いてからサインインしてください", tone: "ok" });
+        if (e) {
+          setAuthMsg(authNotice(e.message));
+        } else {
+          // 登録済みのアドレスでも Supabase はエラーを返さずメールも送らない。
+          // そのまま成功扱いにすると、来ないメールを待たせ続けることになる。
+          const out = signUpOutcome(data?.user, data?.session);
+          setAuthMsg(out.notice);
+          if (out.switchToSignIn) {
+            setAuthMode("signin");
+            setConfirm("");
+            pwRef.current?.focus();
+          }
+        }
       } else {
         const { error: e } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (e) setAuthMsg(authNotice(e.message));

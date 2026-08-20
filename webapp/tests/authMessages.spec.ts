@@ -11,7 +11,8 @@
 
 import { test, expect } from "@playwright/test";
 import {
-  authNotice, authErrorFromHash, validateCredentials, confirmState, NOTICE_COLOR,
+  authNotice, authErrorFromHash, signUpOutcome, validateCredentials, confirmState,
+  NOTICE_COLOR,
 } from "../src/lib/authMessages";
 
 /* ── Supabaseの英語 → 日本語 ────────────────────────────────────── */
@@ -125,6 +126,44 @@ test("確認欄の状態は 空 / 一致 / 不一致 の3つ", () => {
   // 大文字小文字・空白も別物として扱う
   expect(confirmState("PW123456", "pw123456")).toBe("mismatch");
   expect(confirmState("pw123456", "pw123456 ")).toBe("mismatch");
+});
+
+/* ── 登録済みアドレスの見分け ────────────────────────────────────── */
+test("登録済みのアドレスは「送りました」と言わない", () => {
+  // Supabase は登録済みかどうかを外から探れないよう、登録済みでも
+  // エラーを返さず成功のように振る舞い、メールも送らない。
+  // 成功扱いにすると、来ないメールを永久に待たせることになる（実際に踏んだ）。
+  const out = signUpOutcome({ identities: [] }, null);
+  expect(out.notice.text).toContain("登録済み");
+  expect(out.notice.text).not.toContain("送りました");
+  expect(out.switchToSignIn).toBeTruthy();      // サインイン側へ寄せる
+  expect(out.notice.tone).toBe("info");         // 利用者の失敗ではない
+});
+
+test("登録済みのときは、パスワード再設定の逃げ道も示す", () => {
+  // パスワードを忘れて再登録を試す人が多い。行き止まりにしない
+  expect(signUpOutcome({ identities: [] }, null).notice.text).toContain("パスワードを忘れた");
+});
+
+test("新規のアドレスは、確認メールの案内を出す", () => {
+  const out = signUpOutcome({ identities: [{ id: "x" }] }, null);
+  expect(out.notice.text).toContain("確認メール");
+  expect(out.switchToSignIn).toBeFalsy();
+});
+
+test("メール確認が無効な設定なら、その場で作成完了", () => {
+  // session が返る = すぐ使える。届かないメールを待たせない
+  const out = signUpOutcome({ identities: [] }, { access_token: "t" });
+  expect(out.notice.text).toContain("作成しました");
+  expect(out.switchToSignIn).toBeFalsy();
+});
+
+test("返り値の形が想定外でも、案内を止めない", () => {
+  // identities が無い／null で返る版に当たっても落ちない
+  expect(signUpOutcome(null, null).notice.text).toContain("確認メール");
+  expect(signUpOutcome({}, null).notice.text).toContain("確認メール");
+  expect(signUpOutcome({ identities: null }, null).notice.text).toContain("確認メール");
+  expect(signUpOutcome(undefined, null).notice.text).toContain("確認メール");
 });
 
 /* ── 確認メールのリンクから戻ってきたとき ────────────────────────── */

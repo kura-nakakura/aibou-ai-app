@@ -59,6 +59,50 @@ const MAP: { match: RegExp; text: string; tone: AuthNotice["tone"] }[] = [
   },
 ];
 
+/** アカウント作成を試したあと、画面がどう振る舞うか。 */
+export interface SignUpOutcome {
+  notice: AuthNotice;
+  /** サインイン側へ切り替えるべきか（すでに登録済みのとき）。 */
+  switchToSignIn: boolean;
+}
+
+/**
+ * signUp の結果から、利用者に何と伝えるかを決める。
+ *
+ * Supabase は「そのアドレスが登録済みかどうか」を外から探れないように、
+ * 登録済みでもエラーを返さず成功のように振る舞い、メールも送らない。
+ * 返り値をそのまま成功として扱うと「確認メールを送りました」と出したまま
+ * いつまでも届かず、原因が誰にも分からなくなる（実際に踏んだ）。
+ *
+ * 見分け方: 登録済みのとき user.identities が空配列で返る。
+ */
+export function signUpOutcome(
+  user: { identities?: unknown[] | null } | null | undefined,
+  session: unknown,
+): SignUpOutcome {
+  // メール確認が無効な設定では、その場でセッションが返る
+  if (session) {
+    return {
+      notice: { text: "アカウントを作成しました", tone: "ok" },
+      switchToSignIn: false,
+    };
+  }
+  if (user && Array.isArray(user.identities) && user.identities.length === 0) {
+    return {
+      notice: {
+        text: "このメールアドレスは登録済みです。パスワードを入れてサインインしてください"
+            + "（分からなければ「パスワードを忘れた」から再設定できます）",
+        tone: "info",
+      },
+      switchToSignIn: true,
+    };
+  }
+  return {
+    notice: { text: "確認メールを送りました。リンクを開いてからサインインしてください", tone: "ok" },
+    switchToSignIn: false,
+  };
+}
+
 /**
  * 確認メールのリンクから戻ってきたときのエラーを読み取る。
  *
