@@ -57,19 +57,26 @@ export interface IncomeSummary {
 }
 
 /** Build request headers, adding the bearer token when configured. */
+/**
+ * 「通してよいか（通行証）」と「誰か（本人確認）」は別物として送る。
+ *
+ * 以前はログインすると Authorization を JWT で上書きしていた。サーバーが
+ * SUPABASE_JWT_SECRET を持たない構成では JWT を検証できないため、
+ * それまで通っていた共通トークンを捨てた結果「ログインした瞬間に全部401」に
+ * なった（実際に踏んだ）。
+ *
+ * そこで、確実に通る資格情報があるならそれを Authorization に残し、
+ * 本人確認は別のヘッダで渡す。サーバーの設定がどの段階でも動く。
+ */
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { ...(extra || {}) };
-  // ログイン中は Supabase の JWT を優先（バンドル埋め込みトークン不要の実効認証）。
   const jwt = getAccessToken();
-  if (jwt) {
-    headers["Authorization"] = `Bearer ${jwt}`;
-    // 共通トークンも別ヘッダで添える。
-    // サーバーが SUPABASE_JWT_SECRET を持たない構成だと JWT を検証できず、
-    // 「ログインした瞬間に全部401になる」ため（実際に踏んだ）。
-    // 両方の設定が済んだら APP_TOKEN は外してよい。
-    if (API_TOKEN) headers["X-App-Token"] = API_TOKEN;
-  } else if (API_TOKEN) {
-    headers["Authorization"] = `Bearer ${API_TOKEN}`;
+
+  if (API_TOKEN) {
+    headers["Authorization"] = `Bearer ${API_TOKEN}`;   // 通行証（確実に通る）
+    if (jwt) headers["X-Supabase-Token"] = jwt;         // 誰か（利用者ごとの分離用）
+  } else if (jwt) {
+    headers["Authorization"] = `Bearer ${jwt}`;         // 通行証も本人確認もJWT
   }
   return headers;
 }

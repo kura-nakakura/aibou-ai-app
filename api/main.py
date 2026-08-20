@@ -146,20 +146,32 @@ def _verify_supabase_jwt(token: str) -> bool:
     return _decode_supabase_jwt(token) is not None
 
 
-async def current_user(authorization: Optional[str] = Header(default=None)) -> str:
-    """ログイン中の利用者ID（SupabaseのJWTの sub）。特定できなければ空文字。"""
-    if authorization and authorization.strip().lower().startswith("bearer "):
-        claims = _decode_supabase_jwt(authorization.strip()[7:].strip())
+def _identity_claims(authorization: Optional[str], x_supabase_token: Optional[str]) -> dict:
+    """「誰か」を取り出す。
+
+    通行証（Authorization）と本人確認（X-Supabase-Token）は別物。
+    APP_TOKEN を使う構成では Authorization に共通トークンが入るので、
+    本人確認は別ヘッダから読む必要がある。両方見て、読めたほうを使う。
+    """
+    if x_supabase_token:
+        claims = _decode_supabase_jwt(x_supabase_token.strip())
         if claims:
-            return str(claims.get("sub") or "")
-    return ""
-
-
-async def current_claims(authorization: Optional[str] = Header(default=None)) -> dict:
-    """ログイン中の利用者の claims（sub / email など）。分からなければ空dict。"""
+            return claims
     if authorization and authorization.strip().lower().startswith("bearer "):
         return _decode_supabase_jwt(authorization.strip()[7:].strip()) or {}
     return {}
+
+
+async def current_user(authorization: Optional[str] = Header(default=None),
+                       x_supabase_token: Optional[str] = Header(default=None)) -> str:
+    """ログイン中の利用者ID（SupabaseのJWTの sub）。特定できなければ空文字。"""
+    return str(_identity_claims(authorization, x_supabase_token).get("sub") or "")
+
+
+async def current_claims(authorization: Optional[str] = Header(default=None),
+                         x_supabase_token: Optional[str] = Header(default=None)) -> dict:
+    """ログイン中の利用者の claims（sub / email など）。分からなければ空dict。"""
+    return _identity_claims(authorization, x_supabase_token)
 
 
 def is_owner_claims(claims: Optional[dict]) -> bool:
@@ -205,30 +217,32 @@ async def use_own_database(user_id: str = Depends(current_user)):
 
 async def require_auth(authorization: Optional[str] = Header(default=None),
                        x_app_token: Optional[str] = Header(default=None),
+                       x_supabase_token: Optional[str] = Header(default=None),
                        _db: str = Depends(use_own_database)) -> None:
-    """認証。次のいずれかで通過:
-      1) APP_TOKEN 設定時: Authorization: Bearer <APP_TOKEN> の一致
-      2) SUPABASE_JWT_SECRET 設定時: Supabase ログインの JWT（HS256）が有効
-      3) APP_TOKEN 設定時: X-App-Token ヘッダの一致
+    """通してよいかの判定。次のいずれかで通過:
+      1) APP_TOKEN 設定時: Authorization: Bearer <APP_TOKEN>、または X-App-Token の一致
+      2) SUPABASE_JWT_SECRET 設定時: Supabase ログインの JWT が有効
+         （Authorization / X-Supabase-Token のどちらでもよい）
     APP_TOKEN も REQUIRE_AUTH も無ければ従来どおりオープン。
-    REQUIRE_AUTH=1 なら上記いずれかを必須にする（バンドル埋め込みトークン不要の
-    実効的な保護は「SUPABASE_JWT_SECRET + REQUIRE_AUTH=1」の組み合わせ）。
     /health はこの依存を付けない。
 
-    3 がある理由: ログインするとフロントは Authorization に JWT を載せるため、
-    サーバーが SUPABASE_JWT_SECRET を持たないと「ログインした瞬間に全部401」に
-    なってしまう。移行中でも動くように、共通トークンを別ヘッダでも受け取る。
-    JWT の設定が済んだら APP_TOKEN は外してよい（外せば 1 と 3 は無効になる）。
-    """
-    token = ""
-    if authorization and authorization.strip().lower().startswith("bearer "):
-        token = authorization.strip()[7:].strip()
+    通行証と本人確認を分けている理由:
+    フロントは、確実に通る資格情報があればそれを Authorization に置き、
+    「誰か」は X-Supabase-Token で別に送る。以前は Authorization を JWT で
+    上書きしていたため、サーバーが JWT を検証できない構成では、それまで
+    通っていた共通トークンごと失われて全部401になった（実際に踏んだ）。
 
-    if config.APP_TOKEN and token == config.APP_TOKEN:
-        return
-    if _verify_supabase_jwt(token):
-        return
-    if config.APP_TOKEN and (x_app_token or "").strip() == config.APP_TOKEN:
+    人に配るときは「SUPABASE_JWT_SECRET + REQUIRE_AUTH=1」にして、
+    APP_TOKEN は外すこと（外すと 1 の経路が消える）。
+    """
+    bearer = ""
+    if authorization and authorization.strip().lower().startswith("bearer "):
+        bearer = authorization.strip()[7:].strip()
+
+    if config.APP_TOKEN:
+        if bearer == config.APP_TOKEN or (x_app_token or "").strip() == config.APP_TOKEN:
+            return
+    if _verify_supabase_jwt(bearer) or _verify_supabase_jwt((x_supabase_token or "").strip()):
         return
     # どの保護も構成されていなければオープン
     if not config.APP_TOKEN and not config.REQUIRE_AUTH:
