@@ -5,4 +5,4 @@
  * glance whether the live site is serving the latest deployment (vs. a cached
  * old build or a stale immutable deployment URL).
  */
-export const APP_VERSION = "2026.08.19 · ui-r71 SIGNUP DIAGNOSIS";
+export const APP_VERSION = "2026.08.20 · ui-r72 SETUP ALWAYS VISIBLE";

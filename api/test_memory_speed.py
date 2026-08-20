@@ -262,3 +262,75 @@ def test_streaming_replies_are_not_buffered_by_proxies():
         assert r.headers.get("x-accel-buffering") == "no"
         assert "no-transform" in (r.headers.get("cache-control") or "")
         assert r.headers["content-type"].startswith("text/event-stream")
+
+
+# ── ログインした瞬間に全部401、を防ぐ ──────────────────────────────
+# フロントはログインすると Authorization に Supabase の JWT を載せる。
+# サーバーが SUPABASE_JWT_SECRET を持たない構成だと検証できず、
+# APP_TOKEN 時代から動いていたアプリが「ログインした途端に壊れる」。
+# 移行中でも動くよう、共通トークンを別ヘッダでも受け取る。
+def test_logging_in_does_not_break_a_server_that_only_knows_app_token(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import config as cfg
+    import main as main_mod
+
+    monkeypatch.setattr(cfg, "APP_TOKEN", "legacy-shared-token")
+    monkeypatch.setattr(cfg, "SUPABASE_JWT_SECRET", "")     # まだ設定していない
+    monkeypatch.setattr(cfg, "REQUIRE_AUTH", True)
+    c = TestClient(main_mod.app)
+
+    # ログイン後: Authorization は JWT（このサーバーには検証できない）
+    only_jwt = c.get("/tasks", headers={"Authorization": "Bearer some.supabase.jwt"})
+    assert only_jwt.status_code == 401           # これだけだと通らない（従来どおり）
+
+    # フロントは共通トークンも別ヘッダで添えるので、通る
+    both = c.get("/tasks", headers={
+        "Authorization": "Bearer some.supabase.jwt",
+        "X-App-Token": "legacy-shared-token",
+    })
+    assert both.status_code == 200, "ログインすると使えなくなってしまう"
+
+    # 間違ったトークンは通さない
+    wrong = c.get("/tasks", headers={
+        "Authorization": "Bearer some.supabase.jwt",
+        "X-App-Token": "not-the-token",
+    })
+    assert wrong.status_code == 401
+
+
+def test_app_token_header_is_ignored_when_no_app_token_is_configured(monkeypatch):
+    """APP_TOKEN を外したら、このヘッダでは通れないこと。"""
+    from fastapi.testclient import TestClient
+
+    import config as cfg
+    import main as main_mod
+
+    monkeypatch.setattr(cfg, "APP_TOKEN", "")
+    monkeypatch.setattr(cfg, "SUPABASE_JWT_SECRET", "secret")
+    monkeypatch.setattr(cfg, "REQUIRE_AUTH", True)
+    c = TestClient(main_mod.app)
+    assert c.get("/tasks", headers={"X-App-Token": "anything"}).status_code == 401
+
+
+# ── 「使えない理由」を取り違えないこと ────────────────────────────
+def test_database_reason_distinguishes_signed_out_from_unverifiable(monkeypatch):
+    """ログイン済みの人に「ログインしていません」と言わないこと。"""
+    from fastapi.testclient import TestClient
+
+    import config as cfg
+    import main as main_mod
+
+    monkeypatch.setattr(cfg, "APP_TOKEN", "")
+    monkeypatch.setattr(cfg, "REQUIRE_AUTH", False)
+    monkeypatch.setattr(cfg, "SUPABASE_JWT_SECRET", "")
+    c = TestClient(main_mod.app)
+
+    out = c.get("/account/database").json()
+    assert "ログインしていない" in out["reason"]
+
+    # ログインしているのにサーバーが確認できない場合は、そう言う
+    signed = c.get("/account/database",
+                   headers={"Authorization": "Bearer some.jwt"}).json()
+    assert "ログインしていない" not in signed["reason"]
+    assert "SUPABASE_JWT_SECRET" in signed["reason"]

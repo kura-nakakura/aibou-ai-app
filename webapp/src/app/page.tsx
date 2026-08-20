@@ -1024,8 +1024,17 @@ function SettingsPanel({
               </div>
 
               {online ? (
-                <div className="rounded-forge border border-panel p-3 text-[11px] leading-relaxed text-[#60d394]">
-                  ✓ バックエンド接続済み。あとは KEYCHAIN に <b>Gemini API Key</b> を入れれば各AI機能が有効になります。
+                /* 「バックエンド接続済み」だけを大きく出すと、自分のデータベースまで
+                   繋がったと読まれる（実際に誤解された）。別物だとはっきり書く。 */
+                <div className="rounded-forge border border-panel p-3">
+                  <p className="text-[11px] leading-relaxed text-[#60d394]">
+                    ✓ サーバー（頭脳）には繋がっています。
+                  </p>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-fg">
+                    これは<b>あなたのデータベースの接続とは別</b>です。自分のデータを保存するには、
+                    KEYCHAIN の「自分のデータベース」を繋いでください
+                    （繋ぐまでは保存されません）。手順は GUIDE に載っています。
+                  </p>
                 </div>
               ) : process.env.NEXT_PUBLIC_API_URL ? (
                 <div className="rounded-forge border p-3" style={{ borderColor: "#ffd06055" }}>

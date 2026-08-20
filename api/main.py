@@ -204,14 +204,22 @@ async def use_own_database(user_id: str = Depends(current_user)):
 
 
 async def require_auth(authorization: Optional[str] = Header(default=None),
+                       x_app_token: Optional[str] = Header(default=None),
                        _db: str = Depends(use_own_database)) -> None:
     """認証。次のいずれかで通過:
       1) APP_TOKEN 設定時: Authorization: Bearer <APP_TOKEN> の一致
       2) SUPABASE_JWT_SECRET 設定時: Supabase ログインの JWT（HS256）が有効
+      3) APP_TOKEN 設定時: X-App-Token ヘッダの一致
     APP_TOKEN も REQUIRE_AUTH も無ければ従来どおりオープン。
     REQUIRE_AUTH=1 なら上記いずれかを必須にする（バンドル埋め込みトークン不要の
     実効的な保護は「SUPABASE_JWT_SECRET + REQUIRE_AUTH=1」の組み合わせ）。
-    /health はこの依存を付けない。"""
+    /health はこの依存を付けない。
+
+    3 がある理由: ログインするとフロントは Authorization に JWT を載せるため、
+    サーバーが SUPABASE_JWT_SECRET を持たないと「ログインした瞬間に全部401」に
+    なってしまう。移行中でも動くように、共通トークンを別ヘッダでも受け取る。
+    JWT の設定が済んだら APP_TOKEN は外してよい（外せば 1 と 3 は無効になる）。
+    """
     token = ""
     if authorization and authorization.strip().lower().startswith("bearer "):
         token = authorization.strip()[7:].strip()
@@ -219,6 +227,8 @@ async def require_auth(authorization: Optional[str] = Header(default=None),
     if config.APP_TOKEN and token == config.APP_TOKEN:
         return
     if _verify_supabase_jwt(token):
+        return
+    if config.APP_TOKEN and (x_app_token or "").strip() == config.APP_TOKEN:
         return
     # どの保護も構成されていなければオープン
     if not config.APP_TOKEN and not config.REQUIRE_AUTH:
@@ -1175,12 +1185,27 @@ class DatabaseConnectRequest(BaseModel):
 
 
 @app.get("/account/database")
-async def account_database(user_id: str = Depends(current_user)):
-    """自分のDBの接続状態。鍵の値は返さない（マスクのみ）。"""
-    if not user_id:
-        return {"available": False,
-                "reason": "ログインしていないため、個人のデータベースは使えません"}
-    return {"available": True, **tenancy.status(user_id)}
+async def account_database(user_id: str = Depends(current_user),
+                           authorization: Optional[str] = Header(default=None)):
+    """自分のDBの接続状態。鍵の値は返さない（マスクのみ）。
+
+    「使えない」理由を1つの文言でまとめると、ログイン済みの人にまで
+    「ログインしていません」と言ってしまい、原因を探せなくなる（実際に踏んだ）。
+    本当に未ログインなのか、サーバー側が確認できないのかを分けて返す。
+    """
+    if user_id:
+        return {"available": True, **tenancy.status(user_id)}
+
+    signed_in = bool(authorization and authorization.strip().lower().startswith("bearer "))
+    if signed_in and not config.SUPABASE_JWT_SECRET:
+        return {"available": False, "reason":
+                "サーバー側でログインを確認する設定（SUPABASE_JWT_SECRET）が未設定のため、"
+                "個人のデータベースを使えません。管理者に設定を依頼してください"}
+    if signed_in:
+        return {"available": False, "reason":
+                "ログイン情報を確認できませんでした。一度サインアウトして入り直してください"}
+    return {"available": False,
+            "reason": "ログインしていないため、個人のデータベースは使えません"}
 
 
 @app.post("/account/database/test")
@@ -1259,38 +1284,25 @@ async def guide(_auth: None = Depends(require_auth), claims: dict = Depends(curr
     return {
         "sections": guide_mod.sections(owner=owner),
         "modes": guide_mod.modes(owner=owner),
-        "setup": _setup_with_schema(),
         "is_owner": owner,
         **guide_mod.status(owner=owner),
     }
 
 
-def _read_schema_sql() -> str:
-    """貼り付け用のSQL全文。リポジトリ同梱のものをそのまま返す。
+@app.get("/guide")
+async def guide(_auth: None = Depends(require_auth), claims: dict = Depends(current_claims)):
+    """アプリの使い方（画面のガイドとCHATが同じ内容を見る）。
 
-    説明書に手で書き写すと、本物のスキーマと必ずズレる。実物を読んで返す。
+    持ち主専用のモードは、持ち主以外の説明書には出さない
+    （使えない機能の説明が並ぶと、壊れているように見えるため）。
     """
-    here = os.path.dirname(os.path.abspath(__file__))
-    for p in (os.path.join(here, "supabase_schema.sql"),
-              os.path.join(os.path.dirname(here), "supabase_schema.sql")):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception:
-            continue
-    return ""
-
-
-def _setup_with_schema() -> list:
-    """はじめる手順。code:"schema" を実際のSQL全文に差し替える。"""
-    sql = _read_schema_sql()
-    out = []
-    for s in guide_mod.setup_steps():
-        if s.get("code") == "schema":
-            s = {**s, "code": sql, "code_lang": "sql",
-                 "code_label": "Supabase の SQL Editor に貼り付けるSQL"}
-        out.append(s)
-    return out
+    owner = is_owner_claims(claims)
+    return {
+        "sections": guide_mod.sections(owner=owner),
+        "modes": guide_mod.modes(owner=owner),
+        "is_owner": owner,
+        **guide_mod.status(owner=owner),
+    }
 
 
 # ── HF MODELS：HuggingFaceのモデルを登録して役割に割り当てる ──────────

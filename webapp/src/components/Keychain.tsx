@@ -336,8 +336,15 @@ function SupabaseVault() {
     try {
       setKeys(await listKeys());
       setError(null);
-    } catch {
-      setError("バックエンドに接続できません。DIAGNOSTICS で BACKEND を確認してください。");
+    } catch (e) {
+      // 401 を「接続できません」と出すと、DIAGNOSTICS が「接続済み」と言って
+      // いるのと食い違い、どちらが本当か分からなくなる（実際に踏んだ）。
+      // 届いているが断られたのか、そもそも届かないのかを分けて伝える。
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(/\(401\)|\(403\)/.test(msg)
+        ? "サーバーがログインを確認できませんでした。一度サインアウトして入り直すか、"
+          + "管理者にサーバー側の認証設定（SUPABASE_JWT_SECRET）を確認してもらってください。"
+        : "バックエンドに接続できません。DIAGNOSTICS で BACKEND を確認してください。");
     } finally {
       setLoading(false);
     }

@@ -213,9 +213,10 @@ test("GUIDE mode opens and shows how to start even without a backend", async ({ 
   await enterApp(page);
   await goMode(page, "GUIDE");
   await expect(page.getByRole("heading", { name: /の説明書/ })).toBeVisible({ timeout: 5_000 });
-  // 未接続でも「まず何をすればいいか」は必ず出す
-  await expect(page.getByText("まずはここから")).toBeVisible();
-  await expect(page.getByText(/KEYCHAIN/)).toBeVisible();
+  // 未接続でも、はじめる手順は最後まで読める（繋ぎ方の案内を、繋がないと
+  // 読めない場所に置かない）。詳細は tests/setup.spec.ts。
+  await expect(page.getByText("はじめる手順（初回だけ）")).toBeVisible();
+  await expect(page.getByText(/KEYCHAIN/).first()).toBeVisible();
 });
 
 test("GUIDE is reachable from the mode launcher and survives a reload", async ({ page }) => {

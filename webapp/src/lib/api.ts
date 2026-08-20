@@ -61,8 +61,16 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { ...(extra || {}) };
   // ログイン中は Supabase の JWT を優先（バンドル埋め込みトークン不要の実効認証）。
   const jwt = getAccessToken();
-  if (jwt) headers["Authorization"] = `Bearer ${jwt}`;
-  else if (API_TOKEN) headers["Authorization"] = `Bearer ${API_TOKEN}`;
+  if (jwt) {
+    headers["Authorization"] = `Bearer ${jwt}`;
+    // 共通トークンも別ヘッダで添える。
+    // サーバーが SUPABASE_JWT_SECRET を持たない構成だと JWT を検証できず、
+    // 「ログインした瞬間に全部401になる」ため（実際に踏んだ）。
+    // 両方の設定が済んだら APP_TOKEN は外してよい。
+    if (API_TOKEN) headers["X-App-Token"] = API_TOKEN;
+  } else if (API_TOKEN) {
+    headers["Authorization"] = `Bearer ${API_TOKEN}`;
+  }
   return headers;
 }
 
@@ -2163,24 +2171,10 @@ export interface GuideMode {
   how: string[];
   tips: string[];
 }
-/** 「はじめる手順」1ステップ。code があれば、そのまま貼って使うもの。 */
-export interface GuideSetupStep {
-  id: string;
-  title: string;
-  detail?: string;
-  steps: string[];
-  /** 貼り付ける中身（SQLなど）。長いので折りたたんで出す。 */
-  code?: string;
-  code_lang?: string;
-  code_label?: string;
-  caution?: string[];
-}
 export interface GuideDoc {
   app: string;
   sections: GuideSection[];
   modes: GuideMode[];
-  /** はじめる手順（Supabaseに貼るSQLを含む）。 */
-  setup: GuideSetupStep[];
   /** このアプリの持ち主か（持ち主専用モードの説明を出すかの判断に使う）。 */
   is_owner: boolean;
   section_count: number;
@@ -2234,7 +2228,6 @@ export async function guideGet(): Promise<GuideDoc> {
     app: d.app ?? "AIbou",
     sections: Array.isArray(d.sections) ? d.sections : [],
     modes: Array.isArray(d.modes) ? d.modes : [],
-    setup: Array.isArray(d.setup) ? d.setup : [],
     is_owner: Boolean(d.is_owner),
     section_count: d.section_count ?? 0,
     mode_count: d.mode_count ?? 0,

@@ -16,15 +16,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { API_URL, guideGet, type GuideDoc, type GuideMode, type GuideSetupStep } from "@/lib/api";
+import { API_URL, guideGet, type GuideDoc, type GuideMode } from "@/lib/api";
 import { PolicyBody } from "@/components/Policy";
-
-/** 未接続時にだけ出す、最小限の始め方。 */
-const OFFLINE_STEPS = [
-  "下の CHAT に、やりたいことをそのまま書いてください（例：「明日15時に歯医者の予定を入れて」）",
-  "右上の ⚙ → KEYCHAIN で「自分のデータベース」を繋ぎ、AIの鍵を1つ保存します",
-  "接続できると、ここに全モードの説明書（画面写真つき）が出ます",
-];
+import { SETUP_STEPS, type SetupStep } from "@/lib/setup";
 
 export default function Guide() {
   const [doc, setDoc] = useState<GuideDoc | null>(null);
@@ -59,34 +53,37 @@ export default function Guide() {
         </p>
       </div>
 
+      {/* はじめる手順 — 必ず出す。
+          これは「まだ何も繋がっていない人」が読むもの。バックエンドから
+          取ってくる作りだと、繋がっていないときに手順ごと消えてしまい、
+          「自分のDBを繋ぎたいのに繋ぎ方が書いていない」状態になる。 */}
+      <section className="panel mb-3 p-4">
+        <h3 className="text-[13px] text-fg-strong">はじめる手順（初回だけ）</h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-muted">
+          上から順にやれば終わります。3の「SQL」は、意味が分からなくても
+          コピーして貼るだけで大丈夫です。
+        </p>
+        <div className="mt-3 grid gap-2.5">
+          {SETUP_STEPS.map((s) => <SetupStepCard key={s.id} step={s} />)}
+        </div>
+      </section>
+
       {loading && (
-        <div className="panel p-4 text-center text-[10px] tracking-[0.2em] text-muted label-mono">
+        <div className="panel mb-3 p-4 text-center text-[10px] tracking-[0.2em] text-muted label-mono">
           ◈ LOADING GUIDE…
         </div>
       )}
 
       {!loading && !doc && (
-        <div className="panel p-4">
-          <div className="mb-2 text-[10px] tracking-[0.16em] text-muted label-mono">まずはここから</div>
-          <ol className="ml-4 list-decimal space-y-1.5 text-[12px] leading-relaxed text-fg">
-            {OFFLINE_STEPS.map((s) => <li key={s}>{s}</li>)}
-          </ol>
-          {err && <p className="mt-2 text-[10px] text-muted">{err}</p>}
-        </div>
-      )}
-
-      {/* はじめる手順 — 渡された人が、自分ひとりで最後まで行けるように */}
-      {doc && doc.setup.length > 0 && (
-        <section className="panel mb-3 p-4">
-          <h3 className="text-[13px] text-fg-strong">はじめる手順（初回だけ）</h3>
-          <p className="mt-1 text-[11px] leading-relaxed text-muted">
-            上から順にやれば終わります。3の「SQL」は、意味が分からなくても
-            コピーして貼るだけで大丈夫です。
+        <div className="panel mb-3 p-4">
+          <p className="text-[12px] leading-relaxed text-fg">
+            各画面の使い方（写真つき）は、バックエンドに繋がると、この下に出ます。
           </p>
-          <div className="mt-3 grid gap-2.5">
-            {doc.setup.map((s) => <SetupStep key={s.id} step={s} />)}
-          </div>
-        </section>
+          {err && <p className="mt-1.5 text-[11px] text-muted">{err}</p>}
+          <p className="mt-1.5 text-[11px] text-muted">
+            上の手順は接続に関係なく読めます。まずは 1 から進めてください。
+          </p>
+        </div>
       )}
 
       {/* 読みもの（はじめに・秘書としての使い方・自分のDB・ベータの注意 など） */}
@@ -227,14 +224,28 @@ export default function Guide() {
  * 貼り付ける中身（SQL）は長いので、既定では畳んでおく。ボタン1つで
  * クリップボードに入るようにしないと、スマホでは全選択すら難しい。
  */
-function SetupStep({ step }: { step: GuideSetupStep }) {
+function SetupStepCard({ step }: { step: SetupStep }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [code, setCode] = useState<string | null>(null);
+  const [codeErr, setCodeErr] = useState(false);
+
+  // 貼り付けるSQLは、アプリ自身が配信しているファイルから取る。
+  // バックエンドに依存させると、繋がっていない人がSQLを取れなくなる。
+  useEffect(() => {
+    if (!step.codeUrl) return;
+    let alive = true;
+    fetch(step.codeUrl, { cache: "force-cache" })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+      .then((t) => { if (alive) setCode(t); })
+      .catch(() => { if (alive) setCodeErr(true); });
+    return () => { alive = false; };
+  }, [step.codeUrl]);
 
   const copy = async () => {
-    if (!step.code) return;
+    if (!code) return;
     try {
-      await navigator.clipboard.writeText(step.code);
+      await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -254,34 +265,47 @@ function SetupStep({ step }: { step: GuideSetupStep }) {
         {step.steps.map((s) => <li key={s}>{s}</li>)}
       </ol>
 
-      {step.code && (
+      {step.codeUrl && (
         <div className="mt-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={copy}
-              className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-3 py-1.5 text-[10px] tracking-[0.12em] text-fg-strong label-mono"
-            >
-              {copied ? "✓ コピーしました" : "⧉ SQLをコピー"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              className="text-[10px] text-muted underline"
-            >
-              {open ? "中身を隠す" : "中身を見る"}
-            </button>
-            <span className="text-[10px] text-muted">
-              {step.code.split("\n").length} 行
-            </span>
-          </div>
-          {step.code_label && (
-            <p className="mt-1 text-[10px] text-muted">{step.code_label}</p>
-          )}
-          {open && (
-            <pre className="mt-2 max-h-64 w-full max-w-full overflow-auto rounded-forge border border-panel bg-[var(--input-bg)] p-2.5 text-[10px] leading-relaxed text-fg">
-              <code>{step.code}</code>
-            </pre>
+          {code ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={copy}
+                  className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-3 py-1.5 text-[10px] tracking-[0.12em] text-fg-strong label-mono"
+                >
+                  {copied ? "✓ コピーしました" : "⧉ SQLをコピー"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen((v) => !v)}
+                  className="text-[10px] text-muted underline"
+                >
+                  {open ? "中身を隠す" : "中身を見る"}
+                </button>
+                <span className="text-[10px] text-muted">{code.split("\n").length} 行</span>
+              </div>
+              {step.codeLabel && (
+                <p className="mt-1 text-[10px] text-muted">{step.codeLabel}</p>
+              )}
+              {open && (
+                <pre className="mt-2 max-h-64 w-full max-w-full overflow-auto rounded-forge border border-panel bg-[var(--input-bg)] p-2.5 text-[10px] leading-relaxed text-fg">
+                  <code>{code}</code>
+                </pre>
+              )}
+            </>
+          ) : codeErr ? (
+            <p className="text-[11px] text-muted">
+              SQLを読み込めませんでした。
+              <a href={step.codeUrl} target="_blank" rel="noopener noreferrer"
+                 className="ml-1 text-[var(--accent)] underline">
+                こちらから開いて
+              </a>
+              コピーしてください。
+            </p>
+          ) : (
+            <p className="text-[10px] text-muted label-mono">SQL を読み込み中…</p>
           )}
         </div>
       )}
