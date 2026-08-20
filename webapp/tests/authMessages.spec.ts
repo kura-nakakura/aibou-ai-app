@@ -11,7 +11,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
-  authNotice, validateCredentials, confirmState, NOTICE_COLOR,
+  authNotice, authErrorFromHash, validateCredentials, confirmState, NOTICE_COLOR,
 } from "../src/lib/authMessages";
 
 /* ── Supabaseの英語 → 日本語 ────────────────────────────────────── */
@@ -125,6 +125,41 @@ test("確認欄の状態は 空 / 一致 / 不一致 の3つ", () => {
   // 大文字小文字・空白も別物として扱う
   expect(confirmState("PW123456", "pw123456")).toBe("mismatch");
   expect(confirmState("pw123456", "pw123456 ")).toBe("mismatch");
+});
+
+/* ── 確認メールのリンクから戻ってきたとき ────────────────────────── */
+test("期限切れのリンクは、再送を案内する", () => {
+  // 実際に踏んだURL。読まずに捨てると「開いたのに何も起きない」画面になる
+  const n = authErrorFromHash(
+    "#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
+  );
+  expect(n).not.toBeNull();
+  expect(n!.text).toContain("再送");
+  expect(n!.tone).toBe("info");        // 利用者の失敗ではないので赤にしない
+  expect(n!.text).not.toMatch(/[A-Za-z]{4,}/);   // 英語をそのまま出さない
+});
+
+test("先頭の # は付いていなくても読める", () => {
+  const a = authErrorFromHash("#error_code=otp_expired");
+  const b = authErrorFromHash("error_code=otp_expired");
+  expect(a?.text).toBe(b?.text);
+});
+
+test("エラーが無ければ何も出さない", () => {
+  expect(authErrorFromHash("")).toBeNull();
+  expect(authErrorFromHash("#")).toBeNull();
+  // ログイン成功時はトークンが載って戻る。これを警告にしてはいけない
+  expect(authErrorFromHash("#access_token=abc&refresh_token=def&type=signup")).toBeNull();
+});
+
+test("知らないエラーは説明文をそのまま見せる", () => {
+  // 黙って握りつぶすと原因の手掛かりが消える
+  const n = authErrorFromHash("#error=server_error&error_description=Something+new+broke");
+  expect(n?.text).toContain("Something new broke");
+});
+
+test("コードが無くても error だけで案内する", () => {
+  expect(authErrorFromHash("#error=access_denied")?.text).toContain("再送");
 });
 
 /* ── 色 ─────────────────────────────────────────────────────────── */

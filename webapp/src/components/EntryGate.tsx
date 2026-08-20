@@ -18,7 +18,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import CoreOrb from "./CoreOrb";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import {
-  authNotice, confirmState, NOTICE_COLOR, validateCredentials, type AuthNotice,
+  authErrorFromHash, authNotice, confirmState, NOTICE_COLOR, validateCredentials,
+  type AuthNotice,
 } from "@/lib/authMessages";
 import { SIGNUP_SUMMARY } from "@/lib/policy";
 import PolicyOverlay from "@/components/Policy";
@@ -52,6 +53,8 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
   // 「知らないうちに自分のデータがどこかへ行っていた」を作らないため。
   const [agreed, setAgreed] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
+  // 確認リンクが期限切れ・使用済みだったとき、再送の導線を出す
+  const [needsResend, setNeedsResend] = useState(false);
 
   useEffect(() => {
     if (supabaseEnabled && supabase) {
@@ -108,7 +111,13 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
     setAuthMsg(null);
     try {
       if (authMode === "signup") {
-        const { error: e } = await supabase.auth.signUp({ email: email.trim(), password });
+        // 戻り先を明示する。指定しないと Supabase 側の Site URL
+        // （初期値は http://localhost:3000）へ飛ばされ、確認リンクが死ぬ。
+        const { error: e } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        });
         if (e) setAuthMsg(authNotice(e.message));
         else setAuthMsg({ text: "確認メールを送りました。リンクを開いてからサインインしてください", tone: "ok" });
       } else {
@@ -122,6 +131,48 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
       setAuthBusy(false);
     }
   }, [authBusy, authMode, email, password, confirm, agreed]);
+
+  /**
+   * 確認リンクから戻ってきたときのエラーを拾って出す。
+   *
+   * Supabase は失敗を «#» のうしろに載せて戻してくる。読まずに捨てると、
+   * リンクを開いたのに何も起きない画面になり「壊れている」と受け取られる。
+   * 読んだあとは hash を消す（再読み込みで同じ警告が出続けないように）。
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const notice = authErrorFromHash(window.location.hash);
+    if (!notice) return;
+    setAuthMsg(notice);
+    setNeedsResend(true);
+    try {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    } catch { /* ignore */ }
+  }, []);
+
+  /** 確認メールをもう一度送る（リンクが期限切れ・使用済みのとき）。 */
+  const resendConfirm = useCallback(async () => {
+    if (!supabase || authBusy) return;
+    if (!email.trim()) {
+      setAuthMsg({ text: "先にメールアドレスを入力してください", tone: "error", field: "email" });
+      emailRef.current?.focus();
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const { error: e } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+        options: { emailRedirectTo: window.location.origin },
+      });
+      setAuthMsg(e ? authNotice(e.message)
+                   : { text: "確認メールを送り直しました。新しいメールのリンクを開いてください", tone: "ok" });
+    } catch (err) {
+      setAuthMsg(authNotice(err));
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [authBusy, email]);
 
   /** パスワードを忘れた場合の再設定メール。スマホで詰まりやすいので導線を出す。 */
   const sendReset = useCallback(async () => {
@@ -374,7 +425,7 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
                     >
                       {authMode === "signup" ? "サインインに戻る" : "アカウントを作成"}
                     </button>
-                    {authMode === "signin" && (
+                    {authMode === "signin" && !needsResend && (
                       <button
                         type="button"
                         onClick={() => void sendReset()}
@@ -382,6 +433,16 @@ export default function EntryGate({ children }: { children: React.ReactNode }) {
                         className="-mx-1 min-h-[40px] px-1 text-right text-[11px] text-muted transition hover:text-fg-strong disabled:opacity-40"
                       >
                         パスワードを忘れた
+                      </button>
+                    )}
+                    {needsResend && (
+                      <button
+                        type="button"
+                        onClick={() => void resendConfirm()}
+                        disabled={authBusy}
+                        className="-mx-1 min-h-[40px] px-1 text-right text-[11px] text-[var(--accent)] underline transition disabled:opacity-40"
+                      >
+                        確認メールを再送
                       </button>
                     )}
                   </div>

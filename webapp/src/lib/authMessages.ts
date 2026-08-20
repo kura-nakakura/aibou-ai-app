@@ -59,6 +59,53 @@ const MAP: { match: RegExp; text: string; tone: AuthNotice["tone"] }[] = [
   },
 ];
 
+/**
+ * 確認メールのリンクから戻ってきたときのエラーを読み取る。
+ *
+ * Supabase は失敗を URL の «#» のうしろに載せて戻してくる。例:
+ *   #error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid...
+ * これを拾って出さないと、利用者はリンクを開いたのに何も起きない画面を見て
+ * 「壊れている」と受け取る（実際に踏んだ）。
+ *
+ * hash は "#..." でも "..." でも受け付ける。エラーが無ければ null。
+ */
+export function authErrorFromHash(hash: string): AuthNotice | null {
+  const raw = (hash || "").replace(/^#/, "");
+  if (!raw) return null;
+  let p: URLSearchParams;
+  try {
+    p = new URLSearchParams(raw);
+  } catch {
+    return null;
+  }
+  const code = (p.get("error_code") || "").toLowerCase();
+  const err = (p.get("error") || "").toLowerCase();
+  if (!code && !err) return null;
+
+  // 期限切れ・使用済み。いちばん多い。
+  if (code.includes("otp_expired") || code.includes("expired")) {
+    return {
+      text: "確認リンクの期限が切れているか、すでに使われています。下の「確認メールを再送」を押してください",
+      tone: "info",
+    };
+  }
+  if (code.includes("email_link_invalid") || code.includes("invalid")) {
+    return {
+      text: "確認リンクが正しくありません。下の「確認メールを再送」から、新しいリンクを受け取ってください",
+      tone: "info",
+    };
+  }
+  if (err.includes("access_denied")) {
+    return {
+      text: "確認リンクが使えませんでした。下の「確認メールを再送」を押してください",
+      tone: "info",
+    };
+  }
+  // 知らないものは説明文をそのまま見せる（黙って握りつぶさない）
+  const desc = (p.get("error_description") || "").replace(/\+/g, " ").trim();
+  return { text: desc || `確認に失敗しました（${err || code}）`, tone: "error" };
+}
+
 /** Supabase のエラー文（英語）を日本語の案内に変換する。 */
 export function authNotice(raw: unknown): AuthNotice {
   const msg = (raw instanceof Error ? raw.message : String(raw ?? "")).trim();
