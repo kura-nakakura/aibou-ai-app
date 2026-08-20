@@ -18,6 +18,13 @@
 export interface SetupStep {
   id: string;
   title: string;
+  /**
+   * ひとことで言うと何をするのか。専門用語を使わない例えで書く。
+   * 「Supabaseを作る」と言われても、何をさせられるのか分からない人向け。
+   */
+  plain: string;
+  /** かかる時間の目安。先に分かると身構えずに済む。 */
+  minutes: string;
   /** なぜ必要か。意味が分かると間違えにくい。 */
   detail?: string;
   /** 実際の操作。見たままの文言で。 */
@@ -29,6 +36,30 @@ export interface SetupStep {
   caution?: string[];
 }
 
+/**
+ * 用語のいいかえ。
+ *
+ * 画面や外部サービスには英語の名前がそのまま出るので、言葉自体は消せない。
+ * 消せない代わりに、そのつど「要するに何か」を並べて置く。
+ */
+export interface Term {
+  word: string;
+  means: string;
+}
+
+export const GLOSSARY: Term[] = [
+  { word: "Supabase（スーパベース）", means: "あなたのデータをしまっておく倉庫。無料で1つ借りられます" },
+  { word: "データベース", means: "その倉庫の中身。タスクや予定が入る場所" },
+  { word: "SQL（エスキューエル）", means: "倉庫に棚を作るための指示書。読まずに貼り付けるだけでOK" },
+  { word: "テーブル", means: "倉庫の中の棚。「タスク用」「予定用」と分かれています" },
+  { word: "service_role キー", means: "倉庫の合鍵。持っている人は中身を全部出し入れできます" },
+  { word: "APIキー", means: "外のサービスを使うための利用券。AIを動かすのに要ります" },
+  { word: "Gemini（ジェミニ）", means: "Googleが作ったAI。このアプリの頭脳として使います" },
+  { word: "プロジェクト", means: "Supabaseで借りる倉庫1つぶんの単位" },
+  { word: "バックエンド", means: "アプリの裏で動いている部分。画面ではなく処理をする側" },
+  { word: "KEYCHAIN（キーチェーン）", means: "設定の中にある、鍵をしまう場所" },
+];
+
 /** 貼り付け用のSQL（アプリ自身が配信する。バックエンド不要）。 */
 export const SCHEMA_SQL_URL = "/supabase_schema.sql";
 
@@ -36,6 +67,8 @@ export const SETUP_STEPS: SetupStep[] = [
   {
     id: "account",
     title: "1. アカウントを作る",
+    plain: "メールアドレスとパスワードを決めるだけです。",
+    minutes: "2分",
     detail: "ログインすると、あなたのデータが他の人と混ざらないように分けられます。",
     steps: [
       "最初の画面で「アカウントを作成」を押す",
@@ -51,10 +84,14 @@ export const SETUP_STEPS: SetupStep[] = [
   },
   {
     id: "supabase-project",
-    title: "2. 自分の保存先（Supabase）を作る",
+    title: "2. 自分の保存先を作る",
+    plain:
+      "あなた専用の「保管庫」を1つ用意します。ここにタスクや予定が入ります。"
+      + "Supabase（スーパベース）という無料のサービスを使います。",
+    minutes: "5分（待ち時間ふくむ）",
     detail:
-      "あなたのタスク・予定・記録は、あなた自身のデータベースに入ります。"
-      + "無料の枠で足ります。作るのは1回だけです。",
+      "あなたのタスク・予定・記録は、ここに入ります。他の人からは見えません。"
+      + "無料の枠で足ります。作るのは最初の1回だけです。",
     steps: [
       "supabase.com を開いて、GitHubアカウントなどで登録する",
       "「New project」を押す",
@@ -66,10 +103,14 @@ export const SETUP_STEPS: SetupStep[] = [
   },
   {
     id: "supabase-sql",
-    title: "3. 保存する場所（テーブル）を作る",
+    title: "3. 保管庫に棚を作る",
+    plain:
+      "「タスク用」「予定用」といった棚を用意します。"
+      + "下のボタンでコピーして、貼り付けて、実行を押すだけ。中身は読まなくて大丈夫です。",
+    minutes: "2分",
     detail:
-      "アプリが読み書きする入れ物を用意します。下のSQLを丸ごと貼って実行するだけです。"
-      + "中身は理解しなくて構いません。",
+      "アプリが読み書きする入れ物を用意します。"
+      + "この文章（SQL といいます）は棚を作る指示書で、意味が分からなくても問題ありません。",
     steps: [
       "Supabase の左メニューから「SQL Editor」を開く",
       "「New query」を押す",
@@ -86,8 +127,12 @@ export const SETUP_STEPS: SetupStep[] = [
   },
   {
     id: "supabase-keys",
-    title: "4. 接続情報を取り出す",
-    detail: "アプリがあなたのデータベースへ入るための、住所と鍵です。",
+    title: "4. 保管庫の住所と鍵を控える",
+    plain:
+      "アプリがあなたの保管庫に入れるように、場所（URL）と合鍵をコピーします。"
+      + "2つの文字列をコピーするだけです。",
+    minutes: "2分",
+    detail: "この2つがないと、アプリはあなたの保管庫を見つけられません。",
     steps: [
       "Supabase の左メニュー下部の「Project Settings」→「API」を開く",
       "「Project URL」をコピーする（https://xxxxx.supabase.co の形）",
@@ -101,7 +146,9 @@ export const SETUP_STEPS: SetupStep[] = [
   },
   {
     id: "connect",
-    title: "5. アプリに繋ぐ",
+    title: "5. アプリと保管庫をつなぐ",
+    plain: "4でコピーした2つを、アプリの設定に貼り付けます。これで保存が始まります。",
+    minutes: "1分",
     detail: "ここまで来れば、あとは貼るだけです。",
     steps: [
       "画面右上の歯車（設定）を押す",
@@ -117,9 +164,12 @@ export const SETUP_STEPS: SetupStep[] = [
   },
   {
     id: "ai-key",
-    title: "6. AIの鍵を入れる",
+    title: "6. AIを使えるようにする",
+    plain:
+      "AIを動かすための「利用券」を1つ取ってきて、アプリに入れます。無料で取れます。",
+    minutes: "3分",
     detail:
-      "AIが考えるための鍵です。管理者が共通の鍵を用意している場合は不要です"
+      "管理者が共通の鍵を用意している場合は不要です"
       + "（設定 → KEYCHAIN で GEMINI_API_KEY が「設定済み」なら飛ばしてください）。",
     steps: [
       "aistudio.google.com/app/apikey を開く",
@@ -135,6 +185,8 @@ export const SETUP_STEPS: SetupStep[] = [
   {
     id: "try",
     title: "7. 使ってみる",
+    plain: "ためしに話しかけて、ちゃんと保存されるか見てみます。",
+    minutes: "1分",
     detail: "ここまでで準備は終わりです。",
     steps: [
       "CHAT に「明日15時に歯医者の予定を入れて」と書いて送る",

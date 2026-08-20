@@ -13,6 +13,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SETUP_STEPS, SCHEMA_SQL_URL } from "../src/lib/setup";
 
+
+/** GUIDEを開く（どのテストからも使う）。 */
+async function openGuide(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.waitForSelector("text=ENTER", { timeout: 10_000 });
+  await page.click("text=ENTER");
+  const off = page.getByText("ENTER OFFLINE");
+  const hud = page.getByLabel("Modes", { exact: true });
+  await Promise.race([
+    off.waitFor({ timeout: 8_000 }).then(() => off.click()).catch(() => {}),
+    hud.waitFor({ timeout: 10_000 }),
+  ]);
+  await hud.waitFor({ timeout: 10_000 });
+  await hud.click();
+  await page.locator("nav").filter({ hasText: "MODES" }).getByText("GUIDE", { exact: true }).click();
+  await page.waitForTimeout(800);
+}
+
 const ROOT = join(__dirname, "..", "..");
 const PUBLIC = join(__dirname, "..", "public");
 
@@ -102,9 +120,49 @@ test("バックエンド未接続でも、はじめる手順が読める", async
   await hud.click();
   await page.locator("nav").filter({ hasText: "MODES" }).getByText("GUIDE", { exact: true }).click();
 
-  await expect(page.getByText("はじめる手順（初回だけ）")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText("2. 自分の保存先（Supabase）を作る")).toBeVisible();
-  await expect(page.getByText("5. アプリに繋ぐ")).toBeVisible();
-  // SQLもここから取れること
-  await expect(page.getByRole("button", { name: /SQLをコピー/ })).toBeVisible({ timeout: 10_000 });
+  // 「はじめる」タブが既定で開いていること
+  await expect(page.getByText("はじめる手順")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("2. 自分の保存先を作る")).toBeVisible();
+  await expect(page.getByText("5. アプリと保管庫をつなぐ")).toBeVisible();
+
+  // 手順を開くと、貼り付けるものが取れること
+  await page.getByText("3. 保管庫に棚を作る").click();
+  await expect(page.getByRole("button", { name: /貼り付けるSQL/ })).toBeVisible({ timeout: 10_000 });
+});
+
+test("閉じていても「何をさせられるのか」が読める", async ({ page }) => {
+  // 見出しだけだと、押して開くまで内容が分からず、身構えてしまう
+  await openGuide(page);
+  await expect(page.getByText(/あなた専用の「保管庫」を1つ用意します/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/中身は読まなくて大丈夫です/)).toBeVisible();
+});
+
+test("どこまで済んだかを覚えている", async ({ page }) => {
+  // 設定は数日に分けてやる人もいる。開き直すたびに最初からでは困る
+  await openGuide(page);
+  await expect(page.getByText("0 / 7 完了")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByText("1. アカウントを作る").click();
+  await page.getByRole("button", { name: /できた（次へ）/ }).click();
+  await expect(page.getByText("1 / 7 完了")).toBeVisible();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await openGuide(page);
+  await expect(page.getByText("1 / 7 完了")).toBeVisible({ timeout: 10_000 });
+});
+
+test("用語のいいかえが読める", async ({ page }) => {
+  await openGuide(page);
+  await page.getByText("聞き慣れない言葉が出てきたら").click();
+  await expect(page.getByText(/あなたのデータをしまっておく倉庫/)).toBeVisible();
+  await expect(page.getByText(/倉庫の合鍵/)).toBeVisible();
+});
+
+test("章がタブで分かれていて、縦に全部並ばない", async ({ page }) => {
+  await openGuide(page);
+  await expect(page.getByRole("tab")).toHaveCount(4);
+  // 「はじめる」を見ているとき、プライバシー本文までは出ていない
+  await expect(page.getByText("あなたのデータがどこに入るか")).toBeHidden();
+  await page.getByRole("tab", { name: /データと安全/ }).click();
+  await expect(page.getByText("あなたのデータがどこに入るか")).toBeVisible();
 });
