@@ -197,18 +197,28 @@ async def require_owner(claims: dict = Depends(current_claims)) -> None:
         raise HTTPException(status_code=403, detail="このモードは管理者専用です")
 
 
-async def use_own_database(user_id: str = Depends(current_user)):
+async def use_own_database(user_id: str = Depends(current_user),
+                           claims: dict = Depends(current_claims)):
     """このリクエストの保存先を「その人のSupabase」に差し替える。
 
     ・接続済み  … その人のクライアント
     ・未接続    … None（保存しない）。管理者の共有DBへ黙って書かないため。
     ・そもそも利用者を特定できない（JWT無し/単独運用）… 差し替えない
       （従来どおりサーバーの既定Supabaseを使う）
+
+    持ち主だけは例外で、未接続でもサーバーの既定DBを使う。
+    そこは元々「持ち主のDB」であり、これまでのデータが入っている。ここで
+    None に差し替えると、認証が通り始めた瞬間に、持ち主の既存データが
+    まるごと見えなくなる（保存もされなくなる）。
     """
     if not user_id:
         yield ""
         return
-    token = config.bind_request_client(tenancy.client_for(user_id))
+    client = tenancy.client_for(user_id)
+    if client is None and is_owner_claims(claims):
+        yield user_id            # 差し替えない = サーバーの既定DBのまま
+        return
+    token = config.bind_request_client(client)
     try:
         yield user_id
     finally:

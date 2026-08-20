@@ -152,3 +152,76 @@ def test_a_forged_identity_is_ignored(monkeypatch):
                                "X-Supabase-Token": forged}).json()
     assert prof["signed_in"] is False
     assert prof["user_id"] == ""
+
+
+# ── 認証が通り始めたとき、既存データが消えて見えないこと ──────────
+# JWT の検証ができるようになると、保存先が「その人のDB」に切り替わる。
+# 持ち主は自分のDBを別途繋いでいないことが多く、そのまま None に差し替えると
+# サーバーの既定DB（＝これまでの保存先）が見えなくなり、データが消えたように
+# 見える。実際に配布直前でこの状態になりかけた。
+def _storage_seen_by(headers) -> object:
+    """そのリクエストの間、保存先として何が使われるかを覗く。"""
+    import config as cfg
+    from fastapi import Depends
+
+    seen = {}
+
+    # 差し替えの効果はリクエストの中だけなので、専用の入口を立てて中から見る
+    probe_app = main.app
+    path = "/__probe_storage"
+    if not any(getattr(r, "path", "") == path for r in probe_app.routes):
+        @probe_app.get(path)
+        async def _probe(_auth: None = Depends(main.require_auth)):
+            _probe.seen = cfg.get_supabase()
+            return {"ok": True}
+        _storage_seen_by.fn = _probe
+    fn = _storage_seen_by.fn
+    fn.seen = "not-run"
+    TestClient(probe_app).get(path, headers=headers)
+    return fn.seen
+
+
+def _token(sub, email):
+    import jwt as pyjwt
+    return pyjwt.encode({"sub": sub, "email": email, "aud": "authenticated",
+                         "exp": 9999999999}, SECRET, algorithm="HS256")
+
+
+def test_owner_keeps_using_the_server_database_when_not_connected(monkeypatch):
+    """持ち主の既存データが、認証が通った瞬間に見えなくならないこと。"""
+    setup_server(monkeypatch, app_token="", jwt_secret=SECRET, require=True)
+    monkeypatch.setattr(config, "OWNER_EMAIL", "boss@example.com")
+
+    default = object()          # サーバーの既定DBの代わり
+    monkeypatch.setattr(config, "_supabase_client", default, raising=False)
+    monkeypatch.setattr(config, "_supabase_tried", True, raising=False)
+    monkeypatch.setattr(main.tenancy, "client_for", lambda uid: None)   # 未接続
+
+    boss = {"Authorization": f"Bearer {_token('boss', 'boss@example.com')}"}
+    assert _storage_seen_by(boss) is default, \
+        "持ち主の保存先が既定DBから外れている（これまでのデータが見えなくなる）"
+
+
+def test_employee_data_never_lands_in_the_admin_database(monkeypatch):
+    """従業員が未接続のときは、どこにも書かない（管理者のDBへ混ぜない）。"""
+    setup_server(monkeypatch, app_token="", jwt_secret=SECRET, require=True)
+    monkeypatch.setattr(config, "OWNER_EMAIL", "boss@example.com")
+    monkeypatch.setattr(config, "_supabase_client", object(), raising=False)
+    monkeypatch.setattr(config, "_supabase_tried", True, raising=False)
+    monkeypatch.setattr(main.tenancy, "client_for", lambda uid: None)
+
+    emp = {"Authorization": f"Bearer {_token('emp', 'emp@example.com')}"}
+    assert _storage_seen_by(emp) is None, "従業員のデータが管理者のDBへ入ってしまう"
+
+
+def test_a_connected_user_uses_their_own_database(monkeypatch):
+    """自分のDBを繋いだ人は、そちらが使われること。"""
+    setup_server(monkeypatch, app_token="", jwt_secret=SECRET, require=True)
+    monkeypatch.setattr(config, "OWNER_EMAIL", "boss@example.com")
+    monkeypatch.setattr(config, "_supabase_client", object(), raising=False)
+    monkeypatch.setattr(config, "_supabase_tried", True, raising=False)
+
+    mine = object()
+    monkeypatch.setattr(main.tenancy, "client_for", lambda uid: mine)
+    emp = {"Authorization": f"Bearer {_token('emp', 'emp@example.com')}"}
+    assert _storage_seen_by(emp) is mine
