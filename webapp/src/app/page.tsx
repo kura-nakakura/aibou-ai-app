@@ -16,7 +16,6 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AiProviderSettings from "@/components/AiProviderSettings";
 import HfModels from "@/components/HfModels";
-import MyDatabase from "@/components/MyDatabase";
 import { applySkin, readSkin, setSkin, SKINS, type Skin } from "@/lib/skin";
 import { CORE_TYPES, readCoreType, setCoreType, type CoreType } from "@/lib/coreType";
 import IntegrationsSettings from "@/components/IntegrationsSettings";
@@ -356,6 +355,7 @@ function Hud() {
             online={online}
             onClose={() => setSettingsOpen(false)}
             onSave={handleSave}
+            onGoExtend={() => { setSettingsOpen(false); setView("extend"); }}
           />
         )}
       </AnimatePresence>
@@ -685,12 +685,14 @@ function SettingsPanel({
   online,
   onClose,
   onSave,
+  onGoExtend,
 }: {
   initial: ChatSettings;
   initialVoice: boolean;
   online: boolean;
   onClose: () => void;
   onSave: (settings: ChatSettings, voice: boolean) => void;
+  onGoExtend: () => void;
 }) {
   const [tab, setTab] = useState<SettingsTab>("core");
   const [name, setName] = useState(initial.name);
@@ -980,12 +982,37 @@ function SettingsPanel({
 
           {tab === "keychain" && (
             <>
-              <div className="mb-3 text-[10px] leading-relaxed text-muted">
-                APIキーを暗号化して保管します。<b className="text-fg">バックエンド接続時は Supabase にサーバー側で暗号化保存</b>（Fernet・DBは暗号文のみ）。
-                未接続時は端末内に暗号化下書き（AES-256）として保存し、接続後に取り込めます。ここで追加・変更・削除できます。
+              {/* 同じ設定が2か所にあると、どちらが本物か分からなくなる。
+                  ふだんの操作は拡張機能に一本化し、ここは逃げ道として残す。 */}
+              <div className="mb-3 rounded-forge border border-panel p-3">
+                <p className="text-[11px] leading-relaxed text-fg">
+                  連携（Supabase・LINE・Google など）は
+                  <b className="text-fg-strong">「拡張機能」</b>にまとめました。
+                  そちらなら、何ができるようになるか・値のとり方まで一緒に出ます。
+                </p>
+                <button
+                  type="button"
+                  onClick={onGoExtend}
+                  className="mt-2 rounded-forge border px-3 py-2 text-[11px] label-mono"
+                  style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}
+                >
+                  拡張機能をひらく
+                </button>
               </div>
-              <MyDatabase />
-              <Keychain />
+
+              <details>
+                <summary className="cursor-pointer text-[11px] text-muted">
+                  上級者向け：キーを名前で直接編集する
+                </summary>
+                <div className="mt-2">
+                  <div className="mb-3 text-[10px] leading-relaxed text-muted">
+                    APIキーを暗号化して保管します。<b className="text-fg">バックエンド接続時は Supabase にサーバー側で暗号化保存</b>（Fernet・DBは暗号文のみ）。
+                    未接続時は端末内に暗号化下書き（AES-256）として保存し、接続後に取り込めます。
+                    拡張機能に無い独自のキーは、ここから追加できます。
+                  </div>
+                  <Keychain />
+                </div>
+              </details>
             </>
           )}
 

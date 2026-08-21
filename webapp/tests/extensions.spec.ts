@@ -78,6 +78,32 @@ test("連携済みの数え方", () => {
   expect(connectedCount(visibleExtensions(false), new Set())).toBe(0);
 });
 
+test("任意項目だけでは連携済みにならない", () => {
+  // メールはサーバー名が任意。アドレスとパスワードが要る
+  const email = EXTENSIONS.find((e) => e.id === "email")!;
+  expect(isConnected(email, new Set(["EMAIL_SMTP_HOST", "EMAIL_IMAP_HOST"]))).toBe(false);
+  expect(isConnected(email, new Set(["EMAIL_ADDRESS", "EMAIL_PASSWORD"]))).toBe(true);
+});
+
+test("実装が無いサービスを載せていない", () => {
+  // 実際に起きた: OpenAI と Leonardo の鍵の欄はあったが、llm.py も imagegen.py も
+  // 見ていなかった。「連携するとこれができます」と書いてある以上、動かないと嘘になる。
+  // Leonardo は実装が無いので台帳から外し、OpenAI は実装を足して残した。
+  const ids = EXTENSIONS.map((e) => e.id);
+  for (const dead of ["leonardo", "youtube", "shutterstock"]) {
+    expect(ids, `${dead} は実装が無い`).not.toContain(dead);
+  }
+  expect(ids).toContain("openai");
+});
+
+test("保存先はこの画面の中で設定できる（別の画面に送らない）", () => {
+  // 「設定→KEYCHAINへ」と案内していたが、そこから設定できないなら
+  // 拡張機能として置いている意味がない
+  const supabase = EXTENSIONS.find((e) => e.id === "supabase")!;
+  expect(supabase.kind).toBe("database");
+  expect(supabase.howto.join("")).not.toContain("KEYCHAIN");
+});
+
 test("LINE は終了した方式を案内していない", () => {
   const line = EXTENSIONS.find((e) => e.id === "line")!;
   // LINE Notify は2025年3月末で終了。手順に混ぜると必ず失敗する

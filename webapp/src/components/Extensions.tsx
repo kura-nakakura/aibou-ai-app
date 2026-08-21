@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   API_URL, deleteKey, googleAuthStartUrl, googleDisconnect, googleStatus,
-  listKeys, profileGet, sendNotify, setKey,
+  listKeys, myDatabase, profileGet, sendNotify, setKey,
 } from "@/lib/api";
 import {
   EXTENSIONS, GROUP_LABEL, GROUP_ORDER, isConnected, visibleExtensions,
@@ -24,11 +24,13 @@ import {
 } from "@/lib/extensions";
 import { explain } from "@/lib/needs";
 import BrandIcon from "@/components/BrandIcon";
+import MyDatabase from "@/components/MyDatabase";
 
 export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") => void }) {
   const [keysSet, setKeysSet] = useState<Set<string>>(new Set());
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
   const [google, setGoogle] = useState<{ configured: boolean; connected: boolean } | null>(null);
+  const [dbOn, setDbOn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Extension | null>(null);
@@ -36,14 +38,17 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
   const load = useCallback(async () => {
     if (!API_URL) { setLoading(false); return; }
     setError(null);
-    const [keys, prof, g] = await Promise.all([
+    const [keys, prof, g, db] = await Promise.all([
       listKeys().catch((e) => { setError(explain(e, "連携状況の読み込み")); return null; }),
       profileGet().catch(() => null),
       googleStatus().catch(() => null),
+      myDatabase().catch(() => null),
     ]);
     if (keys) setKeysSet(new Set(keys.filter((k) => k.set).map((k) => k.name)));
     if (prof) setIsOwner(Boolean(prof.is_owner));
     setGoogle(g);
+    // 既定DBに保存されている人も「保存先は決まっている」ので済み扱いにする
+    setDbOn(Boolean(db?.connected) || Boolean(db?.using_server_db));
     setLoading(false);
   }, []);
 
@@ -54,14 +59,11 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
   /** 連携済みか。Googleは鍵だけでなく「許可」まで済んで初めて使える。 */
   const connectedOf = useCallback((e: Extension) => {
     if (e.kind === "oauth") return Boolean(google?.connected);
-    if (e.kind === "database") return null;      // 専用画面で見せる
+    if (e.kind === "database") return dbOn;
     return isConnected(e, keysSet);
-  }, [google, keysSet]);
+  }, [google, keysSet, dbOn]);
 
-  // 分母は「ここで連携できるもの」だけ。専用画面に任せている保存先を数に
-  // 入れると、全部つないでも満たせない数字になる。
-  const countable = exts.filter((e) => connectedOf(e) !== null);
-  const doneCount = countable.filter((e) => connectedOf(e) === true).length;
+  const doneCount = exts.filter((e) => connectedOf(e) === true).length;
 
   if (!API_URL) {
     return (
@@ -76,7 +78,7 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
       <div className="panel p-3">
         <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
           <span className="text-[10px] tracking-[0.2em] text-muted label-mono">拡張機能</span>
-          <span className="text-[10px] text-muted label-mono">{doneCount} / {countable.length} 連携済み</span>
+          <span className="text-[10px] text-muted label-mono">{doneCount} / {exts.length} 連携済み</span>
         </div>
         <p className="text-[11px] leading-relaxed text-fg">
           使いたいサービスを選んでつなぐと、その分だけできることが増えます。
@@ -265,12 +267,13 @@ function Detail({ ext, connected, google, onClose, onChanged }: {
           </p>
         )}
 
-        {/* ② 保存先が絡むものは専用画面に送る（二重管理にしない） */}
+        {/* ② 保存先はここで直接つなぐ。
+            以前は「設定→KEYCHAINへ」と案内していたが、拡張機能を開いた人が
+            そこから設定できないなら、拡張機能である意味がない。 */}
         {ext.kind === "database" && (
-          <p className="mb-3 text-[11px] leading-relaxed text-fg">
-            設定（右上の歯車）→ KEYCHAIN の「自分のデータベース」から接続します。
-            強い権限の鍵を扱うため、専用の画面にまとめています。
-          </p>
+          <div className="mb-3">
+            <MyDatabase compact />
+          </div>
         )}
 
         {/* ③ 値の入力 */}

@@ -27,7 +27,9 @@ import {
 type Note = { text: string; tone: "error" | "info" | "ok" } | null;
 const COLOR = { error: "#ff9b9b", info: "#ffd07f", ok: "#7fe0a8" } as const;
 
-export default function MyDatabase() {
+/** compact: 拡張機能の中に埋め込むとき。取り方と注意書きは外側が出すので、
+ *  ここでは繰り返さない（同じ文が2回出ると、どちらが正か分からなくなる）。 */
+export default function MyDatabase({ compact = false }: { compact?: boolean } = {}) {
   const [state, setState] = useState<DbState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"" | "test" | "connect" | "migrate" | "off">("");
@@ -243,7 +245,7 @@ export default function MyDatabase() {
             </button>
           </div>
 
-          <details className="mt-1">
+          <details className="mt-1" hidden={compact}>
             <summary className="cursor-pointer text-[10px] text-muted">値のとり方（Supabaseの画面）</summary>
             <ol className="ml-4 mt-1 list-decimal space-y-1 text-[10px] leading-relaxed text-muted">
               <li>supabase.com で自分のプロジェクトを作る（無料枠でOK）</li>
@@ -262,10 +264,12 @@ export default function MyDatabase() {
         </p>
       )}
 
-      <p className="mt-2 text-[9px] leading-relaxed text-muted">
-        service_role キーは強い権限を持ちます。サーバーで暗号化して保管し、画面には伏せ字でしか出しません。
-        他人に渡さないでください。
-      </p>
+      {!compact && (
+        <p className="mt-2 text-[9px] leading-relaxed text-muted">
+          service_role キーは強い権限を持ちます。サーバーで暗号化して保管し、画面には伏せ字でしか出しません。
+          他人に渡さないでください。
+        </p>
+      )}
     </div>
   );
 }

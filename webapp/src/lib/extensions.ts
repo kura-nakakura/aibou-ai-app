@@ -89,14 +89,21 @@ export const EXTENSIONS: Extension[] = [
     tagline: "GPT系を使いたいとき（任意）",
     group: "ai",
     kind: "keys",
-    unlocks: ["生成エンジンとしてGPT系を選べるようになる"],
-    fields: [{ name: "OPENAI_API_KEY", label: "API キー", placeholder: "sk-…", secret: true }],
+    unlocks: [
+      "GPT系で会話・生成する（設定 › CORE で優先エンジンに選べます）",
+      "Gemini も HuggingFace も落ちているときの最後の受け皿になる",
+    ],
+    fields: [
+      { name: "OPENAI_API_KEY", label: "API キー", placeholder: "sk-…", secret: true },
+      { name: "OPENAI_MODEL", label: "モデル名（空でOK）", placeholder: "gpt-4o-mini", optional: true },
+    ],
     howto: [
       "platform.openai.com/api-keys を開く",
       "「Create new secret key」を押す",
       "sk- で始まる文字列をコピーして、ここに貼る",
     ],
-    warning: "無料枠はありません。使った分だけ課金されます。",
+    warning: "無料枠はありません。使った分だけ課金されます。"
+      + "そのため、鍵を入れただけでは先頭では使いません（他が落ちたときの控えになります）。",
   },
 
   /* ── 通知（スマホに届く） ─────────────────────────────────── */
@@ -236,10 +243,15 @@ export const EXTENSIONS: Extension[] = [
     tagline: "エージェントがメールを送る",
     group: "work",
     kind: "keys",
-    unlocks: ["下書きを作ってメールで送る（送信前に確認あり）"],
+    unlocks: [
+      "下書きを作ってメールで送る（送信前に確認あり）",
+      "受信箱の新着を読んで要約する",
+    ],
     fields: [
       { name: "EMAIL_ADDRESS", label: "メールアドレス", placeholder: "you@gmail.com" },
       { name: "EMAIL_PASSWORD", label: "アプリパスワード", secret: true },
+      { name: "EMAIL_SMTP_HOST", label: "送信サーバー（Gmailなら空でOK）", placeholder: "smtp.gmail.com", optional: true },
+      { name: "EMAIL_IMAP_HOST", label: "受信サーバー（Gmailなら空でOK）", placeholder: "imap.gmail.com", optional: true },
     ],
     howto: [
       "Googleアカウント → セキュリティ → 2段階認証プロセス をONにする",
@@ -266,23 +278,12 @@ export const EXTENSIONS: Extension[] = [
       "supabase.com で無料のプロジェクトを作る",
       "Project Settings → API の Project URL と service_role をコピー",
       "Connect → Session pooler の postgresql://… をコピー",
-      "設定 → KEYCHAIN の「自分のデータベース」に貼って接続する",
+      "上の欄に貼って「接続テスト」→「接続する」→「テーブルを作成」",
     ],
     warning: "service_role キーは全権限を持ちます。他の人には渡さないでください。",
   },
 
   /* ── 持ち主だけ ───────────────────────────────────────────── */
-  {
-    id: "leonardo",
-    name: "Leonardo.ai",
-    tagline: "高品質な画像生成（任意）",
-    group: "ai",
-    kind: "keys",
-    ownerOnly: true,
-    unlocks: ["画像生成エンジンとして選べるようになる"],
-    fields: [{ name: "LEONARDO_API_KEY", label: "API キー", secret: true }],
-    howto: ["leonardo.ai にログイン", "API 設定からキーを発行", "ここに貼る"],
-  },
   {
     id: "note",
     name: "note",

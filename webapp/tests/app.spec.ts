@@ -38,6 +38,14 @@ async function goWorkshop(page: Page, tab: "FORGE" | "AI STUDIO") {
 }
 
 /* ── EntryGate ──────────────────────────────────────────────────── */
+/** 設定のKEYCHAINタブで、畳んである「上級者向け：キーを名前で直接編集する」を開く。
+ *  ふだんの連携は拡張機能に移したので、生のキー一覧はここに畳まれている。 */
+async function openRawKeyEditor(page: Page) {
+  await page.getByLabel("Settings").click();
+  await page.getByText("KEYCHAIN", { exact: true }).click();
+  await page.getByText("上級者向け：キーを名前で直接編集する").click();
+}
+
 test("EntryGate renders with THE FORGE OS wordmark", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("THE FORGE OS").first()).toBeVisible({ timeout: 10_000 });
@@ -229,13 +237,14 @@ test("GUIDE is reachable from the mode launcher and survives a reload", async ({
 });
 
 
-test("KEYCHAIN explains where your data is stored before you connect a database", async ({ page }) => {
+test("KEYCHAIN sends you to the one place where connections live", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await page.getByLabel("Settings").click();
-  await page.getByText("KEYCHAIN", { exact: true }).click();
-  // 未接続の人がまず見る場所に、自分のDBの設定があること
-  await expect(page.getByText("自分のデータベース")).toBeVisible({ timeout: 5_000 });
+  await openRawKeyEditor(page);
+  // 同じ設定が2か所にあると、どちらが本物か分からなくなる。
+  // ふだんの連携は拡張機能に一本化し、ここからはそこへ送る。
+  await expect(page.getByText("「拡張機能」")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole("button", { name: "拡張機能をひらく" })).toBeVisible();
 });
 
 /* ── Settings ───────────────────────────────────────────────────── */
@@ -294,16 +303,14 @@ test("Settings CORE tab shows voice + talk speed controls", async ({ page }) => 
 test("Settings KEYCHAIN tab shows API key vault", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await page.getByLabel("Settings").click();
-  await page.getByText("KEYCHAIN", { exact: true }).click();
+  await openRawKeyEditor(page);
   await expect(page.getByText("ACCESS CODE")).toBeVisible({ timeout: 5_000 });
 });
 
 test("KEYCHAIN: encrypted vault stores a key offline (ciphertext at rest)", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await page.getByLabel("Settings").click();
-  await page.getByText("KEYCHAIN", { exact: true }).click();
+  await openRawKeyEditor(page);
 
   // 1) Create the master passcode (setup phase) — works with no backend
   await expect(page.getByText("SET ACCESS CODE")).toBeVisible({ timeout: 5_000 });
@@ -1083,8 +1090,7 @@ test("Settings CORE shows Google/DB integration note (offline)", async ({ page }
 test("KEYCHAIN includes a Google key with its issuance guide", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await page.getByLabel("Settings").click();
-  await page.getByText("KEYCHAIN", { exact: true }).click();
+  await openRawKeyEditor(page);
   await expect(page.getByText("SET ACCESS CODE")).toBeVisible({ timeout: 5_000 });
   await page.getByPlaceholder("パスコード（4文字以上）").fill("test-pass");
   await page.getByPlaceholder("確認のためもう一度").fill("test-pass");
@@ -1098,8 +1104,7 @@ test("KEYCHAIN includes a Google key with its issuance guide", async ({ page }) 
 test("KEYCHAIN includes an email key with its issuance guide", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await page.getByLabel("Settings").click();
-  await page.getByText("KEYCHAIN", { exact: true }).click();
+  await openRawKeyEditor(page);
   await expect(page.getByText("SET ACCESS CODE")).toBeVisible({ timeout: 5_000 });
   await page.getByPlaceholder("パスコード（4文字以上）").fill("test-pass");
   await page.getByPlaceholder("確認のためもう一度").fill("test-pass");
@@ -1167,8 +1172,7 @@ test("Fullscreen toggle hides the CORE header and restores it", async ({ page })
 test("KEYCHAIN: a key's ? button reveals its issuance guide", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await page.getByLabel("Settings").click();
-  await page.getByText("KEYCHAIN", { exact: true }).click();
+  await openRawKeyEditor(page);
   // Create the offline vault so the preset key rows render.
   await expect(page.getByText("SET ACCESS CODE")).toBeVisible({ timeout: 5_000 });
   await page.getByPlaceholder("パスコード（4文字以上）").fill("test-pass");
@@ -1186,8 +1190,7 @@ test("KEYCHAIN: a key's ? button reveals its issuance guide", async ({ page }) =
 test("KEYCHAIN includes a Notion key with its issuance guide", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await page.getByLabel("Settings").click();
-  await page.getByText("KEYCHAIN", { exact: true }).click();
+  await openRawKeyEditor(page);
   await expect(page.getByText("SET ACCESS CODE")).toBeVisible({ timeout: 5_000 });
   await page.getByPlaceholder("パスコード（4文字以上）").fill("test-pass");
   await page.getByPlaceholder("確認のためもう一度").fill("test-pass");
