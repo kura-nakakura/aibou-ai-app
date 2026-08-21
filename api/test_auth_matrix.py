@@ -270,13 +270,18 @@ def test_the_fallback_is_off_once_the_secret_is_set(monkeypatch):
     assert not can_use({"Authorization": f"Bearer {fake}"})
 
 
-def test_the_fallback_respects_an_explicit_require_auth(monkeypatch):
-    """REQUIRE_AUTH=1 と明示している意図は尊重する。"""
+def test_require_auth_without_a_way_to_verify_does_not_lock_you_out(monkeypatch):
+    """REQUIRE_AUTH=1 でも、検証手段が無いなら本人を閉め出さない。
+
+    検証できないのに「ログイン必須」を貫いても、偽のトークンは作り放題なので
+    誰も守れない。守られないまま、正しくログインした本人だけが閉め出される。
+    """
     setup_server(monkeypatch, app_token=APP, jwt_secret="", require=True)
     import jwt as pyjwt
     tok = pyjwt.encode({"sub": "me", "aud": "authenticated", "exp": 9999999999},
                        "other", algorithm="HS256")
-    assert not can_use({"Authorization": f"Bearer {tok}"})
+    assert can_use({"Authorization": f"Bearer {tok}"}), \
+        "設定の組み合わせだけで本人が閉め出されている"
 
 
 def test_random_junk_is_still_refused(monkeypatch):
@@ -292,3 +297,76 @@ def test_profile_reports_whether_login_is_verified(monkeypatch):
     assert client.get("/account/profile").json()["login_verified"] is False
     setup_server(monkeypatch, app_token=APP, jwt_secret=SECRET, require=False)
     assert client.get("/account/profile").json()["login_verified"] is True
+
+
+# ── サーバー自身に原因を説明させる（/diagnose）────────────────────
+# 「401」だけ見えても原因は分からず、当てずっぽうで設定をいじることになる。
+# 認証不要で開けて、何を受け取って、なぜ通す／通さないのかを返す。
+def test_diagnose_is_open_and_reports_the_reason(monkeypatch):
+    setup_server(monkeypatch, app_token=APP, jwt_secret="", require=False)
+    d = client.get("/diagnose").json()
+    assert d["通るか"] is False
+    assert "ログインしていない" in d["理由"]
+    assert d["サーバーの設定"]["共通トークン(APP_TOKEN)"] is True
+    assert d["サーバーの設定"]["ログイン検証(SUPABASE_JWT_SECRET)"] is False
+    assert d["version"]
+
+
+def test_diagnose_explains_why_a_logged_in_request_passes(monkeypatch):
+    setup_server(monkeypatch, app_token=APP, jwt_secret="", require=False)
+    import jwt as pyjwt
+    tok = pyjwt.encode({"sub": "me", "aud": "authenticated", "exp": 9999999999},
+                       "other", algorithm="HS256")
+    d = client.get("/diagnose", headers={"Authorization": f"Bearer {tok}"}).json()
+    assert d["通るか"] is True
+    assert "検証できない" in d["理由"]
+    assert d["受け取ったもの"]["Authorization"] == "ログイン用トークン（署名は未検証）"
+
+
+def test_diagnose_points_at_the_jwt_secret_when_verification_fails(monkeypatch):
+    """設定済みなのに通らない＝別プロジェクトの値、を指摘できること。"""
+    setup_server(monkeypatch, app_token="", jwt_secret=SECRET, require=True)
+    import jwt as pyjwt
+    other = pyjwt.encode({"sub": "me", "aud": "authenticated", "exp": 9999999999},
+                         "a-different-projects-secret", algorithm="HS256")
+    d = client.get("/diagnose", headers={"Authorization": f"Bearer {other}"}).json()
+    assert d["通るか"] is False
+    assert "別プロジェクト" in d["理由"] or "HS256" in d["理由"]
+
+
+def test_diagnose_never_leaks_secrets(monkeypatch):
+    """診断のために秘密を出さないこと。"""
+    monkeypatch.setattr(config, "APP_TOKEN", "super-secret-app-token")
+    monkeypatch.setattr(config, "SUPABASE_JWT_SECRET", "super-secret-jwt")
+    monkeypatch.setattr(config, "REQUIRE_AUTH", True)
+    monkeypatch.setattr(config, "OWNER_EMAIL", "boss@example.com")
+    body = client.get("/diagnose",
+                      headers={"Authorization": "Bearer super-secret-app-token"}).text
+    for secret in ["super-secret-app-token", "super-secret-jwt", "boss@example.com"]:
+        assert secret not in body, f"秘密が漏れている: {secret}"
+
+
+def test_diagnose_matches_what_require_auth_actually_does(monkeypatch):
+    """説明と実際の挙動が食い違わないこと（食い違うと余計に混乱する）。"""
+    import jwt as pyjwt
+    cases = [
+        dict(app_token=APP, jwt_secret="", require=False),
+        dict(app_token=APP, jwt_secret=SECRET, require=True),
+        dict(app_token="", jwt_secret=SECRET, require=True),
+        dict(app_token="", jwt_secret="", require=False),
+    ]
+    tokens = {
+        "なし": {},
+        "共通": {"Authorization": f"Bearer {APP}"},
+        "本物JWT": {"Authorization": f"Bearer {jwt_for()}"},
+        "他所のJWT": {"Authorization": "Bearer " + pyjwt.encode(
+            {"sub": "x", "aud": "authenticated", "exp": 9999999999},
+            "elsewhere", algorithm="HS256")},
+        "ゴミ": {"Authorization": "Bearer nonsense"},
+    }
+    for cfg in cases:
+        setup_server(monkeypatch, **cfg)
+        for name, h in tokens.items():
+            said = client.get("/diagnose", headers=h).json()["通るか"]
+            real = client.get("/tasks", headers=h).status_code != 401
+            assert said is real, f"{cfg} / {name}: 説明({said})と実際({real})が違う"

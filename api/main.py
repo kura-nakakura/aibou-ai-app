@@ -108,6 +108,10 @@ async def _lifespan(_app: "FastAPI"):
         task.cancel()
 
 
+# サーバー側のビルド目印。/diagnose で返す。
+# 「直したはずなのに直らない」ときに、デプロイが届いているかを一目で確かめる。
+APP_VERSION = "2026.08.21 · api-r7 DIAGNOSE"
+
 app = FastAPI(
     title="AIbou Brain API",
     description="JARVIS的パーソナルAIアシスタントのバックエンド（chat / vision / tts / memory / income / video）",
@@ -282,12 +286,17 @@ async def require_auth(authorization: Optional[str] = Header(default=None),
     # SUPABASE_JWT_SECRET が無いサーバーは、ログイン用トークンを検証できない。
     # 「検証できない」を「拒否してよい」と扱うと、設定漏れだけで動いていた
     # アプリが止まる（実際に止めた）。ログインを足す前と同じ扱いに戻す。
+    #
+    # REQUIRE_AUTH=1 でもここは通す。検証する手段が無いのに「ログイン必須」を
+    # 貫くと、正しくログインしている本人まで閉め出すだけで、誰も守れない
+    # （偽のトークンは作り放題なので、拒否しても攻撃者は素通りできる）。
+    # 守りたいなら SUPABASE_JWT_SECRET を設定する必要があり、設定した時点で
+    # この経路は使われなくなる。
+    #
     # ・保護の強さは元のまま。元の APP_TOKEN は公開されるJSに埋め込まれており、
     #   もともと誰でも読める値だったので、ここで下がるものはない。
     # ・この経路で「誰か」は決めない（保存先も持ち主判定も動かさない）。
-    # ・REQUIRE_AUTH=1 を明示している場合は、その意図を尊重して通さない。
-    # ・SUPABASE_JWT_SECRET を設定した時点で、この経路は使われなくなる。
-    if (not config.SUPABASE_JWT_SECRET and not config.REQUIRE_AUTH
+    if (not config.SUPABASE_JWT_SECRET
             and (_looks_like_session_token(bearer)
                  or _looks_like_session_token((x_supabase_token or "").strip()))):
         return
@@ -725,6 +734,84 @@ def _sse(data: dict) -> str:
 async def health():
     """ヘルスチェック（認証不要）。フロントがコールドスタートを温めるのに使う。"""
     return {"status": "ok"}
+
+
+@app.get("/diagnose")
+async def diagnose(authorization: Optional[str] = Header(default=None),
+                   x_app_token: Optional[str] = Header(default=None),
+                   x_supabase_token: Optional[str] = Header(default=None)):
+    """なぜ通らないのかを、サーバー自身に説明させる（認証不要）。
+
+    「401」とだけ見えても、原因はサーバーの設定・送られた資格情報・その
+    組み合わせのどれにでもありうる。当てずっぽうで設定をいじらせないため、
+    実際に何を受け取って、なぜ通す／通さないのかをそのまま返す。
+
+    秘密は返さない。設定されているかどうか（真偽）と、受け取ったものの
+    「形」だけを返す。値そのものは決して出さない。
+    """
+    def shape(token: str) -> str:
+        t = (token or "").strip()
+        if not t:
+            return "なし"
+        if config.APP_TOKEN and t == config.APP_TOKEN:
+            return "共通トークンと一致"
+        if _verify_supabase_jwt(t):
+            return "ログイン用トークン（検証OK）"
+        if _looks_like_session_token(t):
+            return "ログイン用トークン（署名は未検証）"
+        return "不明な文字列"
+
+    bearer = ""
+    if authorization and authorization.strip().lower().startswith("bearer "):
+        bearer = authorization.strip()[7:].strip()
+
+    got = {
+        "Authorization": shape(bearer),
+        "X-Supabase-Token": shape(x_supabase_token or ""),
+        "X-App-Token": shape(x_app_token or ""),
+    }
+
+    # require_auth と同じ順番で判定し、その理由を言葉にする
+    if config.APP_TOKEN and (bearer == config.APP_TOKEN
+                             or (x_app_token or "").strip() == config.APP_TOKEN):
+        passes, why = True, "共通トークン（APP_TOKEN）が一致しました"
+    elif _verify_supabase_jwt(bearer) or _verify_supabase_jwt((x_supabase_token or "").strip()):
+        passes, why = True, "ログイン用トークンの検証に成功しました"
+    elif not config.APP_TOKEN and not config.REQUIRE_AUTH:
+        passes, why = True, "保護が何も設定されていないため、誰でも通ります"
+    elif (not config.SUPABASE_JWT_SECRET
+            and (_looks_like_session_token(bearer)
+                 or _looks_like_session_token((x_supabase_token or "").strip()))):
+        passes, why = True, ("サーバーがログイン用トークンを検証できない設定のため、"
+                             "ログイン前と同じ扱いで通しました")
+    else:
+        passes = False
+        if not bearer and not x_supabase_token and not x_app_token:
+            why = "資格情報が何も送られていません（ログインしていない可能性）"
+        elif config.APP_TOKEN and not config.SUPABASE_JWT_SECRET:
+            why = ("共通トークンが一致せず、ログイン用トークンを検証する設定"
+                   "（SUPABASE_JWT_SECRET）もありません")
+        elif config.SUPABASE_JWT_SECRET:
+            why = ("ログイン用トークンの検証に失敗しました。"
+                   "SUPABASE_JWT_SECRET が別プロジェクトの値か、"
+                   "署名方式が HS256 でない可能性があります")
+        else:
+            why = "どの条件にも当てはまりませんでした"
+
+    return {
+        "version": APP_VERSION,
+        "サーバーの設定": {
+            "共通トークン(APP_TOKEN)": bool(config.APP_TOKEN),
+            "ログイン検証(SUPABASE_JWT_SECRET)": bool(config.SUPABASE_JWT_SECRET),
+            "ログイン必須(REQUIRE_AUTH)": bool(config.REQUIRE_AUTH),
+            "持ち主(OWNER_EMAIL/USER_ID)": bool(config.OWNER_EMAIL or config.OWNER_USER_ID),
+            "保存先(SUPABASE_URL/SERVICE_KEY)": bool(config.SUPABASE_URL and config.SUPABASE_SERVICE_KEY),
+            "AIの鍵(GEMINI_API_KEY)": bool(config.current_gemini_key()),
+        },
+        "受け取ったもの": got,
+        "通るか": passes,
+        "理由": why,
+    }
 
 
 @app.post("/chat")
