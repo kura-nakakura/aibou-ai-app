@@ -146,6 +146,26 @@ def _verify_supabase_jwt(token: str) -> bool:
     return _decode_supabase_jwt(token) is not None
 
 
+def _looks_like_session_token(token: str) -> bool:
+    """Supabase のログイン用トークンの形をしているか（署名は見ない）。
+
+    署名を確かめる材料（SUPABASE_JWT_SECRET）がサーバーに無いときの、
+    最後の受け皿として使う。中身は信用しない＝これで「誰か」は決めない。
+    """
+    parts = (token or "").split(".")
+    if len(parts) != 3 or not all(parts):
+        return False
+    try:
+        import base64
+        import json as _json
+        pad = lambda s: s + "=" * (-len(s) % 4)          # noqa: E731
+        head = _json.loads(base64.urlsafe_b64decode(pad(parts[0])))
+        body = _json.loads(base64.urlsafe_b64decode(pad(parts[1])))
+    except Exception:
+        return False
+    return bool(head.get("alg")) and bool(body.get("sub") or body.get("aud"))
+
+
 def _identity_claims(authorization: Optional[str], x_supabase_token: Optional[str]) -> dict:
     """「誰か」を取り出す。
 
@@ -257,6 +277,21 @@ async def require_auth(authorization: Optional[str] = Header(default=None),
     # どの保護も構成されていなければオープン
     if not config.APP_TOKEN and not config.REQUIRE_AUTH:
         return
+
+    # 最後の受け皿:
+    # SUPABASE_JWT_SECRET が無いサーバーは、ログイン用トークンを検証できない。
+    # 「検証できない」を「拒否してよい」と扱うと、設定漏れだけで動いていた
+    # アプリが止まる（実際に止めた）。ログインを足す前と同じ扱いに戻す。
+    # ・保護の強さは元のまま。元の APP_TOKEN は公開されるJSに埋め込まれており、
+    #   もともと誰でも読める値だったので、ここで下がるものはない。
+    # ・この経路で「誰か」は決めない（保存先も持ち主判定も動かさない）。
+    # ・REQUIRE_AUTH=1 を明示している場合は、その意図を尊重して通さない。
+    # ・SUPABASE_JWT_SECRET を設定した時点で、この経路は使われなくなる。
+    if (not config.SUPABASE_JWT_SECRET and not config.REQUIRE_AUTH
+            and (_looks_like_session_token(bearer)
+                 or _looks_like_session_token((x_supabase_token or "").strip()))):
+        return
+
     raise HTTPException(status_code=401, detail="Unauthorized: valid bearer token required")
 
 
@@ -1294,6 +1329,9 @@ async def account_profile(claims: dict = Depends(current_claims)):
         # 持ち主だけの機能。UIはこの一覧を見て出し分ける
         "owner_only_modes": ["income", "evolve"],
         "owner_configured": bool(config.OWNER_EMAIL or config.OWNER_USER_ID),
+        # サーバーがログインを検証できるか。false のまま人に配ると、
+        # 利用者ごとの分離も持ち主限定も働かない。画面で警告するために返す。
+        "login_verified": bool(config.SUPABASE_JWT_SECRET),
     }
 
 

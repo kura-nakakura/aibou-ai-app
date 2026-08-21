@@ -225,3 +225,70 @@ def test_a_connected_user_uses_their_own_database(monkeypatch):
     monkeypatch.setattr(main.tenancy, "client_for", lambda uid: mine)
     emp = {"Authorization": f"Bearer {_token('emp', 'emp@example.com')}"}
     assert _storage_seen_by(emp) is mine
+
+
+# ── 設定漏れだけでアプリを止めないこと ────────────────────────────
+# SUPABASE_JWT_SECRET が無いサーバーは、ログイン用トークンを検証できない。
+# 「検証できない」を「拒否」にすると、動いていたアプリが止まる（実際に止めた）。
+def test_a_missing_jwt_secret_does_not_break_a_working_app(monkeypatch):
+    """r64 の送り方（JWTだけ）でも、サーバーが未設定なら通ること。"""
+    setup_server(monkeypatch, app_token=APP, jwt_secret="", require=False)
+    # 署名を確かめる手段が無い側の JWT（別の秘密鍵で作った＝検証は不可能）
+    import jwt as pyjwt
+    tok = pyjwt.encode({"sub": "me", "aud": "authenticated", "exp": 9999999999},
+                       "a-secret-this-server-does-not-have", algorithm="HS256")
+    assert can_use({"Authorization": f"Bearer {tok}"}), \
+        "ログインしただけでアプリが止まる"
+
+
+def test_the_fallback_does_not_decide_who_you_are(monkeypatch):
+    """検証できていないトークンで「誰か」を決めないこと。
+
+    ここで身元を認めてしまうと、他人になりすまして持ち主専用モードや
+    他人のDBに入れてしまう。
+    """
+    setup_server(monkeypatch, app_token=APP, jwt_secret="", require=False)
+    monkeypatch.setattr(config, "OWNER_EMAIL", "boss@example.com")
+    import jwt as pyjwt
+    fake = pyjwt.encode({"sub": "attacker", "email": "boss@example.com",
+                         "aud": "authenticated", "exp": 9999999999},
+                        "not-the-real-secret", algorithm="HS256")
+    prof = client.get("/account/profile",
+                      headers={"Authorization": f"Bearer {fake}"}).json()
+    assert prof["signed_in"] is False, "検証していないトークンを信用している"
+    assert prof["is_owner"] is False, "なりすましで持ち主になれる"
+    assert client.get("/income/jobs",
+                      headers={"Authorization": f"Bearer {fake}"}).status_code == 403
+
+
+def test_the_fallback_is_off_once_the_secret_is_set(monkeypatch):
+    """設定が済んだら、検証できないトークンは通さない。"""
+    setup_server(monkeypatch, app_token=APP, jwt_secret=SECRET, require=False)
+    import jwt as pyjwt
+    fake = pyjwt.encode({"sub": "x", "aud": "authenticated", "exp": 9999999999},
+                        "wrong", algorithm="HS256")
+    assert not can_use({"Authorization": f"Bearer {fake}"})
+
+
+def test_the_fallback_respects_an_explicit_require_auth(monkeypatch):
+    """REQUIRE_AUTH=1 と明示している意図は尊重する。"""
+    setup_server(monkeypatch, app_token=APP, jwt_secret="", require=True)
+    import jwt as pyjwt
+    tok = pyjwt.encode({"sub": "me", "aud": "authenticated", "exp": 9999999999},
+                       "other", algorithm="HS256")
+    assert not can_use({"Authorization": f"Bearer {tok}"})
+
+
+def test_random_junk_is_still_refused(monkeypatch):
+    """形をしていないものは通さない。"""
+    setup_server(monkeypatch, app_token=APP, jwt_secret="", require=False)
+    for junk in ["", "hello", "a.b", "a.b.c", "...", "x" * 50]:
+        assert not can_use({"Authorization": f"Bearer {junk}"}), junk
+
+
+def test_profile_reports_whether_login_is_verified(monkeypatch):
+    """未設定のまま配らないよう、画面に出せる形で返すこと。"""
+    setup_server(monkeypatch, app_token=APP, jwt_secret="", require=False)
+    assert client.get("/account/profile").json()["login_verified"] is False
+    setup_server(monkeypatch, app_token=APP, jwt_secret=SECRET, require=False)
+    assert client.get("/account/profile").json()["login_verified"] is True
