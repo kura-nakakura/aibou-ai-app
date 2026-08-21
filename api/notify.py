@@ -1,5 +1,5 @@
 """
-api/notify.py — 外部通知（LINE Notify / Discord / Slack）。
+api/notify.py — 外部通知（LINE / Discord / Slack）。
 
 Keychain に保存されたトークンを使い、ジョブやオートパイロットの結果をスマホへ届ける。
 標準ライブラリ(urllib)のみ。トークン未設定なら何もせず {"ok": False, "skipped": True}
@@ -79,32 +79,49 @@ def _q(s: str) -> str:
     return quote_plus(str(s))
 
 
-def _post_json(url: str, payload: dict) -> bool:
+def _post_json(url: str, payload: dict, headers: Dict[str, str] | None = None) -> bool:
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    head = {"Content-Type": "application/json"}
+    head.update(headers or {})
+    req = urllib.request.Request(url, data=data, headers=head, method="POST")
     with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
         return 200 <= resp.status < 300
 
 
 def send_line(message: str) -> dict:
-    """LINE Notify でメッセージを送る。トークン未設定なら skipped。"""
-    token = keychain.get_key("LINE_NOTIFY_TOKEN")
-    if not token:
-        return {"ok": False, "skipped": True, "channel": "line"}
-    try:
-        ok = _post_form(
-            "https://notify-api.line.me/api/notify",
-            {"message": message},
-            {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-        )
-        return {"ok": ok, "channel": "line"}
-    except Exception as e:
-        return {"ok": False, "error": str(e), "channel": "line"}
+    """LINEへ送る。
+
+    LINE Notify は 2025年3月31日でサービス終了しており、旧トークンでは
+    もう届かない。いまの正規の方法は Messaging API なので、そちらを優先する。
+
+      LINE_CHANNEL_TOKEN … チャネルアクセストークン（必須）
+      LINE_TO_USER_ID    … 宛先。空ならブロードキャスト（友だち全員）。
+                           1人で使うぶんにはブロードキャストで足りる。
+
+    旧 LINE_NOTIFY_TOKEN しか無い人には、黙って失敗せず理由を返す。
+    """
+    channel_token = keychain.get_key("LINE_CHANNEL_TOKEN")
+    if channel_token:
+        to = keychain.get_key("LINE_TO_USER_ID")
+        url = ("https://api.line.me/v2/bot/message/push" if to
+               else "https://api.line.me/v2/bot/message/broadcast")
+        payload: dict = {"messages": [{"type": "text", "text": (message or "")[:4900]}]}
+        if to:
+            payload["to"] = to
+        try:
+            ok = _post_json(url, payload, {"Authorization": f"Bearer {channel_token}"})
+            return {"ok": ok, "channel": "line"}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "channel": "line"}
+
+    if keychain.get_key("LINE_NOTIFY_TOKEN"):
+        # 送信を試みても必ず失敗する。原因が分かる形で返す。
+        return {"ok": False, "channel": "line",
+                "error": "LINE Notify は2025年3月末で終了しました。"
+                         "LINE公式アカウントを作り、LINE_CHANNEL_TOKEN "
+                         "（チャネルアクセストークン）を設定してください"}
+
+    return {"ok": False, "skipped": True, "channel": "line"}
 
 
 def send_discord(message: str) -> dict:

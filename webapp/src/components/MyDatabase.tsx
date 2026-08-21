@@ -8,6 +8,12 @@
  * どこにも保存されない（管理者のDBへ黙って書かない）ので、その状態は
  * はっきり画面に出す。
  *
+ * ただし持ち主だけは例外で、個人接続が無くてもサーバーの既定DBに保存され続ける
+ * （そこが元々「持ち主のDB」で、これまでのデータが入っている）。サーバーが
+ * using_server_db で知らせてくるので、その人には「未接続／消えます」ではなく
+ * 「既定のDBに保存されています」と出す。以前ここを混同して、保存されている人に
+ * 「どこにも保存されていません」と嘘をついていた。
+ *
  * service_role キーは強い権限を持つ。ここでは入力後は伏せて表示し、
  * サーバーは暗号化して保管し、APIはマスクした値しか返さない。
  */
@@ -35,7 +41,10 @@ export default function MyDatabase() {
   const reload = useCallback(async () => {
     const s = await myDatabase();
     setState(s);
-    if (!s.connected) setOpen(true);      // 未接続の人には最初から入力欄を見せる
+    // 未接続の人には最初から入力欄を見せる。ただし既定DBに保存されている人
+    // （持ち主）は困っていないので、勝手に開かない。開いた入力欄はブラウザの
+    // 自動入力に狙われ、Project URL にメールアドレスが入る事故が起きた。
+    if (!s.connected && !s.using_server_db) setOpen(true);
   }, []);
 
   useEffect(() => {
@@ -63,6 +72,10 @@ export default function MyDatabase() {
   }
 
   const connected = Boolean(state?.connected);
+  // 個人接続は無いが、サーバーの既定DBに保存され続けている（持ち主）。
+  // ここを「未接続」と同じ扱いにすると、保存されている人に
+  // 「どこにも保存されていません。再起動すると消えます」と嘘をつくことになる。
+  const onServerDb = !connected && Boolean(state?.using_server_db);
 
   const run = async (kind: typeof busy, fn: () => Promise<Note>) => {
     setBusy(kind);
@@ -114,16 +127,33 @@ export default function MyDatabase() {
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-[10px] tracking-[0.2em] text-muted label-mono">自分のデータベース</span>
         <span className="shrink-0 text-[9px] tracking-[0.1em] label-mono"
-              style={{ color: connected ? "#7fe0a8" : "#ffd07f" }}>
-          ● {connected ? "接続済み" : "未接続"}
+              style={{ color: connected || onServerDb ? "#7fe0a8" : "#ffd07f" }}>
+          ● {connected ? "接続済み" : onServerDb ? "保存されています" : "未接続"}
         </span>
       </div>
 
-      {!connected && (
+      {onServerDb && (
+        <p className="mb-2 text-[10px] leading-relaxed text-fg">
+          いまは<b>このアプリの既定のデータベースに保存されています</b>。
+          これまでのデータもそこにあり、消えていません。
+          <span className="mt-1 block text-muted">
+            別の Supabase に移したいときだけ、下の「別のDBに繋ぐ」から設定してください。
+          </span>
+        </p>
+      )}
+
+      {!connected && !onServerDb && (
         <p className="mb-2 text-[10px] leading-relaxed" style={{ color: "#ffd07f" }}>
           いまは<b>どこにも保存されていません</b>。アプリを再起動すると消えます。
           自分の Supabase を繋ぐと、タスク・予定・ノートがあなたのDBに残ります。
         </p>
+      )}
+
+      {onServerDb && !open && (
+        <button type="button" onClick={() => setOpen(true)}
+                className="mb-1 rounded-forge border border-panel px-2.5 py-1.5 text-[10px] text-fg-strong label-mono">
+          別のDBに繋ぐ
+        </button>
       )}
 
       {connected && state && (
@@ -168,6 +198,7 @@ export default function MyDatabase() {
             onChange={(e) => { setUrl(e.target.value); setNote(null); }}
             placeholder="https://xxxxxxxx.supabase.co"
             aria-label="Supabase の Project URL"
+            name="supabase-project-url" autoComplete="off"
             autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url"
             className="min-h-[44px] w-full rounded-forge border border-[var(--input-bd)] bg-[var(--input-bg)] px-3 text-[13px] text-fg-strong placeholder:text-muted focus:border-[var(--line)] focus:outline-none"
           />
@@ -179,6 +210,7 @@ export default function MyDatabase() {
             type="password"
             placeholder="eyJhbGciOi…"
             aria-label="Supabase の service_role キー"
+            name="supabase-service-role" autoComplete="new-password"
             autoCapitalize="none" autoCorrect="off" spellCheck={false}
             className="min-h-[44px] w-full rounded-forge border border-[var(--input-bd)] bg-[var(--input-bg)] px-3 text-[13px] text-fg-strong placeholder:text-muted focus:border-[var(--line)] focus:outline-none"
           />
@@ -192,6 +224,7 @@ export default function MyDatabase() {
             type="password"
             placeholder="postgresql://postgres:…@…pooler.supabase.com:5432/postgres"
             aria-label="テーブル作成用のDB接続URL"
+            name="supabase-db-url" autoComplete="new-password"
             autoCapitalize="none" autoCorrect="off" spellCheck={false}
             className="min-h-[44px] w-full rounded-forge border border-[var(--input-bd)] bg-[var(--input-bg)] px-3 text-[13px] text-fg-strong placeholder:text-muted focus:border-[var(--line)] focus:outline-none"
           />

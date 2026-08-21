@@ -1677,16 +1677,33 @@ export async function autopilotDelete(id: string): Promise<boolean> {
   return Boolean(data.ok);
 }
 
-/** POST /notify — send a test/manual notification to configured channels. */
-export async function sendNotify(message: string): Promise<{ ok: boolean; sent?: string[]; skipped?: boolean }> {
+/** 1チャンネルぶんの送信結果。どこで失敗したかを画面に出すのに使う。 */
+export interface NotifyChannelResult {
+  channel: string;
+  ok?: boolean;
+  skipped?: boolean;
+  error?: string;
+}
+
+/** POST /notify — send a test/manual notification to configured channels.
+ *  チャンネルごとの結果まで返す。「送りました」だけだと、実際は
+ *  どこにも届いていなくても成功に見えてしまう。 */
+export async function sendNotify(message: string):
+  Promise<{ ok: boolean; sent?: string[]; skipped?: boolean; results?: NotifyChannelResult[] }> {
   const res = await fetch(`${requireApiUrl()}/notify`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ message }),
   });
-  const data = (await res.json().catch(() => ({ ok: false }))) as { ok?: boolean; sent?: string[]; skipped?: boolean };
+  const data = (await res.json().catch(() => ({ ok: false }))) as
+    { ok?: boolean; sent?: string[]; skipped?: boolean; results?: NotifyChannelResult[] };
   if (!res.ok) throw new Error(`Notify failed (${res.status})`);
-  return { ok: Boolean(data.ok), sent: data.sent, skipped: data.skipped };
+  return {
+    ok: Boolean(data.ok),
+    sent: data.sent,
+    skipped: data.skipped,
+    results: Array.isArray(data.results) ? data.results : [],
+  };
 }
 
 /* ---------------- Automations (no-code flows / Zapier-style) ---------------- */
@@ -2263,6 +2280,9 @@ export interface MyDatabase {
   available: boolean;      // ログインしていないと使えない
   reason?: string;
   connected?: boolean;
+  /** 個人接続は無いが、サーバーの既定DBに保存されている（持ち主のみ）。
+   *  これが true のときに「保存されていません」と出すと嘘になる。 */
+  using_server_db?: boolean;
   url?: string;
   masked_key?: string;
   db_url_set?: boolean;
@@ -2315,4 +2335,30 @@ export async function myDatabaseDisconnect(): Promise<{ ok?: boolean; error?: st
     method: "DELETE", headers: authHeaders(),
   });
   return (await res.json().catch(() => ({ error: "解除に失敗しました" })));
+}
+
+/* ---------------- Calendar (app agenda + Google merged) ---------------- */
+export interface CalendarItem {
+  id: string;
+  title: string;
+  date: string;          // YYYY-MM-DD
+  time: string;          // HH:MM（終日なら空）
+  note: string;
+  source: "app" | "google";
+  url: string;
+}
+
+/** GET /agenda/calendar — アプリ内の予定と Googleカレンダーをまとめて取る。 */
+export async function calendarItems(days = 30):
+  Promise<{ items: CalendarItem[]; google_connected: boolean }> {
+  const res = await fetch(`${requireApiUrl()}/agenda/calendar?days=${days}`, {
+    headers: authHeaders(), cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Calendar failed (${res.status})`);
+  const d = (await res.json().catch(() => ({}))) as
+    { items?: CalendarItem[]; google_connected?: boolean };
+  return {
+    items: Array.isArray(d.items) ? d.items : [],
+    google_connected: Boolean(d.google_connected),
+  };
 }

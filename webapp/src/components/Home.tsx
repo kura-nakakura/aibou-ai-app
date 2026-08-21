@@ -42,6 +42,7 @@ import {
 } from "@/lib/homeLayout";
 import Markdown from "@/components/Markdown";
 import FirstRun from "@/components/FirstRun";
+import CalendarPanel from "@/components/CalendarPanel";
 
 type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home" | "guide";
 
@@ -702,9 +703,44 @@ function AgendaPanel({
     setEvents(events.filter((e) => e.id !== id));
   };
 
+  // 一覧とカレンダーの切り替え。選んだほうを覚えておく。
+  //
+  // 読み込みを useEffect でやると、保存する側の effect が初期値で先に走って
+  // 保存済みの選択を上書きしてしまう（再マウントすると元に戻る）。
+  // 最初の描画時点で正しい値を持たせ、保存は押されたときだけにする。
+  const [mode, setMode] = useState<"list" | "month">(() => {
+    try {
+      const m = localStorage.getItem("forge_agenda_mode");
+      return m === "month" ? "month" : "list";
+    } catch {
+      return "list";
+    }
+  });
+  const pickMode = (m: "list" | "month") => {
+    setMode(m);
+    try { localStorage.setItem("forge_agenda_mode", m); } catch { /* ignore */ }
+  };
+
   return (
     <div id="home-agenda" className="glass-silver p-3">
-      <div className="mb-1.5 text-[10px] tracking-[0.2em] text-muted label-mono">予定 — AGENDA</div>
+      {/* 一覧だけだと「来週の火曜は空いているか」が分からない。月の形も見せる。 */}
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-[10px] tracking-[0.2em] text-muted label-mono">予定 — AGENDA</span>
+        <div className="flex shrink-0 gap-1">
+          {(["list", "month"] as const).map((m) => (
+            <button key={m} type="button" onClick={() => pickMode(m)} aria-pressed={mode === m}
+              className="rounded-forge border px-2 py-0.5 text-[9px] label-mono"
+              style={{
+                borderColor: mode === m ? "var(--accent)" : "var(--panel-bd)",
+                color: mode === m ? "var(--fg-strong)" : "var(--muted)",
+              }}>
+              {m === "list" ? "一覧" : "カレンダー"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {mode === "month" && !offline && <div className="mb-2"><CalendarPanel /></div>}
       <div className="flex gap-2">
         <input
           value={text}
@@ -724,7 +760,7 @@ function AgendaPanel({
         </button>
       </div>
 
-      {events.length === 0 ? (
+      {mode === "month" ? null : events.length === 0 ? (
         <p className="mt-2 text-[11px] text-muted">予定はまだありません。エージェントに「明日15時に歯医者」と頼むこともできます。</p>
       ) : (
         <div className="mt-2 flex flex-col gap-1.5">

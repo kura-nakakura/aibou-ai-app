@@ -37,6 +37,7 @@ import Home from "@/components/Home";
 import Guide from "@/components/Guide";
 import NeedsNotice from "@/components/NeedsNotice";
 import SelfCheck from "@/components/SelfCheck";
+import Extensions from "@/components/Extensions";
 import Income from "@/components/Income";
 import Keychain from "@/components/Keychain";
 import LifeMode from "@/components/LifeMode";
@@ -50,7 +51,7 @@ import { listVoices } from "@/lib/voice";
 import { supabase, supabaseEnabled } from "@/lib/supabase";
 import { APP_VERSION } from "@/lib/version";
 
-type View = "chat" | "me" | "sns" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home" | "guide";
+type View = "chat" | "me" | "sns" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home" | "guide" | "extend";
 
 const LS_NAME = "forge_name";
 const LS_PERSONA = "forge_persona";
@@ -144,7 +145,7 @@ function Hud() {
       // Reopen the mode you were using (PWA relaunch lands where you left off).
       let savedView = localStorage.getItem("forge_view") as View | null;
       if (savedView === ("forge" as View)) savedView = "studio"; // 旧FORGEはWORKSHOP(studio)に統合
-      if (savedView && ["chat", "me", "sns", "capture", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home", "guide"].includes(savedView)) {
+      if (savedView && ["chat", "me", "sns", "capture", "code", "vault", "income", "tasks", "studio", "autopilot", "board", "archive", "home", "guide", "extend"].includes(savedView)) {
         setView(savedView);
       }
       if (localStorage.getItem("forge_fullscreen") === "1") setFullscreen(true);
@@ -341,6 +342,7 @@ function Hud() {
           {loaded && view === "autopilot" && <Centered><Autopilot /></Centered>}
           {loaded && view === "board" && <Centered><Dashboard /></Centered>}
           {loaded && view === "archive" && <Centered><AppArchive /></Centered>}
+          {loaded && view === "extend" && <Centered><Extensions onNavigate={setView} /></Centered>}
           {loaded && view === "guide" && <Centered><Guide /></Centered>}
         </motion.div>
       </section>
@@ -391,6 +393,7 @@ const NAV_ITEMS: { key: View; label: string }[] = [
   { key: "autopilot", label: "AUTO" },
   { key: "board", label: "BOARD" },
   { key: "archive", label: "ARCHIVE" },
+  { key: "extend", label: "EXTEND" },
   { key: "guide", label: "GUIDE" },
 ];
 
@@ -429,6 +432,9 @@ function NavIcon({ name }: { name: View }) {
       return (<svg {...p}><rect x="3" y="4" width="7" height="7" rx="1" /><rect x="14" y="4" width="7" height="4" rx="1" /><rect x="14" y="12" width="7" height="8" rx="1" /><rect x="3" y="15" width="7" height="5" rx="1" /></svg>);
     case "archive":
       return (<svg {...p}><path d="M3 7l9-4 9 4-9 4-9-4z" /><path d="M3 12l9 4 9-4M3 17l9 4 9-4" /></svg>);
+    case "extend":
+      // コンセント（差し込む＝つなぐ）。他のアイコンと同じ線画で揃える
+      return (<svg {...p}><path d="M9 3v6M15 3v6" /><path d="M5 9h14v3a7 7 0 0 1-14 0V9z" /><path d="M12 19v2" /></svg>);
     default:
       return null;
   }

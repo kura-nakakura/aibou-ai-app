@@ -1,0 +1,324 @@
+/**
+ * extensions — 「連携できるサービス」の台帳。
+ *
+ * これまで設定のKEYCHAINは、鍵の名前が縦にずらっと並ぶだけだった。
+ * GITHUB_TOKEN と書いてあっても、入れると何ができるようになるのかが
+ * 分からない。だから誰も入れない。
+ *
+ * ここではサービス単位でまとめる。「LINEを連携する → こういうことが
+ * できるようになる → 必要なのはこの値 → 取り方はこう」。
+ *
+ * 大事なのは、できないことを書かないこと。実装が無い機能を
+ * unlocks に並べると、入れたのに動かない＝いちばん不親切になる。
+ */
+
+export type ExtField = {
+  name: string;            // KEYCHAIN に保存する名前
+  label: string;
+  placeholder?: string;
+  /** true なら入力を伏せる（画面にも履歴にも残さない） */
+  secret?: boolean;
+  /** 空でも連携できる（任意項目） */
+  optional?: boolean;
+};
+
+export type Extension = {
+  id: string;
+  name: string;
+  /** 一言。カードに出る */
+  tagline: string;
+  /** 連携すると何ができるようになるか。実装があるものだけ書く */
+  unlocks: string[];
+  /** つなぎ方。keys=値を貼る / oauth=ボタンで許可 / database=専用画面 */
+  kind: "keys" | "oauth" | "database";
+  fields: ExtField[];
+  /** 値のとり方。番号付きで出す */
+  howto: string[];
+  /** 注意書き（料金・終了予定・権限の強さなど） */
+  warning?: string;
+  /** 持ち主だけに出す */
+  ownerOnly?: boolean;
+  /** 分類。カードのグループ分けに使う */
+  group: "ai" | "notify" | "work" | "data";
+};
+
+export const EXTENSIONS: Extension[] = [
+  /* ── AI（頭脳） ───────────────────────────────────────────── */
+  {
+    id: "gemini",
+    name: "Gemini",
+    tagline: "会話と生成の頭脳（これが無いと何も喋りません）",
+    group: "ai",
+    kind: "keys",
+    unlocks: [
+      "CHATでの会話、音声での応答",
+      "資料の要約・文章生成・画像の説明",
+      "ゴールを手順に分解する（AUTOPILOT）",
+    ],
+    fields: [{ name: "GEMINI_API_KEY", label: "API キー", placeholder: "AIza…", secret: true }],
+    howto: [
+      "aistudio.google.com/app/apikey を開く",
+      "Googleアカウントでログインする",
+      "「APIキーを作成」を押す",
+      "出てきた AIza… で始まる文字列をコピーして、ここに貼る",
+    ],
+    warning: "無料枠があります。使いすぎると一時的に止まりますが、料金は発生しません。",
+  },
+  {
+    id: "huggingface",
+    name: "HuggingFace",
+    tagline: "無料の代替AI。画像生成や文字起こしも",
+    group: "ai",
+    kind: "keys",
+    unlocks: [
+      "Geminiが混んでいるときの代わりの返答",
+      "画像生成（FLUX など）",
+      "音声の文字起こし（Whisper など）",
+    ],
+    fields: [{ name: "HUGGINGFACE_TOKEN", label: "アクセストークン", placeholder: "hf_…", secret: true }],
+    howto: [
+      "huggingface.co でアカウントを作る",
+      "右上のアイコン → Settings → Access Tokens",
+      "「New token」で Read 権限のトークンを作る",
+      "hf_ で始まる文字列をコピーして、ここに貼る",
+    ],
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    tagline: "GPT系を使いたいとき（任意）",
+    group: "ai",
+    kind: "keys",
+    unlocks: ["生成エンジンとしてGPT系を選べるようになる"],
+    fields: [{ name: "OPENAI_API_KEY", label: "API キー", placeholder: "sk-…", secret: true }],
+    howto: [
+      "platform.openai.com/api-keys を開く",
+      "「Create new secret key」を押す",
+      "sk- で始まる文字列をコピーして、ここに貼る",
+    ],
+    warning: "無料枠はありません。使った分だけ課金されます。",
+  },
+
+  /* ── 通知（スマホに届く） ─────────────────────────────────── */
+  {
+    id: "line",
+    name: "LINE",
+    tagline: "終わったこと・失敗したことをLINEに届ける",
+    group: "notify",
+    kind: "keys",
+    unlocks: [
+      "自動実行が終わったらLINEに通知",
+      "失敗したときにLINEに通知",
+      "毎朝のブリーフィングをLINEに送る",
+    ],
+    fields: [
+      { name: "LINE_CHANNEL_TOKEN", label: "チャネルアクセストークン", placeholder: "長い英数字", secret: true },
+      { name: "LINE_TO_USER_ID", label: "宛先ユーザーID（空でOK）", placeholder: "U… ／ 空なら友だち全員", optional: true },
+    ],
+    howto: [
+      "developers.line.biz にLINEアカウントでログインする",
+      "プロバイダーを作り、その中に「Messaging API」チャネルを作る",
+      "できた公式アカウントを、自分のLINEで友だち追加する",
+      "チャネル設定 → Messaging API → 「チャネルアクセストークン（長期）」を発行",
+      "その文字列をコピーして、ここに貼る",
+    ],
+    warning:
+      "以前の「LINE Notify」は2025年3月末で終了しました。古いトークンでは届きません。"
+      + "上の手順で作り直してください。",
+  },
+  {
+    id: "slack",
+    name: "Slack",
+    tagline: "チームのチャンネルに結果を流す",
+    group: "notify",
+    kind: "keys",
+    unlocks: [
+      "自動実行の結果をSlackチャンネルに投稿",
+      "失敗したときにSlackに通知",
+    ],
+    fields: [
+      { name: "SLACK_WEBHOOK", label: "Incoming Webhook URL", placeholder: "https://hooks.slack.com/services/…", secret: true },
+    ],
+    howto: [
+      "api.slack.com/apps で「Create New App」→ From scratch",
+      "使うワークスペースを選ぶ",
+      "左メニューの「Incoming Webhooks」をONにする",
+      "「Add New Webhook to Workspace」で投稿先チャンネルを選ぶ",
+      "できた https://hooks.slack.com/… をコピーして、ここに貼る",
+    ],
+    warning: "このURLを知っている人は誰でもそのチャンネルに投稿できます。共有しないでください。",
+  },
+  {
+    id: "discord",
+    name: "Discord",
+    tagline: "Discordのチャンネルに結果を流す",
+    group: "notify",
+    kind: "keys",
+    unlocks: ["自動実行の結果をDiscordに投稿", "失敗したときにDiscordに通知"],
+    fields: [
+      { name: "DISCORD_WEBHOOK", label: "Webhook URL", placeholder: "https://discord.com/api/webhooks/…", secret: true },
+    ],
+    howto: [
+      "投稿したいチャンネルの「⚙ 編集」を開く",
+      "「連携サービス」→「ウェブフック」→「新しいウェブフック」",
+      "「ウェブフックURLをコピー」を押す",
+      "コピーしたURLをここに貼る",
+    ],
+  },
+
+  /* ── 仕事の道具 ───────────────────────────────────────────── */
+  {
+    id: "google",
+    name: "Google",
+    tagline: "カレンダー・スプレッドシート・ドキュメント・スライド",
+    group: "work",
+    kind: "oauth",
+    unlocks: [
+      "予定をGoogleカレンダーに登録する",
+      "今後の予定をアプリ内のカレンダーで見る",
+      "表をスプレッドシートとして書き出す",
+      "文章をGoogleドキュメントにする",
+      "スライドをGoogleスライドにする",
+    ],
+    fields: [
+      { name: "GOOGLE_CLIENT_ID", label: "クライアントID", placeholder: "…apps.googleusercontent.com" },
+      { name: "GOOGLE_CLIENT_SECRET", label: "クライアントシークレット", secret: true },
+    ],
+    howto: [
+      "console.cloud.google.com でプロジェクトを作る",
+      "「APIとサービス」→ ライブラリ で Calendar / Sheets / Docs / Slides を有効にする",
+      "「OAuth同意画面」を作る（テストユーザーに自分のアドレスを入れる）",
+      "「認証情報」→「OAuth クライアントID」→ ウェブアプリケーション",
+      "IDとシークレットをここに貼り、下の「Googleと接続」を押して許可する",
+    ],
+    warning: "2つの値を保存したあと、「Googleと接続」ボタンで許可するまで使えません。",
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    tagline: "自分のリポジトリを読み書きする（CODEモード）",
+    group: "work",
+    kind: "keys",
+    unlocks: [
+      "自分のリポジトリを取り込んで編集する",
+      "変更をコミットして push する",
+    ],
+    fields: [{ name: "GITHUB_TOKEN", label: "アクセストークン", placeholder: "github_pat_…", secret: true }],
+    howto: [
+      "github.com → 右上のアイコン → Settings",
+      "左下 Developer settings → Personal access tokens → Fine-grained tokens",
+      "「Generate new token」で対象リポジトリを選ぶ",
+      "Repository permissions で Contents を Read and write にする",
+      "できたトークンをコピーして、ここに貼る（一度しか表示されません）",
+    ],
+  },
+  {
+    id: "notion",
+    name: "Notion",
+    tagline: "決まったページにメモを書き足す",
+    group: "work",
+    kind: "keys",
+    unlocks: ["会話や結果をNotionのページに追記する"],
+    fields: [
+      { name: "NOTION_TOKEN", label: "インテグレーションのトークン", placeholder: "ntn_…", secret: true },
+      { name: "NOTION_PARENT_ID", label: "書き込み先のページID", placeholder: "32桁の英数字" },
+    ],
+    howto: [
+      "notion.so/my-integrations で「New integration」を作る",
+      "Internal Integration Token をコピーする",
+      "書き込みたいページを開き、「…」→ 接続 から作ったものを追加する",
+      "そのページのURL末尾の32桁をコピーして、ページIDに貼る",
+    ],
+  },
+  {
+    id: "email",
+    name: "メール",
+    tagline: "エージェントがメールを送る",
+    group: "work",
+    kind: "keys",
+    unlocks: ["下書きを作ってメールで送る（送信前に確認あり）"],
+    fields: [
+      { name: "EMAIL_ADDRESS", label: "メールアドレス", placeholder: "you@gmail.com" },
+      { name: "EMAIL_PASSWORD", label: "アプリパスワード", secret: true },
+    ],
+    howto: [
+      "Googleアカウント → セキュリティ → 2段階認証プロセス をONにする",
+      "同じ画面の「アプリ パスワード」を開く",
+      "アプリ名を入れて作成し、出てきた16文字をコピーする",
+      "ふだんのログインパスワードではなく、その16文字をここに貼る",
+    ],
+    warning: "ふだんのパスワードは絶対に入れないでください。アプリパスワードを使います。",
+  },
+
+  /* ── 保存先 ───────────────────────────────────────────────── */
+  {
+    id: "supabase",
+    name: "Supabase",
+    tagline: "自分専用のデータベースに保存する",
+    group: "data",
+    kind: "database",
+    unlocks: [
+      "タスク・予定・ノート・会話が自分のDBに残る",
+      "端末を変えても続きから使える",
+    ],
+    fields: [],
+    howto: [
+      "supabase.com で無料のプロジェクトを作る",
+      "Project Settings → API の Project URL と service_role をコピー",
+      "Connect → Session pooler の postgresql://… をコピー",
+      "設定 → KEYCHAIN の「自分のデータベース」に貼って接続する",
+    ],
+    warning: "service_role キーは全権限を持ちます。他の人には渡さないでください。",
+  },
+
+  /* ── 持ち主だけ ───────────────────────────────────────────── */
+  {
+    id: "leonardo",
+    name: "Leonardo.ai",
+    tagline: "高品質な画像生成（任意）",
+    group: "ai",
+    kind: "keys",
+    ownerOnly: true,
+    unlocks: ["画像生成エンジンとして選べるようになる"],
+    fields: [{ name: "LEONARDO_API_KEY", label: "API キー", secret: true }],
+    howto: ["leonardo.ai にログイン", "API 設定からキーを発行", "ここに貼る"],
+  },
+  {
+    id: "note",
+    name: "note",
+    tagline: "記事の下書きを作る（任意）",
+    group: "work",
+    kind: "keys",
+    ownerOnly: true,
+    unlocks: ["生成した記事をnoteの下書きにする"],
+    fields: [{ name: "NOTE_TOKEN", label: "トークン", secret: true }],
+    howto: ["noteにログインした状態のセッション値を使います", "自動投稿は既定でOFFです"],
+    warning: "非公式の方法です。自動投稿は既定でOFFのままにしてください。",
+  },
+];
+
+/** その人に見せてよい拡張だけ返す。 */
+export function visibleExtensions(isOwner: boolean | null): Extension[] {
+  return EXTENSIONS.filter((e) => !e.ownerOnly || isOwner === true);
+}
+
+/** この拡張は「つながっている」か。必須項目が全部入っていれば連携済み。 */
+export function isConnected(ext: Extension, keysSet: Set<string>): boolean {
+  const required = ext.fields.filter((f) => !f.optional);
+  if (required.length === 0) return false;      // database/oauth は別途判定
+  return required.every((f) => keysSet.has(f.name));
+}
+
+/** 連携済みの数（進み具合の表示に使う）。 */
+export function connectedCount(exts: Extension[], keysSet: Set<string>): number {
+  return exts.filter((e) => isConnected(e, keysSet)).length;
+}
+
+export const GROUP_LABEL: Record<Extension["group"], string> = {
+  ai: "AI（頭脳）",
+  notify: "通知を受け取る",
+  work: "仕事の道具",
+  data: "保存先",
+};
+
+export const GROUP_ORDER: Extension["group"][] = ["ai", "notify", "work", "data"];

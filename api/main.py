@@ -1415,15 +1415,27 @@ class DatabaseConnectRequest(BaseModel):
 
 @app.get("/account/database")
 async def account_database(user_id: str = Depends(current_user),
+                           claims: dict = Depends(current_claims),
                            authorization: Optional[str] = Header(default=None)):
     """自分のDBの接続状態。鍵の値は返さない（マスクのみ）。
 
     「使えない」理由を1つの文言でまとめると、ログイン済みの人にまで
     「ログインしていません」と言ってしまい、原因を探せなくなる（実際に踏んだ）。
     本当に未ログインなのか、サーバー側が確認できないのかを分けて返す。
+
+    保存先の判定は use_own_database と必ず揃える。持ち主は個人接続が無くても
+    サーバーの既定DBに保存され続けるのに、ここだけ「未接続」と返していたため、
+    画面が「どこにも保存されていません。再起動すると消えます」と嘘をついていた。
     """
     if user_id:
-        return {"available": True, **tenancy.status(user_id)}
+        st = tenancy.status(user_id)
+        # 個人接続が無い持ち主 = サーバーの既定DBのまま（これまでのデータもそこ）
+        st["using_server_db"] = bool(
+            not st.get("connected")
+            and is_owner_claims(claims)
+            and bool(config.SUPABASE_URL)
+        )
+        return {"available": True, **st}
 
     signed_in = bool(authorization and authorization.strip().lower().startswith("bearer "))
     if signed_in and not config.SUPABASE_JWT_SECRET:
@@ -2214,6 +2226,54 @@ async def agenda_parse(req: AgendaParseRequest, _auth: None = Depends(require_au
 async def agenda_delete(event_id: str, _auth: None = Depends(require_auth)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: agenda.delete_event(event_id))
+
+
+@app.get("/agenda/calendar")
+async def agenda_calendar(days: int = 30, _auth: None = Depends(require_auth)):
+    """アプリ内の予定と Googleカレンダーの予定を、1つのカレンダー用にまとめて返す。
+
+    2か所を別々に見せると「どっちを見ればいいのか」になるので、
+    画面には1枚のカレンダーとして出し、出どころだけ印で分ける。
+    Google が未接続でも、アプリ内の予定は必ず返す（片方の失敗で全部消さない）。
+    """
+    loop = asyncio.get_event_loop()
+    items: List[dict] = []
+
+    try:
+        for ev in await loop.run_in_executor(None, agenda.list_events):
+            items.append({
+                "id": ev.get("id") or "",
+                "title": ev.get("title") or "(無題)",
+                "date": (ev.get("date") or "")[:10],
+                "time": ev.get("time") or "",
+                "note": ev.get("note") or "",
+                "source": "app",
+                "url": "",
+            })
+    except Exception:
+        pass
+
+    google_connected = False
+    try:
+        if gservice.connected():
+            google_connected = True
+            res = await loop.run_in_executor(None, lambda: gservice.list_events(days, 25))
+            for ev in (res.get("items") or []):
+                start = str(ev.get("start") or "")
+                items.append({
+                    "id": "",
+                    "title": ev.get("title") or "(無題)",
+                    "date": start[:10],
+                    "time": start[11:16] if len(start) >= 16 else "",
+                    "note": "",
+                    "source": "google",
+                    "url": ev.get("url") or "",
+                })
+    except Exception:
+        pass
+
+    items.sort(key=lambda x: (x["date"] or "9999-99-99", x["time"] or ""))
+    return {"items": items, "google_connected": google_connected}
 
 
 # ── Notifications（アプリ内通知） ─────────────────────────────────
