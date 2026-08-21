@@ -12,6 +12,9 @@ google-auth-httplib2
 google-auth-oauthlib
 supabase
 cryptography
+# ログイン用トークン(JWT)の検証。[crypto] は公開鍵方式(ES256/RS256)に必要。
+# これまで間接依存で入っていたが、外れると全員ログインできなくなるため明示する。
+PyJWT[crypto]>=2.8
 python-pptx
 openpyxl
 python-docx

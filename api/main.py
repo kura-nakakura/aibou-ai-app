@@ -110,7 +110,7 @@ async def _lifespan(_app: "FastAPI"):
 
 # サーバー側のビルド目印。/diagnose で返す。
 # 「直したはずなのに直らない」ときに、デプロイが届いているかを一目で確かめる。
-APP_VERSION = "2026.08.21 · api-r7 DIAGNOSE"
+APP_VERSION = "2026.08.21 · api-r8 JWT BOTH METHODS"
 
 app = FastAPI(
     title="AIbou Brain API",
@@ -134,16 +134,65 @@ app.add_middleware(
 
 
 # ── 認証（任意のBearerトークン） ─────────────────────────────────
+# ── ログイン用トークンの検証 ──────────────────────────────────────────
+# Supabase には2つの方式がある。
+#   1. 共有シークレット（HS256）… 古いプロジェクト。SUPABASE_JWT_SECRET を使う
+#   2. 公開鍵（ES256/RS256）    … 現在の既定。プロジェクトが公開している鍵で照合
+# HS256 だけに対応していると、2 のプロジェクトでは「正しい秘密鍵を入れたのに
+# 永久に検証できない」状態になる（実際にこれで全部401になった）。両方試す。
+_jwks_client = None
+_jwks_uri = ""
+
+# 公開鍵方式で使うアルゴリズム
+_ASYMMETRIC = ["ES256", "RS256", "EdDSA", "ES384", "RS384", "ES512", "RS512"]
+
+
+def _jwks_url() -> str:
+    """このプロジェクトが公開鍵を置いている場所。"""
+    base = (config.SUPABASE_URL or "").strip().rstrip("/")
+    return f"{base}/auth/v1/.well-known/jwks.json" if base else ""
+
+
+def _jwks():
+    """公開鍵の取得役（結果は使い回す。毎回取りに行くと遅い）。"""
+    global _jwks_client, _jwks_uri
+    uri = _jwks_url()
+    if not uri:
+        return None
+    if _jwks_client is None or _jwks_uri != uri:
+        try:
+            from jwt import PyJWKClient
+            _jwks_client = PyJWKClient(uri, cache_keys=True, lifespan=600, timeout=8)
+            _jwks_uri = uri
+        except Exception:
+            return None
+    return _jwks_client
+
+
 def _decode_supabase_jwt(token: str) -> Optional[dict]:
-    """Supabase Auth の access_token (HS256) を検証して claims を返す。失敗は None。"""
-    secret = config.SUPABASE_JWT_SECRET
-    if not (secret and token):
+    """Supabase Auth の access_token を検証して claims を返す。失敗は None。"""
+    if not token:
         return None
-    try:
-        import jwt as pyjwt
-        return pyjwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
-    except Exception:
-        return None
+    import jwt as pyjwt
+
+    # 1) 共有シークレット（HS256）
+    if config.SUPABASE_JWT_SECRET:
+        try:
+            return pyjwt.decode(token, config.SUPABASE_JWT_SECRET,
+                                algorithms=["HS256"], audience="authenticated")
+        except Exception:
+            pass
+
+    # 2) 公開鍵（プロジェクトが公開しているもので照合）
+    client = _jwks()
+    if client:
+        try:
+            key = client.get_signing_key_from_jwt(token)
+            return pyjwt.decode(token, key.key, algorithms=_ASYMMETRIC,
+                                audience="authenticated")
+        except Exception:
+            pass
+    return None
 
 
 def _verify_supabase_jwt(token: str) -> bool:
@@ -808,10 +857,44 @@ async def diagnose(authorization: Optional[str] = Header(default=None),
             "保存先(SUPABASE_URL/SERVICE_KEY)": bool(config.SUPABASE_URL and config.SUPABASE_SERVICE_KEY),
             "AIの鍵(GEMINI_API_KEY)": bool(config.current_gemini_key()),
         },
+        "ログインの方式": _login_method_report(),
         "受け取ったもの": got,
         "通るか": passes,
         "理由": why,
     }
+
+
+def _login_method_report() -> dict:
+    """このプロジェクトがどの方式でトークンに署名しているかを実際に見に行く。
+
+    「秘密鍵は正しく入れたのに通らない」の原因は、たいてい方式の食い違い。
+    設定の真偽だけでは分からないので、公開鍵の置き場を実際に叩いて確かめる。
+    """
+    out = {"公開鍵の置き場": _jwks_url() or "（SUPABASE_URL 未設定）"}
+    uri = _jwks_url()
+    if not uri:
+        out["判定"] = "SUPABASE_URL が無いため、公開鍵方式は使えません"
+        return out
+    try:
+        import json as _json
+        import urllib.request
+        with urllib.request.urlopen(uri, timeout=8) as r:
+            keys = (_json.loads(r.read()) or {}).get("keys") or []
+        algs = sorted({str(k.get("alg") or k.get("kty") or "?") for k in keys})
+        out["公開鍵の数"] = len(keys)
+        out["公開鍵の種類"] = algs
+        if keys:
+            out["判定"] = ("このプロジェクトは公開鍵方式です。"
+                           "共有シークレット(HS256)だけでは検証できません"
+                           if not config.SUPABASE_JWT_SECRET else
+                           "公開鍵・共有シークレットの両方を試します")
+        else:
+            out["判定"] = ("公開鍵が公開されていません。"
+                           "共有シークレット(HS256)方式のプロジェクトです")
+    except Exception as e:
+        out["公開鍵の取得"] = f"失敗: {type(e).__name__}"
+        out["判定"] = "公開鍵を取りに行けませんでした（共有シークレットのみで検証します）"
+    return out
 
 
 @app.post("/chat")

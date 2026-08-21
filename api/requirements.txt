@@ -10,6 +10,9 @@ pydantic
 gTTS
 # APIキーをSupabaseに保存する際のFernet暗号化に使用
 cryptography
+# ログイン用トークン(JWT)の検証。[crypto] は公開鍵方式(ES256/RS256)に必要。
+# これまで間接依存で入っていたが、外れると全員ログインできなくなるため明示する。
+PyJWT[crypto]>=2.8
 # 任意：SUPABASE_DB_URL を設定した時のテーブル自動作成（migrate.py）に使用
 psycopg2-binary
 # アップロードされたPDFからテキストを抽出（/file/extract）
