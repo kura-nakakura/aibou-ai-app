@@ -206,7 +206,10 @@ function AIsPanel() {
       {loading ? (
         <LoadingShimmer label="LOADING AIs…" />
       ) : ais.length === 0 ? (
-        <EmptyState label="NO CUSTOM AIs YET" />
+        <EmptyState
+          label="担当AIはまだいません"
+          hint="上の「+ NEW CUSTOM AI」から作れます。役割（例：営業メールの下書き係）と口調を決めておくと、毎回説明せずに同じ仕事を頼めます。"
+        />
       ) : (
         <div className="flex flex-col gap-2">
           {ais.map((ai) => (
@@ -370,7 +373,10 @@ function WorkflowsPanel() {
       {loading ? (
         <LoadingShimmer label="LOADING WORKFLOWS…" />
       ) : workflows.length === 0 ? (
-        <EmptyState label="NO WORKFLOWS YET" />
+        <EmptyState
+          label="ワークフローはまだありません"
+          hint="上の「+ NEW WORKFLOW」から作れます。いつも同じ順番でやる作業を並べて保存しておくと、次からはボタン1つで最後まで走ります。"
+        />
       ) : (
         <div className="flex flex-col gap-2">
           {workflows.map((wf) => (
@@ -552,10 +558,12 @@ function LoadingShimmer({ label }: { label: string }) {
   );
 }
 
-function EmptyState({ label }: { label: string }) {
+/** 空のとき。英語のラベルだけだと「次に何をするか」が伝わらないので、hint を必ず添える。 */
+function EmptyState({ label, hint }: { label: string; hint?: string }) {
   return (
-    <div className="panel p-6 text-center text-[11px] tracking-[0.18em] text-muted label-mono">
-      {label}
+    <div className="panel p-6 text-center">
+      <p className="text-[12px] text-fg-strong">{label}</p>
+      {hint && <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{hint}</p>}
     </div>
   );
 }

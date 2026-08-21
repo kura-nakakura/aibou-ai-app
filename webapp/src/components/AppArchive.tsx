@@ -113,14 +113,18 @@ export default function AppArchive() {
 
       {apps.length === 0 ? (
         <div className="panel p-8 text-center">
-          <p className="text-[11px] tracking-[0.2em] text-muted label-mono">NO APPS ARCHIVED</p>
-          <p className="mt-2 text-[11px] text-muted">
-            FORGE タブで APP を生成すると自動的にここに保存されます。
+          <p className="text-[12px] text-fg-strong">保存されたアプリはまだありません</p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            FORGE タブで APP を生成すると、自動的にここに保存されます。
           </p>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="panel p-6 text-center text-[11px] tracking-[0.18em] text-muted label-mono">
-          NO RESULTS
+        /* 検索して0件のときは「無い」だけでなく、直し方（消す・別の語）を出す。 */
+        <div className="panel p-6 text-center">
+          <p className="text-[12px] text-fg-strong">「{search}」に一致するアプリはありません</p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            検索欄を空にすると、保存済みの {apps.length} 件がすべて表示されます。
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">

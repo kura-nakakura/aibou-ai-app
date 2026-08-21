@@ -12,6 +12,7 @@ import ImageStudio from "@/components/ImageStudio";
 import Markdown from "@/components/Markdown";
 import { addToArchive } from "@/components/AppArchive";
 import { forgeGenerate, type ForgeKind, type ForgeResult } from "@/lib/api";
+import { explain } from "@/lib/needs";
 
 const KINDS: { key: ForgeKind; label: string; hint: string; placeholder: string }[] = [
   { key: "app", label: "APP", hint: "Streamlitアプリ", placeholder: "例：シンプルな家計簿アプリ" },
@@ -83,7 +84,7 @@ export default function Forge() {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "generation failed");
+      setError(explain(e, "生成"));
     } finally {
       setBusy(false);
     }

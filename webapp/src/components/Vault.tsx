@@ -23,6 +23,7 @@ import {
   type VaultAnswer,
 } from "@/lib/api";
 import Markdown from "@/components/Markdown";
+import { explain } from "@/lib/needs";
 
 export default function Vault() {
   const [notebooks, setNotebooks] = useState<VaultNotebook[]>([]);
@@ -87,7 +88,7 @@ export default function Vault() {
       setNotebooks((prev) => [...prev, nb]);
       setSelectedId(nb.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ノートブックの作成に失敗しました");
+      setError(explain(e, "ノートブックの作成"));
     } finally {
       setCreating(false);
     }
@@ -110,7 +111,7 @@ export default function Vault() {
         setError("資料の取り込みに失敗しました");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "資料の取り込みに失敗しました");
+      setError(explain(e, "資料の取り込み"));
     } finally {
       setAdding(false);
     }
@@ -176,7 +177,7 @@ export default function Vault() {
         await refresh();
         await loadDocs(selectedId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "取り込みに失敗しました");
+        setError(explain(err, "取り込み"));
       } finally {
         setAdding(false);
       }
@@ -208,7 +209,7 @@ export default function Vault() {
     try {
       setAnswer(await vaultQuery(selectedId, question.trim()));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "質問の処理に失敗しました");
+      setError(explain(e, "質問"));
     } finally {
       setAsking(false);
     }
@@ -223,7 +224,7 @@ export default function Vault() {
       const r = await vaultGenerateDoc(selectedId, genInstruction.trim());
       setGenDoc(r.markdown);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "資料の作成に失敗しました");
+      setError(explain(e, "資料の作成"));
     } finally {
       setGenBusy(false);
     }
@@ -238,7 +239,7 @@ export default function Vault() {
       const r = await vaultGenerateDiagram(selectedId, kind);
       setDiagCode(r.mermaid);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "図解の生成に失敗しました");
+      setError(explain(e, "図解の生成"));
     } finally {
       setDiagBusy(false);
     }

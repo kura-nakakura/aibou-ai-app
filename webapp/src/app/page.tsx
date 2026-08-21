@@ -36,6 +36,7 @@ import SnsMode from "@/components/SnsMode";
 import Home from "@/components/Home";
 import Guide from "@/components/Guide";
 import NeedsNotice from "@/components/NeedsNotice";
+import SelfCheck from "@/components/SelfCheck";
 import Income from "@/components/Income";
 import Keychain from "@/components/Keychain";
 import LifeMode from "@/components/LifeMode";
@@ -994,6 +995,9 @@ function SettingsPanel({
 
           {tab === "diagnostics" && (
             <div className="flex flex-col gap-3">
+              {/* 困ったときに最初に押すもの。下の技術情報より前に置く */}
+              <SelfCheck />
+
               {(() => {
                 const repo = process.env.NEXT_PUBLIC_GIT_REPO || "";
                 const sha = (process.env.NEXT_PUBLIC_COMMIT_SHA || "").slice(0, 7);

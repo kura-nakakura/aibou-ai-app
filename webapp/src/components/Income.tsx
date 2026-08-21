@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import PseoPanel from "@/components/PseoPanel";
 import NewsletterPanel from "@/components/NewsletterPanel";
+import { explain } from "@/lib/needs";
 
 type IncomeTab = "queue" | "seo" | "mail";
 
@@ -106,7 +107,7 @@ export default function Income() {
         await refresh();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "enqueue failed");
+      setError(explain(e, "ジョブの投入"));
     } finally {
       setBusy(false);
     }

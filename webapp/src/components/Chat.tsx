@@ -1130,7 +1130,9 @@ function ChatHistory({
       </button>
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-0.5">
         {convos.length === 0 ? (
-          <p className="px-1 py-2 text-[10px] leading-relaxed text-muted/70">履歴はまだありません。</p>
+          <p className="px-1 py-2 text-[10px] leading-relaxed text-muted/70">
+            履歴はまだありません。話しかけると、この一覧に会話が残ります。
+          </p>
         ) : (
           convos.map((c) => {
             const active = c.id === currentId;

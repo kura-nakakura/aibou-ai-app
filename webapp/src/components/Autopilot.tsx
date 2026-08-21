@@ -17,6 +17,7 @@ import {
   autopilotDelete,
   type Mission,
 } from "@/lib/api";
+import { explain } from "@/lib/needs";
 
 const STATUS_COLOR: Record<string, string> = {
   active: "#00f3ff",
@@ -57,7 +58,7 @@ export default function Autopilot() {
       setGoal("");
       setMissions((prev) => [m, ...prev]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ゴールの作成に失敗しました");
+      setError(explain(e, "ゴールの作成"));
     } finally {
       setCreating(false);
     }
@@ -73,7 +74,7 @@ export default function Autopilot() {
       if (r.mission) updateMission(r.mission);
       return r;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "ステップ実行に失敗しました");
+      setError(explain(e, "ステップ実行"));
       return null;
     } finally {
       setRunningId(null);
@@ -165,8 +166,23 @@ export default function Autopilot() {
         <motion.div className="panel p-4 text-center text-[11px] tracking-[0.2em] text-muted label-mono" animate={{ opacity: [0.4, 1, 0.4] }} transition={{ duration: 1.4, repeat: Infinity }}>
           ◈ LOADING MISSIONS…
         </motion.div>
+      ) : missions.length === 0 && error ? (
+        /* 読み込めなかっただけのときに「まだありません」と言うと、消えたように見える。 */
+        <div className="panel p-6 text-center text-[11px] leading-relaxed text-muted">
+          ミッションを読み込めませんでした。中身は消えていません。
+        </div>
       ) : missions.length === 0 ? (
-        <div className="panel p-6 text-center text-[11px] tracking-[0.18em] text-muted label-mono">NO MISSIONS YET</div>
+        /* 空欄は「壊れている」ようにも見える。次の一手を書いておく。 */
+        <div className="panel p-6 text-center">
+          <p className="text-[12px] text-fg-strong">ミッションはまだありません</p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            左の「ゴールを設定」に、やりたいことを1行で書いて実行してください。
+            手順はAIが分解して、ここに並びます。
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted/70">
+            ゴールはざっくりで大丈夫です。細かい手順は考えなくて構いません。
+          </p>
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
           {missions.map((m) => {

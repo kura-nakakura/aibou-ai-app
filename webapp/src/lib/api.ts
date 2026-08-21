@@ -89,6 +89,21 @@ function requireApiUrl(): string {
   return API_URL;
 }
 
+/**
+ * GET /diagnose — うまく動かないときに、サーバー自身に理由を答えさせる。
+ *
+ * 認証不要。ログインしている場合はその資格情報も一緒に送るので、
+ * 「なぜ通らないのか」までサーバー側が判断して返してくれる。
+ * 中身は人が読む前提の日本語キーなので、型は決め打ちにせず素直に扱う。
+ */
+export async function diagnose(): Promise<Record<string, unknown>> {
+  const res = await fetch(`${requireApiUrl()}/diagnose`, {
+    headers: authHeaders(), cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Diagnose failed (${res.status})`);
+  return (await res.json()) as Record<string, unknown>;
+}
+
 /** GET /health — returns true when the backend reports ok. Never throws. */
 export async function health(signal?: AbortSignal): Promise<boolean> {
   if (!API_URL) return false;

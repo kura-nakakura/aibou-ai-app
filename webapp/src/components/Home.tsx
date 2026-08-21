@@ -41,8 +41,9 @@ import {
   toggleHidden, toggleWide, isWide, type HomeLayout, type WidgetId,
 } from "@/lib/homeLayout";
 import Markdown from "@/components/Markdown";
+import FirstRun from "@/components/FirstRun";
 
-type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home";
+type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home" | "guide";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -149,6 +150,9 @@ export default function Home({
           <button onClick={() => onNavigate("chat")} className="ml-1 text-[var(--accent)] underline">CHATへ</button>
         </div>
       )}
+
+      {/* 初回設定が残っている人にだけ、残りの手順を出す（済んだら二度と出ない）。 */}
+      {!offline && <FirstRun onOpenGuide={() => onNavigate("guide")} />}
 
       {/* ウィジェットは保存した並びで出す。編集中は各枠に操作バーが付く。 */}
       <div className="grid gap-3 lg:grid-cols-3">

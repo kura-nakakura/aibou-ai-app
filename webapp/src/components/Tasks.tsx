@@ -11,6 +11,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useRef, useEffect, useState, useCallback, type PointerEvent as ReactPointerEvent } from "react";
 import { listTasks, createTask, updateTask, deleteTask, type Task } from "@/lib/api";
+import { explain } from "@/lib/needs";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   pending: { label: "PENDING", color: "#8b8f97" },
@@ -110,7 +111,7 @@ export default function Tasks() {
       const items = await listTasks(view === "kanban" ? undefined : filter || undefined);
       setTasks(items);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load tasks");
+      setError(explain(e, "タスクの読み込み"));
     } finally {
       setLoading(false);
     }
@@ -134,7 +135,7 @@ export default function Tasks() {
       setNewDue("");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "create failed");
+      setError(explain(e, "タスクの追加"));
     } finally {
       setCreating(false);
     }
@@ -377,9 +378,23 @@ export default function Tasks() {
         >
           ◈ LOADING TASKS…
         </motion.div>
+      ) : error ? (
+        /* 読み込みに失敗したときに「まだありません」と言うと、
+           持っているタスクが消えたように見える。原因は上に出しているので、ここは黙る。 */
+        <div className="panel p-6 text-center text-[11px] leading-relaxed text-muted">
+          タスクを読み込めませんでした。中身は消えていません。
+        </div>
       ) : visible.length === 0 ? (
-        <div className="panel p-6 text-center text-[11px] tracking-[0.18em] text-muted label-mono">
-          NO TASKS FOUND
+        /* 空のときこそ、次にやることを出す。「NO TASKS FOUND」だけだと、
+           使い始めた人は何をすればいいのか分からないまま止まる。 */
+        <div className="panel p-6 text-center">
+          <p className="text-[12px] text-fg-strong">まだタスクはありません</p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+            上の欄から追加できます。CHATで「〜をタスクに入れて」と頼んでも増えます。
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
+            たまってきたら「今日は何からやるのがいい？」と聞くと、順番を提案します。
+          </p>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
