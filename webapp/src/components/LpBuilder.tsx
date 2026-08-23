@@ -14,6 +14,7 @@
 
 import { useState } from "react";
 import { lpGenerate, API_URL } from "@/lib/api";
+import { addToArchive } from "@/components/AppArchive";
 import { previewDoc, PREVIEW_SANDBOX } from "@/lib/preview";
 
 const STYLES = [
@@ -85,6 +86,9 @@ export default function LpBuilder({ kind = "lp" }: { kind?: "lp" | "app" }) {
         setNote(refine ? "✓ 修正しました" : "✓ 生成しました");
         setBrief("");
         setView("preview");
+        // 作ったものは ARCHIVE に残す。以前はダウンロードしないと消えていて、
+        // タブを閉じただけで作業がなくなっていた。
+        addToArchive(r.title || text.slice(0, 40), text, r.html, t.note, "html");
       }
     } catch {
       setNote("⚠ 通信に失敗しました");

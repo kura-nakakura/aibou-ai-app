@@ -11,3 +11,4 @@ backups/
 # Playwright のテスト出力（ローカル生成物）
 test-results/
 playwright-report/
+.next-*

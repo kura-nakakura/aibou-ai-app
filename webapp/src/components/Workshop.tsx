@@ -19,7 +19,8 @@ const TABS = ["forge", "app", "lp", "studio"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function Workshop() {
-  const [tab, setTab] = useState<Tab>("forge");
+  // 最初に出すのは「アプリ」。ここが一番よく使われ、その場で動くものが作れる
+  const [tab, setTab] = useState<Tab>("app");
 
   // AI STUDIO（カスタムAI・ワークフロー・自己進化）は持ち主だけのもの。
   // 分かるまでは隠す側に倒す。実際の遮断はサーバー側で行っている。
@@ -31,9 +32,11 @@ export default function Workshop() {
 
   const tabs = useMemo(() => {
     const all = [
-      { key: "forge" as Tab, label: "✦ FORGE" },
+      // 「何を作るか」で並べる。FORGE という名前は、初めての人には
+      // 何が出てくるのか分からない
       { key: "app" as Tab, label: "▣ アプリ" },
-      { key: "lp" as Tab, label: "◫ LP / HP" },
+      { key: "lp" as Tab, label: "◫ LP・ホームページ" },
+      { key: "forge" as Tab, label: "✦ 素材（画像・資料）" },
       { key: "studio" as Tab, label: "⚙ AI STUDIO", ownerOnly: true },
     ];
     return isOwner === false ? all.filter((t) => !t.ownerOnly) : all;

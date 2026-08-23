@@ -11,6 +11,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { addToArchive } from "@/components/AppArchive";
+import StepRunnersNote from "@/components/StepRunnersNote";
 import FlowBuilder from "@/components/FlowBuilder";
 import {
   studioListAIs,
@@ -296,6 +297,7 @@ function WorkflowsPanel() {
 
   return (
     <>
+      <StepRunnersNote current="workflow" />
       <button
         type="button"
         onClick={() => setShowForm((v) => !v)}

@@ -14,6 +14,8 @@
 
 import { getAccessToken } from "@/lib/supabase";
 
+import { asArray, asNumber } from "@/lib/shape";
+
 export const API_URL: string = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 const API_TOKEN: string = process.env.NEXT_PUBLIC_API_TOKEN || "";
 
@@ -858,7 +860,13 @@ export async function pseoGenerate(axes: string[][], template = "", limit = 5): 
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ axes, template, limit }),
   });
-  return (await res.json().catch(() => ({ count: 0, created: [] }))) as { count: number; created: { slug: string; title: string }[]; failed?: unknown[]; error?: string };
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return {
+    count: asNumber(d.count),
+    created: asArray<{ slug: string; title: string }>(d.created),
+    failed: asArray<unknown>(d.failed),
+    error: typeof d.error === "string" ? d.error : undefined,
+  };
 }
 
 /** GET /pseo/pages — list pages (optionally by status). */
@@ -991,7 +999,8 @@ export interface NewsletterIssue { id: string; subject: string; body: string; st
 export async function newsletterSubscribers(): Promise<{ items: Subscriber[]; stats: NewsletterStats }> {
   const res = await fetch(`${requireApiUrl()}/newsletter/subscribers`, { headers: authHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`Subscribers failed (${res.status})`);
-  return (await res.json()) as { items: Subscriber[]; stats: NewsletterStats };
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return { items: asArray<Subscriber>(d.items), stats: (d.stats ?? {}) as NewsletterStats };
 }
 
 export async function newsletterIssues(): Promise<NewsletterIssue[]> {
@@ -1117,7 +1126,10 @@ export async function lifeEntries(category = ""): Promise<{ items: LifeEntry[]; 
   const q = category ? `?category=${encodeURIComponent(category)}` : "";
   const res = await fetch(`${requireApiUrl()}/life/entries${q}`, { headers: authHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`Life entries failed (${res.status})`);
-  return (await res.json().catch(() => ({ items: [], categories: [] }))) as { items: LifeEntry[]; categories: LifeCategory[] };
+  // 配列が欠けた応答で画面ごと落とさない。categories が undefined のまま
+  // 渡ると LifeMode の categories.length で例外になり、MEが真っ白になる（実際に起きた）。
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return { items: asArray<LifeEntry>(d.items), categories: asArray<LifeCategory>(d.categories) };
 }
 
 /** POST /life/entries — save one experience. */
@@ -1939,7 +1951,8 @@ export interface SlideLayoutDef { key: SlideLayout; label: string; fields: strin
 export async function slideLayouts(): Promise<{ layouts: SlideLayoutDef[]; themes: string[] }> {
   const res = await fetch(`${requireApiUrl()}/slides/layouts`, { headers: authHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`Layouts failed (${res.status})`);
-  return (await res.json()) as { layouts: SlideLayoutDef[]; themes: string[] };
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return { layouts: asArray<SlideLayoutDef>(d.layouts), themes: asArray<string>(d.themes) };
 }
 
 /** POST /slides/revise — rewrite ONE slide with AI, leaving the rest of the deck alone. */

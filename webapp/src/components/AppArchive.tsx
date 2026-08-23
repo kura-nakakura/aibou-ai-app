@@ -1,12 +1,18 @@
 "use client";
 
 /**
- * AppArchive — Forge App Archive (アプリアーカイブ).
- * Store and browse previously generated Streamlit apps from the Forge.
- * Since Next.js cannot run Streamlit apps directly, we store and display
- * the generated code with download functionality.
+ * AppArchive — 作ったものの保管庫。
  *
- * Persisted to localStorage (key: forge_app_archive).
+ * 点検で分かったこと: ここは Streamlit のコードしか入っていなかった。
+ * 「アプリ」タブで作った、ブラウザでそのまま動くHTMLは保存されず、
+ * ダウンロードしないと消えていた。名前が「保管庫」なのに片方しか入らないのは
+ * 誤解を招く（作ったものが消えたように見える）。
+ *
+ * kind で種類を分けて、どちらも入るようにした。
+ *   html   … ブラウザで動く1ファイルアプリ／ページ。開いて確認できる
+ *   python … Streamlit のコード。手元で streamlit run が要る（古い生成物）
+ *
+ * localStorage に保存（key: forge_app_archive）。
  */
 
 import { AnimatePresence, motion } from "framer-motion";
@@ -19,6 +25,13 @@ interface ArchiveApp {
   code: string;
   note?: string;
   createdAt: string;
+  /** 省略時は python（kind を持たない古い保存物との互換） */
+  kind?: "html" | "python";
+}
+
+/** 古い保存物には kind が無い。無ければ Streamlit だったとみなす。 */
+function kindOf(a: ArchiveApp): "html" | "python" {
+  return a.kind === "html" ? "html" : "python";
 }
 
 const LS_KEY = "forge_app_archive";
@@ -41,7 +54,10 @@ function saveArchive(apps: ArchiveApp[]) {
   }
 }
 
-export function addToArchive(name: string, prompt: string, code: string, note?: string) {
+export function addToArchive(
+  name: string, prompt: string, code: string, note?: string,
+  kind: "html" | "python" = "python",
+) {
   const apps = loadArchive();
   const exists = apps.some((a) => a.prompt === prompt && a.code === code);
   if (exists) return;
@@ -51,9 +67,18 @@ export function addToArchive(name: string, prompt: string, code: string, note?: 
     prompt,
     code,
     note,
+    kind,
     createdAt: new Date().toISOString(),
   };
   saveArchive([app, ...apps]);
+}
+
+/** HTMLを別タブで開いて、そのまま動かす。 */
+function openHtml(code: string) {
+  const url = URL.createObjectURL(new Blob([code], { type: "text/html;charset=utf-8" }));
+  window.open(url, "_blank", "noopener");
+  // すぐ revoke すると開く前に消える。読み込む余裕をとってから捨てる
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function download(filename: string, content: string, mime = "text/plain") {
@@ -97,8 +122,10 @@ export default function AppArchive() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pb-2">
       <div className="panel p-3">
         <p className="text-[11px] leading-relaxed text-muted">
-          Forge で生成したアプリのコードを保管・ダウンロードできます。
-          コードをローカルに保存してから <code className="text-[#9fe7ff]">streamlit run</code> で実行してください。
+          ここまでに作ったアプリが残ります。<span className="text-fg">HTML</span> のものは
+          「開く」でそのまま動かせます。
+          <span className="text-muted/70"> Python（Streamlit）の古い生成物は、
+          ダウンロードして手元で <code className="text-[#9fe7ff]">streamlit run</code> が必要です。</span>
         </p>
       </div>
 
@@ -115,7 +142,7 @@ export default function AppArchive() {
         <div className="panel p-8 text-center">
           <p className="text-[12px] text-fg-strong">保存されたアプリはまだありません</p>
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
-            FORGE タブで APP を生成すると、自動的にここに保存されます。
+            STUDIO の「アプリ」タブで作ると、自動的にここに保存されます。
           </p>
         </div>
       ) : filtered.length === 0 ? (
@@ -138,12 +165,32 @@ export default function AppArchive() {
                 exit={{ opacity: 0, scale: 0.96 }}
                 transition={{ duration: 0.15 }}
               >
-                <div className="mb-1.5 truncate text-[13px] text-fg-strong">{app.name}</div>
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-fg-strong">{app.name}</span>
+                  <span className="shrink-0 rounded border px-1 text-[9px] label-mono"
+                        style={kindOf(app) === "html"
+                          ? { borderColor: "#60d39455", color: "#60d394" }
+                          : { borderColor: "var(--panel-bd)", color: "var(--muted)" }}>
+                    {kindOf(app) === "html" ? "HTML" : "PYTHON"}
+                  </span>
+                </div>
                 <p className="mb-2 text-[11px] text-muted line-clamp-2">{app.prompt}</p>
                 <div className="text-[9px] text-muted/60">
                   {new Date(app.createdAt).toLocaleDateString("ja-JP")}
                 </div>
-                <div className="mt-2.5 flex gap-1.5">
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {/* HTMLはその場で動かせる。押せば確認できるのに、コードしか
+                      見せないのが一番もったいない */}
+                  {kindOf(app) === "html" && (
+                    <button
+                      type="button"
+                      onClick={() => openHtml(app.code)}
+                      className="rounded-forge border px-2 py-1 text-[10px] tracking-[0.12em] label-mono"
+                      style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}
+                    >
+                      ▶ 開く
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setViewingId(app.id === viewingId ? null : app.id)}
@@ -153,10 +200,12 @@ export default function AppArchive() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => download(`${app.name.replace(/\s+/g, "_")}.py`, app.code, "text/x-python")}
+                    onClick={() => kindOf(app) === "html"
+                      ? download(`${app.name.replace(/\s+/g, "_")}.html`, app.code, "text/html;charset=utf-8")
+                      : download(`${app.name.replace(/\s+/g, "_")}.py`, app.code, "text/x-python")}
                     className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-2 py-1 text-[10px] tracking-[0.12em] text-fg-strong transition hover:shadow-glow label-mono"
                   >
-                    ↓ .py
+                    {kindOf(app) === "html" ? "↓ .html" : "↓ .py"}
                   </button>
                   <button
                     type="button"

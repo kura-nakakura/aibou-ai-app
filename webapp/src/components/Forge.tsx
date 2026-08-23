@@ -1,8 +1,16 @@
 "use client";
 
 /**
- * Forge — creation surface. Generate apps / images / slides / sheets / docs
- * via the backend, in the FORGE OS look. Loading states keep UI lag invisible.
+ * Forge — 素材をつくる場所（画像・スライド・表・文書・動画）。
+ *
+ * 点検で分かったこと: ここに「APP」があり、隣の「アプリ」タブと
+ * CODEモードと合わせて、アプリの作り方が3つ並んでいた。
+ * しかもここのAPPが出すのは Streamlit のPythonコードで、
+ * ブラウザでは動かず、手元にPythonを入れて streamlit run が要る。
+ * いちばん使いにくいものが「APP」という一番わかりやすい名前を占めていた。
+ *
+ * アプリ作りは「アプリ」タブ（1ファイルHTML・その場で動く）に一本化し、
+ * ここは素材づくりだけにした。
  */
 
 import { motion } from "framer-motion";
@@ -15,7 +23,6 @@ import { forgeGenerate, type ForgeKind, type ForgeResult } from "@/lib/api";
 import { explain } from "@/lib/needs";
 
 const KINDS: { key: ForgeKind; label: string; hint: string; placeholder: string }[] = [
-  { key: "app", label: "APP", hint: "Streamlitアプリ", placeholder: "例：シンプルな家計簿アプリ" },
   { key: "image", label: "IMAGE", hint: "画像生成", placeholder: "例：サイバーパンクな都市の夜景" },
   { key: "slides", label: "SLIDES", hint: "プレゼン", placeholder: "例：新規事業の提案を7枚で" },
   { key: "sheet", label: "SHEET", hint: "表データ", placeholder: "例：月別の売上表（商品別）" },
@@ -41,7 +48,7 @@ function download(filename: string, content: string, mime = "text/plain") {
 }
 
 export default function Forge() {
-  const [tab, setTab] = useState<ForgeKind | "video">("app");
+  const [tab, setTab] = useState<ForgeKind | "video">("image");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ForgeResult | null>(null);
@@ -51,7 +58,9 @@ export default function Forge() {
   const isVideo = tab === "video";
   // 画像は専用スタジオ（複数案・比率プリセット・拡大表示）に任せる
   const isImageStudio = tab === "image";
-  const kind: ForgeKind = isVideo ? "app" : tab;
+  // 動画は専用パネルなので kind は使わない。既定を app にすると
+  // 消したはずの Streamlit 生成に落ちるので image にしておく。
+  const kind: ForgeKind = isVideo ? "image" : tab;
   const active = KINDS.find((k) => k.key === kind)!;
 
   // Switching kind clears stale results/errors/edit box (an image's 修正

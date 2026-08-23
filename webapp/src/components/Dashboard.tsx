@@ -24,6 +24,7 @@ import {
 import Tilt3D from "@/components/Tilt3D";
 import Whiteboard from "@/components/Whiteboard";
 import FlowBuilder from "@/components/FlowBuilder";
+import StepRunnersNote from "@/components/StepRunnersNote";
 
 const STEP_META: Record<StepType, { label: string; color: string; field: string; placeholder: string }> = {
   ai_generate: { label: "AI生成", color: "#00f3ff", field: "prompt", placeholder: "{input}を要約して…" },
@@ -142,6 +143,7 @@ function AutomationBoard() {
 
   return (
     <div className="relative h-full min-h-0 overflow-y-auto pb-4">
+      <StepRunnersNote current="automation" />
       {/* Miro-style canvas backdrop */}
       <div aria-hidden className="forge-grid pointer-events-none absolute inset-0 opacity-50" />
 

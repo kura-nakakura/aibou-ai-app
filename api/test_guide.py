@@ -127,7 +127,7 @@ def test_every_screen_in_the_launcher_is_documented():
     """ランチャーに出る画面は、全部説明書にあること（説明の取りこぼし防止）。"""
     documented = {m["label"] for m in guide.modes()}
     for label in ["CHAT", "HOME", "ME", "TASKS", "BOARD", "VAULT", "CODE",
-                  "STUDIO", "CAPTURE", "SNS", "INCOME", "AUTO", "ARCHIVE"]:
+                  "STUDIO", "CAPTURE", "SNS", "INCOME", "AUTO", "ARCHIVE", "EXTEND"]:
         assert label in documented, f"説明書に無い画面がある: {label}"
 
 
@@ -137,7 +137,7 @@ def test_guide_does_not_promise_features_that_do_not_exist():
     text += " ".join(m["what"] + " ".join(m["how"]) + " ".join(m["tips"])
                      for m in guide.modes())
     modes = ["HOME", "CHAT", "ME", "TASKS", "BOARD", "VAULT", "CODE",
-             "STUDIO", "CAPTURE", "SNS", "INCOME", "AUTO", "ARCHIVE"]
+             "STUDIO", "CAPTURE", "SNS", "INCOME", "AUTO", "ARCHIVE", "EXTEND"]
     # 設定のタブ名（app/page.tsx の SettingsTab と同じ）
     settings_tabs = ["CORE", "PERSONA", "KEYCHAIN", "HF", "DIAGNOSTICS"]
     # 画面の中にある実在のUI名（押せるタブ・見出し）
@@ -146,7 +146,7 @@ def test_guide_does_not_promise_features_that_do_not_exist():
     key_names = ["GEMINI", "HUGGINGFACE", "GITHUB", "API", "TOKEN", "KEY"]
     # 画面名ではない語（キー名・サービス名・一般的な略語）
     other = ["SHIFT", "PDF", "AI", "LP", "HP", "WEB", "LINE", "ZIP", "CSV",
-             "URL", "PAT", "OK", "DB", "MTG"]
+             "URL", "PAT", "OK", "DB", "MTG", "HTML"]
     allowed = modes + settings_tabs + ui_parts + key_names + other
     # 日本語に直接くっついた語（「定例MTG」「WEBアプリ」など）も拾う。\b は
     # 日本語の文字を単語構成文字として扱うため境界が立たず、素通りしてしまう。

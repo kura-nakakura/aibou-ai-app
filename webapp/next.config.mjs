@@ -5,6 +5,10 @@ const SUPABASE_URL_DEFAULT = "https://hwjmojipsablfevtjzln.supabase.co";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // 点検用のサーバーと、テスト用のビルドが同じ .next を奪い合うと、
+  // 片方が相手の設定（API_URLなど）で上書きされ、原因の分からない
+  // 「未接続」が出る。NEXT_DIST_DIR で出力先を分けられるようにする。
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   // Keep the build resilient on Vercel: lint/type issues shouldn't hard-fail
   // a deploy of the "face" while the backend contract is still evolving.
   eslint: {

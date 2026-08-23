@@ -32,9 +32,9 @@ async function goMode(page: Page, label: string) {
 }
 
 /** STUDIO mode merges FORGE (生成) + AI STUDIO; open a tab. */
-async function goWorkshop(page: Page, tab: "FORGE" | "AI STUDIO") {
+async function goWorkshop(page: Page, tab: "素材" | "AI STUDIO") {
   await goMode(page, "STUDIO");
-  await page.getByRole("button", { name: tab === "FORGE" ? /✦ FORGE/ : /AI STUDIO/ }).click();
+  await page.getByRole("button", { name: tab === "素材" ? /✦ 素材/ : /AI STUDIO/ }).click();
 }
 
 /* ── EntryGate ──────────────────────────────────────────────────── */
@@ -373,15 +373,20 @@ test("Settings close button works", async ({ page }) => {
 });
 
 /* ── Navigation (via mode launcher) ─────────────────────────────── */
-test("STUDIO mode merges FORGE + AI STUDIO tabs", async ({ page }) => {
+test("STUDIO のタブは「何を作るか」で並ぶ（アプリの入口は1つだけ）", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
   await goMode(page, "STUDIO");
-  // Both tabs present; FORGE is the default → its kind buttons show.
-  await expect(page.getByRole("button", { name: /✦ FORGE/ })).toBeVisible({ timeout: 5_000 });
+  // 以前は FORGE の中にも APP があり、隣の「アプリ」タブと重なっていた
+  await expect(page.getByRole("button", { name: /▣ アプリ/ })).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole("button", { name: /◫ LP・ホームページ/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /✦ 素材/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /AI STUDIO/ })).toBeVisible();
-  await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 3_000 });
-  await expect(page.locator("button").filter({ hasText: /^IMAGE$/ }).first()).toBeVisible();
+  // 既定は「アプリ」。その場で動くものが作れる入口を最初に見せる
+  // （オフラインでは中身の代わりに案内が出る）
+  await expect(page.getByText(/Webアプリ作成は/)).toBeVisible({ timeout: 3_000 });
+  // APP という別入口は無い
+  await expect(page.locator("button").filter({ hasText: /^APP$/ })).toHaveCount(0);
 });
 
 /* ── SNS mode + LP builder (ui-r37) ── */
@@ -397,11 +402,11 @@ test("STUDIO has an LP/HP builder tab", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
   await goMode(page, "STUDIO");
-  await page.getByRole("button", { name: /LP \/ HP/ }).click();
+  await page.getByRole("button", { name: /LP・ホームページ/ }).click();
   await expect(page.getByText(/LP \/ HP作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
-  // FORGE tab still reachable
-  await page.getByRole("button", { name: /✦ FORGE/ }).click();
-  await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 5_000 });
+  // 素材タブにも戻れる
+  await page.getByRole("button", { name: /✦ 素材/ }).click();
+  await expect(page.locator("button").filter({ hasText: /^IMAGE$/ }).first()).toBeVisible({ timeout: 5_000 });
 });
 
 /* ── ① Web app builder / ② image studio (ui-r38) ── */
@@ -424,10 +429,11 @@ test("STUDIO workshop tab persists across reload", async ({ page }) => {
   await expect(page.getByText(/Webアプリ作成はバックエンド接続後/)).toBeVisible({ timeout: 8_000 });
 });
 
-test("FORGE IMAGE opens the dedicated image studio", async ({ page }) => {
+test("素材タブの IMAGE は専用の画像スタジオを開く", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
   await goMode(page, "STUDIO");
+  await page.getByRole("button", { name: /✦ 素材/ }).click();
   await page.locator("button").filter({ hasText: /^IMAGE$/ }).first().click();
   await expect(page.getByText(/画像作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
 });
@@ -608,11 +614,11 @@ test("AUTO mode explains what AUTOPILOT is and when to use the others", async ({
   await page.goto("/");
   await enterApp(page);
   await goMode(page, "AUTO");
-  await expect(page.getByText("AUTOPILOT とは")).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByText("オートパイロット とは")).toBeVisible({ timeout: 5_000 });
   await expect(page.getByText(/ゴールだけ決めて/)).toBeVisible();
-  // 3つの「手順を並べる」機能の使い分けを示す
-  await expect(page.getByText(/STUDIO の WORKFLOW/)).toBeVisible();
-  await expect(page.getByText(/BOARD の AUTOMATION/)).toBeVisible();
+  // 3つの「手順を並べる」機能の使い分けを示す（同じ説明を3画面で共有している）
+  await expect(page.getByText(/STUDIO › AI STUDIO の ?ワークフロー/)).toBeVisible();
+  await expect(page.getByText(/BOARD › AUTOMATION の ?自動化/)).toBeVisible();
 });
 
 /* ── ⑤ AI STUDIO: per-step AI / knowledge / condition (ui-r41) ── */
@@ -633,10 +639,10 @@ test("AI STUDIO workflow steps can be assigned an AI, knowledge and a condition"
 });
 
 /* ── ③ Video (storyboard-based) ── */
-test("FORGE VIDEO opens the storyboard video panel", async ({ page }) => {
+test("素材の VIDEO は絵コンテの動画パネルを開く", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goMode(page, "STUDIO");
+  await goWorkshop(page, "素材");
   await page.locator("button").filter({ hasText: /^VIDEO$/ }).first().click();
   await expect(page.getByText(/動画作成はバックエンド接続後/)).toBeVisible({ timeout: 5_000 });
 });
@@ -870,27 +876,31 @@ test("Studio: EVOLVE tab shows self-evolution mode", async ({ page }) => {
 });
 
 /* ── FORGE feature ────────────────────────────────────────────────── */
-test("Forge: prompt textarea is present", async ({ page }) => {
+test("素材: 指示を書く欄がある", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goWorkshop(page, "FORGE");
-  const kindBtn = page.locator("button").filter({ hasText: /^APP$/ }).first();
-  await expect(kindBtn).toBeVisible({ timeout: 5_000 });
+  await goWorkshop(page, "素材");
+  // 既定は IMAGE。APP は「アプリ」タブに一本化したのでここには無い
+  await expect(page.locator("button").filter({ hasText: /^IMAGE$/ }).first()).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator("button").filter({ hasText: /^APP$/ })).toHaveCount(0);
+  // 画像は専用スタジオなので、素の生成フォームは他の種類で見る
+  await page.locator("button").filter({ hasText: /^DOC$/ }).first().click();
   await expect(page.locator("textarea").first()).toBeVisible();
 });
 
 test("Forge: shows the artifact placeholder before generating", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goWorkshop(page, "FORGE");
+  await goWorkshop(page, "素材");
+  await page.locator("button").filter({ hasText: /^DOC$/ }).first().click();
   await expect(page.getByText("ここに生成結果が表示されます")).toBeVisible({ timeout: 5_000 });
 });
 
-test("Forge: VIDEO tab switches to VideoPanel", async ({ page }) => {
+test("素材: VIDEO タブは動画パネルに切り替わる", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goWorkshop(page, "FORGE");
-  await expect(page.locator("button").filter({ hasText: /^APP$/ }).first()).toBeVisible({ timeout: 5_000 });
+  await goWorkshop(page, "素材");
+  await expect(page.locator("button").filter({ hasText: /^IMAGE$/ }).first()).toBeVisible({ timeout: 5_000 });
   await page.locator("button").filter({ hasText: /^VIDEO$/ }).click();
   await expect(page.getByText(/VIDEO|SCENE|NARRATION/i).first()).toBeVisible({ timeout: 5_000 });
 });
@@ -920,11 +930,12 @@ test("Briefing opens a panel and closes again", async ({ page }) => {
 });
 
 /* ── Functional: Forge generate enables after typing ──────────────── */
-test("Forge: GENERATE enables once a prompt is typed", async ({ page }) => {
+test("素材: 指示を書くと生成ボタンが押せるようになる", async ({ page }) => {
   await page.goto("/");
   await enterApp(page);
-  await goWorkshop(page, "FORGE");
-  const genBtn = page.getByRole("button", { name: /GENERATE APP/i });
+  await goWorkshop(page, "素材");
+  await page.locator("button").filter({ hasText: /^DOC$/ }).first().click();
+  const genBtn = page.getByRole("button", { name: /GENERATE DOC/i });
   await expect(genBtn).toBeDisabled();
   await page.locator("textarea").first().fill("家計簿アプリ");
   await expect(genBtn).toBeEnabled();
