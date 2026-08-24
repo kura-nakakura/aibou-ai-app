@@ -1,6 +1,10 @@
 /**
  * firstRun — 「初回設定があと何個残っているか」の判定。
  *
+ * 並び順は「これが無いと先が無い」順。保存先を先頭にしているのは、
+ * つながっていないとタスクもノートも保存できず（作ると理由が出る）、
+ * 後回しにすると作業してから気づくことになるため。
+ *
  * 判定だけを画面から切り離しておく。ここが間違うと、設定が済んでいる人に
  * 案内を出し続けたり（うるさい）、済んでいない人に出さなかったり（本題）する。
  * 描画なしで検証できる形にしておきたい。
@@ -29,6 +33,13 @@ export function firstRunSteps(input: FirstRunInput): FirstRunStep[] {
   const hasAiKey = !!input.keys?.some((k) => k.set && AI_KEYS.includes(k.name));
   return [
     {
+      key: "db",
+      done: !!input.db?.connected,
+      title: "保存先をつなぐ",
+      hint: "自分のSupabaseにつなぐまで、タスク・予定・ノートは保存できません"
+        + "（作ろうとすると理由が出ます）。拡張機能 › Supabase から。",
+    },
+    {
       key: "guide",
       done: input.guideTouched,
       title: "説明書に目を通す",
@@ -38,14 +49,7 @@ export function firstRunSteps(input: FirstRunInput): FirstRunStep[] {
       key: "ai-key",
       done: hasAiKey,
       title: "AIの鍵を入れる",
-      hint: "設定 › KEYCHAIN に GEMINI_API_KEY を入れると、会話や生成が動きます。無料でとれます。",
-    },
-    {
-      key: "db",
-      done: !!input.db?.connected,
-      title: "保存先をつなぐ",
-      hint: "自分のSupabaseにつなぐまで、タスク・予定・ノートは保存できません"
-        + "（作ろうとすると理由が出ます）。拡張機能 › Supabase から。",
+      hint: "拡張機能 › Gemini に鍵を入れると、会話や生成が動きます。無料でとれます。",
     },
   ];
 }

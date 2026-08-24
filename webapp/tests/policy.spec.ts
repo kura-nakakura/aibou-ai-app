@@ -29,7 +29,10 @@ test("データの置き場をはっきり書いている", () => {
   const where = PRIVACY.find((s) => s.id === "where");
   const text = where!.points.join(" ");
   expect(text).toContain("Supabase");
-  expect(text).toMatch(/保存されません|どこにも保存/);   // 繋ぐまでは保存されない
+  // 繋ぐまでは保存されない。黙って消すのをやめ、その場で断るようにしたので
+  // 「消えます」ではなく「受け付けません」と書いてあることを見る
+  expect(text).toContain("保存先がつながっていません");
+  expect(text).toContain("黙って消えることはありません");
   expect(text).toContain("他の利用者");
 });
 
@@ -40,6 +43,7 @@ test("外部に送られる先を隠していない", () => {
   expect(text).toContain("Google");
   expect(text).toContain("HuggingFace");
   expect(text).toContain("Microsoft");     // サーバーの声（edge-tts）
+  expect(text).toContain("X");             // 実投稿できるようにしたため
 });
 
 test("管理者が技術的に何をできるかを、都合よく省いていない", () => {
