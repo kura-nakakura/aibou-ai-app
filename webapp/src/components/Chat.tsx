@@ -28,6 +28,7 @@ import Markdown from "@/components/Markdown";
 import {
   API_URL,
   streamChat, vision, agentActStream, agentExecute,
+  conversationsList, conversationGet, conversationSave, conversationDelete,
   type ChatTurn, type AgentEvent,
 } from "@/lib/api";
 import { useSpeechRecognition } from "@/lib/voice";
@@ -184,6 +185,35 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
 
   useEffect(() => { setConvos(loadConvos()); }, []);
 
+  // 履歴はこれまで端末の中（localStorage）にしか無かったので、
+  // 端末を変えると全部消えていた。自分のDBにも残し、開いたときに取り込む。
+  // 手元の控えは残す（オフラインでも読めるし、保存先が無くても会話はできる）。
+  useEffect(() => {
+    if (!API_URL) return;
+    let alive = true;
+    conversationsList()
+      .then((remote) => {
+        if (!alive || remote.length === 0) return;
+        setConvos((prev) => {
+          const known = new Set(prev.map((c) => c.id));
+          const extra: Convo[] = remote
+            .filter((r) => !known.has(r.id))
+            .map((r) => ({
+              id: r.id,
+              title: r.title || "新しいチャット",
+              messages: [],                       // 本文は開いたときに取りに行く
+              updatedAt: Date.parse(r.updated_at || "") || 0,
+            }));
+          if (extra.length === 0) return prev;
+          const next = [...prev, ...extra].sort((a, b) => b.updatedAt - a.updatedAt);
+          saveConvos(next);
+          return next;
+        });
+      })
+      .catch(() => { /* 取れなくても手元の控えで動く */ });
+    return () => { alive = false; };
+  }, []);
+
   // Persist the current conversation once it has settled (not mid-stream).
   useEffect(() => {
     if (streaming) return;
@@ -199,6 +229,17 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
       saveConvos(next);
       return next;
     });
+
+    // 自分のDBにも残す。失敗しても会話は続けられるよう、ここでは黙って諦める
+    // （保存先が無い場合は、他の画面が理由つきで教えてくれる）。
+    if (API_URL) {
+      const title = (meaningful.find((m) => m.role === "user")?.content || "").slice(0, 60);
+      void conversationSave(
+        currentId,
+        meaningful.map((m) => ({ role: m.role, content: m.content })),
+        title,
+      ).catch(() => {});
+    }
   }, [messages, streaming, currentId]);
 
   const newChat = useCallback(() => {
@@ -214,13 +255,29 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
 
   const loadConvo = useCallback((id: string) => {
     const c = loadConvos().find((x) => x.id === id);
-    if (!c) return;
     cancelRef.current?.();
     speechCancelledRef.current = true;
     stopReply();
-    setMessages(c.messages.map((m) => ({ ...m, pending: false })));
-    setCurrentId(c.id);
+    setCurrentId(id);
     setHistoryOpen(false);
+
+    if (c && c.messages.length > 0) {
+      setMessages(c.messages.map((m) => ({ ...m, pending: false })));
+      return;
+    }
+    // 他の端末で作った会話は、手元には見出ししかない。本文を取りに行く。
+    if (!API_URL) { setMessages([]); return; }
+    setMessages([]);
+    void conversationGet(id)
+      .then((body) => {
+        if (!body) return;
+        // サーバー側は role/content だけを持つ（画像や実行記録は端末の控えのみ）。
+        // 画面が使う形に足りない項目を補う。
+        setMessages(body.messages.map((m, i) => ({
+          id: `${id}-${i}`, role: m.role, content: m.content, pending: false,
+        })));
+      })
+      .catch(() => {});
   }, [stopReply]);
 
   const deleteConvo = useCallback((id: string) => {
@@ -230,6 +287,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
       saveConvos(next);
       return next;
     });
+    if (API_URL) void conversationDelete(id).catch(() => {});
     if (id === currentId) {
       setMessages([]);
       setCurrentId(uid());

@@ -2427,3 +2427,66 @@ export function xWeightedLength(text: string): number {
   }
   return n;
 }
+
+/* ---------------- Conversations (CHAT history on your own DB) ---------------- */
+export interface ConversationMeta {
+  id: string;
+  title: string;
+  updated_at?: string;
+  created_at?: string;
+}
+
+export interface ConversationBody extends ConversationMeta {
+  messages: { role: "user" | "assistant"; content: string }[];
+}
+
+/** GET /conversations — 一覧（本文なし）。 */
+export async function conversationsList(limit = 50): Promise<ConversationMeta[]> {
+  const res = await fetch(`${requireApiUrl()}/conversations?limit=${limit}`, {
+    headers: authHeaders(), cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Conversations failed (${res.status})`);
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return asArray<ConversationMeta>(d.items);
+}
+
+/** GET /conversations/{id} — 本文つきで1件。 */
+export async function conversationGet(id: string): Promise<ConversationBody | null> {
+  const res = await fetch(`${requireApiUrl()}/conversations/${encodeURIComponent(id)}`, {
+    headers: authHeaders(), cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Conversation failed (${res.status})`);
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return {
+    id: String(d.id ?? id),
+    title: typeof d.title === "string" ? d.title : "",
+    messages: asArray<{ role: "user" | "assistant"; content: string }>(d.messages),
+  };
+}
+
+/** POST /conversations — 保存（同じidなら上書き）。 */
+export async function conversationSave(
+  id: string,
+  messages: { role: "user" | "assistant"; content: string }[],
+  title = "",
+): Promise<{ ok?: boolean; id?: string; title?: string; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/conversations`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ id, messages, title }),
+  });
+  const d = (await res.json().catch(() => ({}))) as
+    { ok?: boolean; id?: string; title?: string; error?: string; detail?: string };
+  if (!res.ok && !d.error) return { error: d.detail ?? `保存できませんでした (${res.status})` };
+  return d;
+}
+
+/** DELETE /conversations/{id} */
+export async function conversationDelete(id: string): Promise<boolean> {
+  const res = await fetch(`${requireApiUrl()}/conversations/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: authHeaders(),
+  });
+  const d = (await res.json().catch(() => ({ ok: false }))) as { ok?: boolean };
+  return Boolean(d.ok);
+}

@@ -34,6 +34,7 @@ import artifacts
 import autopilot
 import board
 import automations
+import conversations
 import compliance
 import config
 import code_agent
@@ -2325,6 +2326,54 @@ async def automations_run(flow_id: str, req: AutomationRunRequest,
 
 
 # ── Agenda（組み込みカレンダー / 予定） ───────────────────────────
+
+class ConversationSaveRequest(BaseModel):
+    id: str = ""
+    messages: list = []
+    title: str = ""
+
+
+@app.get("/conversations")
+async def conversations_list(limit: int = 50, _auth: None = Depends(require_auth),
+                             _db: str = Depends(use_own_database)):
+    """会話の一覧（本文なし）。重いので、開いたときに取りに行く。"""
+    loop = asyncio.get_event_loop()
+    return {"items": await loop.run_in_executor(
+        None, lambda: conversations.list_conversations(limit))}
+
+
+@app.get("/conversations/{conv_id}")
+async def conversations_get(conv_id: str, _auth: None = Depends(require_auth),
+                            _db: str = Depends(use_own_database)):
+    loop = asyncio.get_event_loop()
+    row = await loop.run_in_executor(None, lambda: conversations.get_conversation(conv_id))
+    if row is None:
+        return JSONResponse(status_code=404, content={"error": "その会話は見つかりませんでした"})
+    return row
+
+
+@app.post("/conversations")
+async def conversations_save(req: ConversationSaveRequest,
+                             _auth: None = Depends(require_auth),
+                             _store: None = Depends(require_storage)):
+    """会話を保存（同じidなら上書き）。端末を変えても続きから読めるように。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: conversations.save_conversation(req.id, req.messages, req.title))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.delete("/conversations/{conv_id}")
+async def conversations_delete(conv_id: str, _auth: None = Depends(require_auth),
+                               _store: None = Depends(require_storage)):
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: conversations.delete_conversation(conv_id))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
 
 @app.get("/agenda")
 async def agenda_list(_auth: None = Depends(require_auth)):

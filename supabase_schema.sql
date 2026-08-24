@@ -145,6 +145,18 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority text DEFAULT 'mid';   -- hig
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due text DEFAULT '';           -- YYYY-MM-DD
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project text DEFAULT '';       -- グループ名
 
+-- 💬 CHAT：会話履歴
+-- 端末を変えても続きから読めるように、その人のDBに残す。
+-- 本文は jsonb に丸ごと入れる（1件ずつ読み書きするので、行を分ける利点が薄い）。
+CREATE TABLE IF NOT EXISTS conversations (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title      text DEFAULT '',
+  messages   jsonb DEFAULT '[]'::jsonb,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+
 -- ✦ AI Studio：カスタムAI
 CREATE TABLE IF NOT EXISTS studio_ais (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
