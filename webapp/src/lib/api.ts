@@ -2375,3 +2375,46 @@ export async function calendarItems(days = 30):
     google_connected: Boolean(d.google_connected),
   };
 }
+
+/* ---------------- X (Twitter) posting ---------------- */
+export interface XStatus {
+  configured: boolean;
+  missing: string[];
+  autopost_allowed: boolean;
+  limit: number;
+}
+
+/** GET /x/status — Xに投稿できる状態か（値そのものは返らない）。 */
+export async function xStatus(): Promise<XStatus> {
+  const res = await fetch(`${requireApiUrl()}/x/status`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`X status failed (${res.status})`);
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  return {
+    configured: Boolean(d.configured),
+    missing: asArray<string>(d.missing),
+    autopost_allowed: Boolean(d.autopost_allowed),
+    limit: asNumber(d.limit, 280),
+  };
+}
+
+/** POST /x/post — 実際に1件投稿する。人が押したときだけ呼ぶ。 */
+export async function xPost(text: string): Promise<{ ok?: boolean; id?: string; url?: string; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/x/post`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ text }),
+  });
+  return (await res.json().catch(() => ({ error: "投稿できませんでした" }))) as
+    { ok?: boolean; id?: string; url?: string; error?: string };
+}
+
+/** Xの数え方に合わせた長さ（日本語は1文字＝2）。画面で事前に出すため。 */
+export function xWeightedLength(text: string): number {
+  let n = 0;
+  for (const ch of text || "") {
+    const o = ch.codePointAt(0) ?? 0;
+    n += (o <= 0x10ff || (o >= 0x2000 && o <= 0x200a)
+      || (o >= 0x2028 && o <= 0x202f) || (o >= 0x2060 && o <= 0x206f)) ? 1 : 2;
+  }
+  return n;
+}

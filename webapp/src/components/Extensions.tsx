@@ -19,7 +19,7 @@ import {
   listKeys, myDatabase, profileGet, sendNotify, setKey,
 } from "@/lib/api";
 import {
-  EXTENSIONS, GROUP_LABEL, GROUP_ORDER, isConnected, visibleExtensions,
+  EXTENSIONS, GROUP_LABEL, GROUP_ORDER, NO_KEY_FEATURES, isConnected, visibleExtensions,
   type Extension,
 } from "@/lib/extensions";
 import { explain } from "@/lib/needs";
@@ -110,6 +110,22 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
           );
         })
       )}
+
+      {/* 一覧に無い＝できない、と読めてしまうので、無いことの意味を書く */}
+      <details className="panel p-3">
+        <summary className="cursor-pointer text-[11px] text-fg">
+          鍵を入れなくても、もう使えるもの
+        </summary>
+        <div className="mt-2 grid gap-1.5">
+          {NO_KEY_FEATURES.map((f) => (
+            <div key={f.title} className="text-[11px] leading-relaxed">
+              <span className="text-fg-strong">{f.title}</span>
+              <span className="ml-1.5 text-[10px] text-muted label-mono">{f.where}</span>
+              <p className="text-muted">{f.detail}</p>
+            </div>
+          ))}
+        </div>
+      </details>
 
       <p className="px-1 text-[10px] leading-relaxed text-muted/70">
         入れた値はサーバーで暗号化して保管され、画面には伏せ字でしか出ません。

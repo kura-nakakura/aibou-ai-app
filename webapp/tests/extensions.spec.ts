@@ -8,7 +8,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
-  EXTENSIONS, GROUP_LABEL, GROUP_ORDER, connectedCount, isConnected,
+  EXTENSIONS, GROUP_LABEL, GROUP_ORDER, NO_KEY_FEATURES, connectedCount, isConnected,
   visibleExtensions,
 } from "../src/lib/extensions";
 
@@ -113,8 +113,34 @@ test("LINE は終了した方式を案内していない", () => {
   expect(line.howto.join("")).toContain("Messaging API");
 });
 
+test("Xは、取り消せないことと自動投稿しないことを書いている", () => {
+  const x = EXTENSIONS.find((e) => e.id === "x")!;
+  // 投稿は取り返しがつかない。押す前に分かるようにする
+  expect(x.warning).toContain("取り消せません");
+  expect(x.warning).toContain("自動実行からは投稿しません");
+  // 4つそろわないと投稿できない
+  expect(x.fields).toHaveLength(4);
+  expect(x.fields.every((f) => f.secret)).toBe(true);
+  expect(isConnected(x, new Set(["X_API_KEY"]))).toBe(false);
+  expect(isConnected(x, new Set(
+    ["X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET"]))).toBe(true);
+  // 権限の落とし穴（Read のままだと投稿できない）を手順に書く
+  expect(x.howto.join("")).toContain("Read and write");
+});
+
+test("鍵が要らない機能を、要らないと書いてある", () => {
+  // 「一覧に無い＝できない」と読まれるのを防ぐ
+  expect(NO_KEY_FEATURES.length).toBeGreaterThan(2);
+  const titles = NO_KEY_FEATURES.map((f) => f.title).join(" ");
+  expect(titles).toContain("画像");
+  expect(titles).toContain("動画");
+  for (const f of NO_KEY_FEATURES) {
+    expect(f.where.length, `${f.title} にどこで使うかが無い`).toBeGreaterThan(2);
+  }
+});
+
 test("強い権限を扱うものには注意書きがある", () => {
-  for (const id of ["supabase", "slack", "email"]) {
+  for (const id of ["supabase", "slack", "email", "x"]) {
     const e = EXTENSIONS.find((x) => x.id === id)!;
     expect(e.warning, `${id} に注意書きが無い`).toBeTruthy();
   }
@@ -126,6 +152,7 @@ test("秘密の値は secret 指定になっている", () => {
     "GEMINI_API_KEY", "OPENAI_API_KEY", "HUGGINGFACE_TOKEN", "GITHUB_TOKEN",
     "SLACK_WEBHOOK", "DISCORD_WEBHOOK", "LINE_CHANNEL_TOKEN",
     "EMAIL_PASSWORD", "GOOGLE_CLIENT_SECRET", "NOTION_TOKEN",
+    "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_SECRET",
   ];
   const byName = new Map(EXTENSIONS.flatMap((e) => e.fields.map((f) => [f.name, f] as const)));
   for (const n of mustHide) {

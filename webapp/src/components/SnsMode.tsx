@@ -3,13 +3,18 @@
 /**
  * SnsMode — SNS投稿サポート（まずは X と Instagram）.
  *
- *  テーマを書く → 各SNSの作法に合わせた投稿案を複数生成 → 気に入ったものをコピー。
+ *  テーマを書く → 各SNSの作法に合わせた投稿案を複数生成 → コピー、または X へ投稿。
+ *
+ * X だけは実際に投稿できる（拡張機能で4つの値を入れた場合）。
+ * 投稿は取り返しがつかないので、人がこの画面で押したときだけ送る。
+ * Instagram はビジネスアカウント＋審査が要るため、いまも下書きまで。
  *  文字数カウンタで上限超過を可視化し、PR案件なら #PR を自動付与する。
  *  自動投稿はしない（X APIは有料枠、Instagramは審査が必要なため、投稿は人が行う）。
  */
 
-import { useState } from "react";
-import { snsGenerate, API_URL, type SnsPost } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { snsGenerate, xPost, xStatus, API_URL, type SnsPost } from "@/lib/api";
+import { explain } from "@/lib/needs";
 
 const PLATFORMS = [
   { key: "x", label: "X", limit: 280, hint: "280字・タグ1〜3個" },
@@ -30,7 +35,35 @@ export default function SnsMode() {
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
 
+  // Xへの実投稿。設定が済んでいるときだけボタンを出す（押せない物を見せない）
+  const [xReady, setXReady] = useState(false);
+  const [posting, setPosting] = useState<number | null>(null);
+  const [postNote, setPostNote] =
+    useState<{ i: number; text: string; ok: boolean; url?: string } | null>(null);
+
+  useEffect(() => {
+    if (!API_URL) return;
+    xStatus().then((st) => setXReady(st.configured)).catch(() => setXReady(false));
+  }, []);
+
   const meta = PLATFORMS.find((p) => p.key === platform) ?? PLATFORMS[0];
+
+  /** 実際にXへ送る。押した人が内容を見たうえで送る、という前提の入口。 */
+  const doPost = async (p: SnsPost, i: number) => {
+    const body = [p.text, p.hashtags.join(" ")].filter(Boolean).join("\n\n");
+    if (!window.confirm(`Xに投稿します。取り消せません。\n\n${body}`)) return;
+    setPosting(i);
+    setPostNote(null);
+    try {
+      const r = await xPost(body);
+      if (r.ok) setPostNote({ i, ok: true, text: "投稿しました。", url: r.url });
+      else setPostNote({ i, ok: false, text: r.error ?? "投稿できませんでした" });
+    } catch (e) {
+      setPostNote({ i, ok: false, text: explain(e, "Xへの投稿") });
+    } finally {
+      setPosting(null);
+    }
+  };
 
   const run = async () => {
     if (!topic.trim() || busy) return;
@@ -172,17 +205,41 @@ export default function SnsMode() {
             </a>
           )}
 
-          <button type="button" onClick={() => void copy(p, i)}
-            className="mt-2 w-full rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] py-1.5 text-[10px] tracking-[0.12em] text-fg-strong label-mono">
-            {copied === i ? "✓ コピーしました" : "⧉ 本文＋タグをコピー"}
-          </button>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => void copy(p, i)}
+              className="min-w-0 flex-1 rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] py-1.5 text-[10px] tracking-[0.12em] text-fg-strong label-mono">
+              {copied === i ? "✓ コピーしました" : "⧉ 本文＋タグをコピー"}
+            </button>
+            {/* Xだけは実際に投稿できる。押した人が内容を見た上で送る */}
+            {platform === "x" && xReady && (
+              <button type="button" onClick={() => void doPost(p, i)}
+                disabled={posting !== null || p.over_limit}
+                className="shrink-0 rounded-forge border px-3 py-1.5 text-[10px] tracking-[0.12em] label-mono disabled:opacity-40"
+                style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}>
+                {posting === i ? "投稿中…" : "𝕏 に投稿"}
+              </button>
+            )}
+          </div>
+          {postNote?.i === i && (
+            <p role="status" aria-live="polite" className="mt-1.5 text-[11px] leading-relaxed"
+               style={{ color: postNote.ok ? "#60d394" : "#ff9b9b" }}>
+              {postNote.text}
+              {postNote.url && (
+                <a href={postNote.url} target="_blank" rel="noopener noreferrer"
+                   className="ml-1 underline">投稿を見る</a>
+              )}
+            </p>
+          )}
         </div>
       ))}
 
       {posts.length > 0 && (
         <p className="px-1 text-[9px] leading-relaxed text-muted">
-          ※ 自動投稿は行いません（X APIは有料、Instagramはビジネスアカウント＋審査が必要）。
-          コピーして各アプリから投稿してください。PR案件は表記を消さないでください。
+          {platform === "x" && xReady
+            ? "※ 「𝕏 に投稿」を押したときだけ送ります。自動実行からは投稿しません。PR案件は表記を消さないでください。"
+            : platform === "x"
+              ? "※ Xに直接投稿するには、拡張機能（EXTEND）→ X で4つの値を設定してください。設定するまではコピーして投稿します。"
+              : "※ Instagramはビジネスアカウント＋審査が必要なため、直接の投稿はできません。コピーして各アプリから投稿してください。PR案件は表記を消さないでください。"}
         </p>
       )}
     </div>

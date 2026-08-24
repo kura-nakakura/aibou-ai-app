@@ -39,7 +39,7 @@ export type Extension = {
   /** 持ち主だけに出す */
   ownerOnly?: boolean;
   /** 分類。カードのグループ分けに使う */
-  group: "ai" | "notify" | "work" | "data";
+  group: "ai" | "notify" | "post" | "work" | "data";
 };
 
 export const EXTENSIONS: Extension[] = [
@@ -173,6 +173,36 @@ export const EXTENSIONS: Extension[] = [
     ],
   },
 
+  /* ── 発信する ─────────────────────────────────────────────── */
+  {
+    id: "x",
+    name: "X（旧Twitter）",
+    tagline: "作った投稿文を、そのままXに投稿する",
+    group: "post",
+    kind: "keys",
+    unlocks: [
+      "SNSモードで作った文案を「𝕏 に投稿」で送る",
+      "文字数はXの数え方で先に出る（日本語は1文字が2つ分）",
+    ],
+    fields: [
+      { name: "X_API_KEY", label: "API Key", secret: true },
+      { name: "X_API_SECRET", label: "API Key Secret", secret: true },
+      { name: "X_ACCESS_TOKEN", label: "Access Token", secret: true },
+      { name: "X_ACCESS_SECRET", label: "Access Token Secret", secret: true },
+    ],
+    howto: [
+      "developer.x.com でアプリを作る（Free プランでも投稿はできます）",
+      "アプリ設定 → User authentication settings で権限を Read and write にする",
+      "「Keys and tokens」タブを開く",
+      "API Key / API Key Secret をコピーして、上の2つに貼る",
+      "Access Token / Access Token Secret を発行して、下の2つに貼る",
+      "※ 権限を Read and write にしたのが後なら、Access Token を作り直す",
+    ],
+    warning:
+      "投稿は取り消せません。押したときだけ送り、自動実行からは投稿しません。"
+      + "Freeプランは1か月あたりの投稿数に上限があります。",
+  },
+
   /* ── 仕事の道具 ───────────────────────────────────────────── */
   {
     id: "google",
@@ -198,7 +228,9 @@ export const EXTENSIONS: Extension[] = [
       "「認証情報」→「OAuth クライアントID」→ ウェブアプリケーション",
       "IDとシークレットをここに貼り、下の「Googleと接続」を押して許可する",
     ],
-    warning: "2つの値を保存したあと、「Googleと接続」ボタンで許可するまで使えません。",
+    warning: "2つの値を保存したあと、「Googleと接続」ボタンで許可するまで使えません。"
+      + " Gmailの送受信はこれとは別で、下の「メール」から設定します。"
+      + " YouTubeへの投稿には対応していません。",
   },
   {
     id: "github",
@@ -318,8 +350,39 @@ export function connectedCount(exts: Extension[], keysSet: Set<string>): number 
 export const GROUP_LABEL: Record<Extension["group"], string> = {
   ai: "AI（頭脳）",
   notify: "通知を受け取る",
+  post: "発信する",
   work: "仕事の道具",
   data: "保存先",
 };
 
-export const GROUP_ORDER: Extension["group"][] = ["ai", "notify", "work", "data"];
+export const GROUP_ORDER: Extension["group"][] = ["ai", "notify", "post", "work", "data"];
+
+/**
+ * 鍵を入れなくても使えるもの。
+ *
+ * 「画像や動画のAPIが拡張機能に無いけど大丈夫？」と聞かれた。
+ * 答えは「要りません、もう動きます」なのだが、画面のどこにもそう書いていなかった。
+ * 一覧に無い＝できない、と読めてしまうので、無いことの意味をはっきり書く。
+ */
+export const NO_KEY_FEATURES: { title: string; detail: string; where: string }[] = [
+  {
+    title: "画像を作る",
+    detail: "鍵を入れなくても作れます。HuggingFaceを繋ぐと、モデルを選べるようになります。",
+    where: "STUDIO › 素材 › IMAGE",
+  },
+  {
+    title: "動画を作る",
+    detail: "絵コンテから動画を組み立てます。サーバー側で処理するのでAPIは要りません。",
+    where: "STUDIO › 素材 › VIDEO",
+  },
+  {
+    title: "スライド・表・文書を作る",
+    detail: "AIの鍵（Gemini）だけで作れます。Googleを繋ぐと、そのまま書き出せます。",
+    where: "STUDIO › 素材",
+  },
+  {
+    title: "Webを調べる",
+    detail: "検索用のAPIは要りません。CHATで「〜を調べて」と頼めます。",
+    where: "CHAT",
+  },
+];

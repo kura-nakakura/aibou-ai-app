@@ -56,6 +56,7 @@ import migrate
 import newsletter
 import note_client
 import notify
+import x_client
 import proactive
 import pseo
 import scheduler
@@ -2252,6 +2253,31 @@ async def autopilot_delete(mission_id: str, _auth: None = Depends(require_auth),
     _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: autopilot.delete_mission(mission_id))
+
+
+class XPostRequest(BaseModel):
+    text: str
+
+
+@app.get("/x/status")
+async def x_status(_auth: None = Depends(require_auth)):
+    """Xに投稿できる状態か。値そのものは返さない。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, x_client.status)
+
+
+@app.post("/x/post")
+async def x_post(req: XPostRequest, _auth: None = Depends(require_auth)):
+    """Xへ1件投稿する。人が画面で押したときだけ通る入口。
+
+    自動実行からの投稿は x_client 側で既定OFF。取り返しがつかないので、
+    内容を見た人が押したときだけにする。
+    """
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: x_client.post(req.text, by_agent=False))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
 
 
 @app.post("/notify")
