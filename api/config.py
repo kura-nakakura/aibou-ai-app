@@ -300,6 +300,30 @@ def reset_request_client(token) -> None:
         pass
 
 
+def storage_is_bound() -> bool:
+    """このリクエストに「保存先の差し替え」が入っているか。
+
+    入っていて中身が None なら、その人には保存先が無い。各モジュールは
+    そのときメモリへ退避するが、それはプロセスが生きている間だけのもので、
+    Renderが再起動すれば消える。保存できたように見えて消えるのが一番きついので、
+    呼び出し側（API入口）がここを見て、先に断れるようにする。
+    """
+    return _request_client.get() is not None
+
+
+def storage_state() -> str:
+    """いまの保存先。"personal" / "server" / "memory" のどれか。
+
+      personal … その人が繋いだSupabase
+      server   … サーバー既定のSupabase（持ち主）
+      memory   … どこにも残らない（プロセスが死ぬと消える）
+    """
+    bound = _request_client.get()
+    if bound is not None:
+        return "personal" if bound[1] is not None else "memory"
+    return "server" if get_supabase() is not None else "memory"
+
+
 def get_supabase():
     """Supabaseクライアントを返す。未設定/失敗時は None（記憶・収益系は空で縮退）。
 

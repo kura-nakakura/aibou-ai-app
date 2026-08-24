@@ -80,6 +80,12 @@ export function explain(err: unknown, what = "この操作"): string {
   if (/\(403\)/.test(msg)) {
     return "この機能は管理者専用です。";
   }
+  if (/\(409\)/.test(msg)) {
+    // 保存先が無いのに保存しようとした。以前は黙って受け取って消えていた
+    return "保存先がつながっていないため、保存できませんでした。"
+      + "拡張機能（EXTEND）→ Supabase から自分のデータベースを接続してください。"
+      + "接続するまで、作ったものは残りません。";
+  }
   if (/\(404\)/.test(msg)) {
     return `${what}の宛先が見つかりませんでした。設定 → DIAGNOSTICS で接続先を確認してください。`;
   }

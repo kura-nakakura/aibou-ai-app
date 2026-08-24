@@ -298,6 +298,31 @@ async def use_own_database(user_id: str = Depends(current_user),
         config.reset_request_client(token)
 
 
+async def require_storage(_db: str = Depends(use_own_database)) -> None:
+    """保存が伴う操作の入口。保存先が無いのに受け付けない。
+
+    これまでは、保存先が無い人の書き込みを各モジュールがプロセスのメモリへ
+    退避していた。画面には「保存しました」と出るのに、Renderが再起動すれば
+    消える。「ノートブックを作ったのに消える」はこれだった。
+
+    消えるくらいなら、その場で断って理由を出すほうがよい。
+    読み取りには付けない（空で表示されるだけで害がない）。
+    """
+    # 利用者を特定できない構成（1人で使っている／ログインを足していない）は
+    # これまで通り。そこはメモリで動くことが分かっていて使う場所で、
+    # 全部の書き込みを止めると評価すらできなくなる。
+    if not _db:
+        return
+    if config.storage_state() != "memory":
+        return
+    raise HTTPException(
+        status_code=409,
+        detail="保存先がつながっていないため、保存できませんでした。"
+               "拡張機能（EXTEND）→ Supabase から自分のデータベースを接続してください。"
+               "接続するまで、作ったものは残りません。",
+    )
+
+
 async def require_auth(authorization: Optional[str] = Header(default=None),
                        x_app_token: Optional[str] = Header(default=None),
                        x_supabase_token: Optional[str] = Header(default=None),
@@ -785,6 +810,34 @@ async def health():
     return {"status": "ok"}
 
 
+def _storage_report(bearer: str, x_supabase: str) -> dict:
+    """このアカウントのデータがどこへ行くかを、そのまま返す。
+
+    「保存したのに消えた」は原因を追いにくい。自己診断でここが見えれば、
+    利用者も管理者も一目で分かる。秘密は出さない（URLの形だけ）。
+    """
+    claims = {}
+    for t in (x_supabase, bearer):
+        c = _decode_supabase_jwt(t) if t else None
+        if c:
+            claims = c
+            break
+    user_id = str(claims.get("sub") or "")
+    if not user_id:
+        return {"状態": "利用者を特定できません（1人運用として動きます）",
+                "保存される": bool(config.get_supabase())}
+    st = tenancy.status(user_id)
+    if st.get("connected"):
+        return {"状態": "自分のSupabaseに保存されます", "保存される": True,
+                "保存先": st.get("url", "")}
+    if is_owner_claims(claims) and config.SUPABASE_URL:
+        return {"状態": "サーバー既定のデータベースに保存されます（持ち主）",
+                "保存される": True}
+    return {"状態": "保存先が未接続です。作ったものは保存されません",
+            "保存される": False,
+            "対処": "拡張機能（EXTEND）→ Supabase から自分のデータベースを接続してください"}
+
+
 @app.get("/diagnose")
 async def diagnose(authorization: Optional[str] = Header(default=None),
                    x_app_token: Optional[str] = Header(default=None),
@@ -857,6 +910,7 @@ async def diagnose(authorization: Optional[str] = Header(default=None),
             "保存先(SUPABASE_URL/SERVICE_KEY)": bool(config.SUPABASE_URL and config.SUPABASE_SERVICE_KEY),
             "AIの鍵(GEMINI_API_KEY)": bool(config.current_gemini_key()),
         },
+        "あなたのデータの保存先": _storage_report(bearer, (x_supabase_token or "").strip()),
         "ログインの方式": _login_method_report(),
         "受け取ったもの": got,
         "通るか": passes,
@@ -1146,7 +1200,8 @@ async def _synthesize_tts(text: str, voice: str, rate: str = "+0%",
 
 
 @app.post("/memory/add")
-async def memory_add(req: MemoryAddRequest, _auth: None = Depends(require_auth)):
+async def memory_add(req: MemoryAddRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """記憶を1件追加する。Supabaseが無ければ ok=false（ただしcrashはしない）。"""
     ok = mem_add(req.role, req.content, importance=req.importance or 0)
     if not ok:
@@ -1324,6 +1379,21 @@ async def code_shell_run(req: ShellRunRequest, _auth: None = Depends(require_aut
 async def code_scaffold(kind: str = "web", _auth: None = Depends(require_auth)):
     """CODE：スターターワークスペース（web | python | empty）。"""
     return code_agent.scaffold(kind)
+
+
+def _media_url(request: Request, url: str, user_id: str = "") -> str:
+    """画像URLを、絶対URL＋「どのDBから読むか」の手形つきにする。
+
+    画像を配る入口は <img src> のために認証を通していない。認証が無いと
+    「誰の保存先を見ればいいか」も分からず、自分のSupabaseに保存した画像が
+    読めなかった。手形（署名つきの利用者ID）を載せて、そこを解決する。
+    """
+    abs_url = _abs_media_url(request, url)
+    token = hfhub.sign_owner(user_id)
+    if not token or "/hf/image/" not in abs_url:
+        return abs_url
+    sep = "&" if "?" in abs_url else "?"
+    return f"{abs_url}{sep}u={token}"
 
 
 def _abs_media_url(request: Request, url: str) -> str:
@@ -1565,7 +1635,8 @@ async def hf_models(_auth: None = Depends(require_auth)):
 
 
 @app.post("/hf/models")
-async def hf_models_add(req: HfModelAddRequest, _auth: None = Depends(require_auth)):
+async def hf_models_add(req: HfModelAddRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """モデルを台帳に登録する（動作確認は別途 /hf/test）。"""
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
@@ -1576,7 +1647,8 @@ async def hf_models_add(req: HfModelAddRequest, _auth: None = Depends(require_au
 
 
 @app.delete("/hf/models/{model_row_id}")
-async def hf_models_delete(model_row_id: str, _auth: None = Depends(require_auth)):
+async def hf_models_delete(model_row_id: str, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """台帳から削除する（割り当て中の役割も外れる）。"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: hfhub.delete_model(model_row_id))
@@ -1631,7 +1703,8 @@ async def hf_search(q: str = "", task: str = "", limit: int = 12,
 
 
 @app.post("/hf/run")
-async def hf_run(req: HfRunRequest, request: Request, _auth: None = Depends(require_auth)):
+async def hf_run(req: HfRunRequest, request: Request, _auth: None = Depends(require_auth),
+                 user_id: str = Depends(current_user)):
     """お試し実行。画像/音声はbase64、それ以外はテキストやラベルを返す。"""
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
@@ -1642,7 +1715,7 @@ async def hf_run(req: HfRunRequest, request: Request, _auth: None = Depends(requ
         img_id = await loop.run_in_executor(
             None, lambda: hfhub.save_image(res["data"], res.get("mime", "image/png"), req.text))
         return {"ok": True, "kind": "image",
-                "url": _abs_media_url(request, hfhub.image_url(img_id)),
+                "url": _media_url(request, hfhub.image_url(img_id), user_id),
                 "mime": res.get("mime"), "bytes": res.get("bytes")}
     if res.get("kind") == "audio":
         return {"ok": True, "kind": "audio", "mime": res.get("mime"),
@@ -1652,14 +1725,29 @@ async def hf_run(req: HfRunRequest, request: Request, _auth: None = Depends(requ
 
 
 @app.get("/hf/image/{img_id}")
-async def hf_image(img_id: str):
+async def hf_image(img_id: str, u: str = ""):
     """生成画像を配る。IDは推測できないUUIDで、一覧は公開しない。
 
     <img src> はヘッダを付けられないため、ここだけ認証を通さない
     （中身は自分が生成した画像で、鍵や個人データは含まれない）。
+
+    ただし保存先は人によって違う。u= の手形から持ち主を割り出して、
+    その人のSupabaseを見る。手形が無い／壊れていれば既定のDBを見る。
     """
     loop = asyncio.get_event_loop()
-    data, mime = await loop.run_in_executor(None, lambda: hfhub.get_image(img_id))
+
+    def _read():
+        owner = hfhub.verify_owner(u)
+        client = tenancy.client_for(owner) if owner else None
+        if client is None:
+            return hfhub.get_image(img_id)
+        token = config.bind_request_client(client)
+        try:
+            return hfhub.get_image(img_id)
+        finally:
+            config.reset_request_client(token)
+
+    data, mime = await loop.run_in_executor(None, _read)
     if not data:
         return JSONResponse(status_code=404, content={"error": "画像が見つかりません"})
     from fastapi.responses import Response
@@ -1712,7 +1800,8 @@ async def life_entries(category: Optional[str] = None, _auth: None = Depends(req
 
 
 @app.post("/life/entries")
-async def life_add(req: LifeEntryRequest, _auth: None = Depends(require_auth)):
+async def life_add(req: LifeEntryRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """ME：経験を1件保存。"""
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, lambda: life.add_entry(req.category, req.content, req.entry_date))
@@ -1722,7 +1811,8 @@ async def life_add(req: LifeEntryRequest, _auth: None = Depends(require_auth)):
 
 
 @app.delete("/life/entries/{entry_id}")
-async def life_delete(entry_id: str, _auth: None = Depends(require_auth)):
+async def life_delete(entry_id: str, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """ME：経験を1件削除。"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: life.delete_entry(entry_id))
@@ -1824,12 +1914,14 @@ async def vault_notebooks(_auth: None = Depends(require_auth)):
 
 
 @app.post("/vault/create")
-async def vault_create(req: VaultCreateRequest, _auth: None = Depends(require_auth)):
+async def vault_create(req: VaultCreateRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     return await asyncio.get_event_loop().run_in_executor(None, lambda: vault.create_notebook(req.name))
 
 
 @app.post("/vault/add")
-async def vault_add(req: VaultAddRequest, _auth: None = Depends(require_auth)):
+async def vault_add(req: VaultAddRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     return await asyncio.get_event_loop().run_in_executor(
         None, lambda: vault.add_text(req.notebook_id, req.title, req.content)
     )
@@ -1837,7 +1929,8 @@ async def vault_add(req: VaultAddRequest, _auth: None = Depends(require_auth)):
 
 @app.post("/vault/upload")
 async def vault_upload(notebook_id: str = Form(...), file: UploadFile = File(...),
-                       title: str = Form(""), _auth: None = Depends(require_auth)):
+                       title: str = Form(""), _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """PDF等をアップロードし、テキストを抽出してノートブックに資料として入れる。
 
     ブラウザ側でPDFをテキストとして読むと文字化けするので、抽出はここで行う。
@@ -1868,7 +1961,8 @@ async def vault_docs(notebook_id: str, _auth: None = Depends(require_auth)):
 
 
 @app.post("/vault/docs/delete")
-async def vault_doc_delete(req: VaultDocDeleteRequest, _auth: None = Depends(require_auth)):
+async def vault_doc_delete(req: VaultDocDeleteRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     res = await asyncio.get_event_loop().run_in_executor(
         None, lambda: vault.delete_doc(req.notebook_id, req.title))
     if isinstance(res, dict) and res.get("error"):
@@ -2024,7 +2118,8 @@ async def get_tasks(status: Optional[str] = None, limit: int = 100,
 
 
 @app.post("/tasks")
-async def create_task(req: TaskCreateRequest, _auth: None = Depends(require_auth)):
+async def create_task(req: TaskCreateRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """新しいタスクを作成する。"""
     loop = asyncio.get_event_loop()
     task = await loop.run_in_executor(
@@ -2038,7 +2133,8 @@ async def create_task(req: TaskCreateRequest, _auth: None = Depends(require_auth
 
 @app.patch("/tasks/{task_id}")
 async def update_task(task_id: str, req: TaskUpdateRequest,
-                      _auth: None = Depends(require_auth)):
+                      _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """タスクのステータス・返答・内容・優先度・期限・プロジェクトを更新する。"""
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
@@ -2051,7 +2147,8 @@ async def update_task(task_id: str, req: TaskUpdateRequest,
 
 
 @app.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, _auth: None = Depends(require_auth)):
+async def delete_task(task_id: str, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """タスクを削除する。"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: tasks_module.delete_task(task_id))
@@ -2066,7 +2163,8 @@ async def studio_list_ais(_auth: None = Depends(require_auth), _own: None = Depe
 
 
 @app.post("/studio/ais")
-async def studio_create_ai(req: AiCreateRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
+async def studio_create_ai(req: AiCreateRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     ai = await loop.run_in_executor(
         None, lambda: studio.create_ai(req.name, req.persona, req.model, req.rules)
@@ -2077,7 +2175,8 @@ async def studio_create_ai(req: AiCreateRequest, _auth: None = Depends(require_a
 
 
 @app.delete("/studio/ais/{ai_id}")
-async def studio_delete_ai(ai_id: str, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
+async def studio_delete_ai(ai_id: str, _auth: None = Depends(require_auth), _own: None = Depends(require_owner),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: studio.delete_ai(ai_id))
 
@@ -2089,7 +2188,8 @@ async def studio_list_workflows(_auth: None = Depends(require_auth), _own: None 
 
 
 @app.post("/studio/workflows")
-async def studio_create_workflow(req: WorkflowCreateRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
+async def studio_create_workflow(req: WorkflowCreateRequest, _auth: None = Depends(require_auth), _own: None = Depends(require_owner),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     wf = await loop.run_in_executor(
         None, lambda: studio.create_workflow(req.name, req.steps)
@@ -2100,7 +2200,8 @@ async def studio_create_workflow(req: WorkflowCreateRequest, _auth: None = Depen
 
 
 @app.delete("/studio/workflows/{wf_id}")
-async def studio_delete_workflow(wf_id: str, _auth: None = Depends(require_auth), _own: None = Depends(require_owner)):
+async def studio_delete_workflow(wf_id: str, _auth: None = Depends(require_auth), _own: None = Depends(require_owner),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: studio.delete_workflow(wf_id))
 
@@ -2127,7 +2228,8 @@ async def autopilot_list(_auth: None = Depends(require_auth)):
 
 
 @app.post("/autopilot/missions")
-async def autopilot_create(req: MissionCreateRequest, _auth: None = Depends(require_auth)):
+async def autopilot_create(req: MissionCreateRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     m = await loop.run_in_executor(None, lambda: autopilot.create_mission(req.goal, req.notify))
     if isinstance(m, dict) and m.get("error"):
@@ -2146,7 +2248,8 @@ async def autopilot_step(mission_id: str, _auth: None = Depends(require_auth)):
 
 
 @app.delete("/autopilot/missions/{mission_id}")
-async def autopilot_delete(mission_id: str, _auth: None = Depends(require_auth)):
+async def autopilot_delete(mission_id: str, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: autopilot.delete_mission(mission_id))
 
@@ -2167,7 +2270,8 @@ async def automations_list(_auth: None = Depends(require_auth)):
 
 
 @app.post("/automations")
-async def automations_create(req: AutomationCreateRequest, _auth: None = Depends(require_auth)):
+async def automations_create(req: AutomationCreateRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     f = await loop.run_in_executor(
         None, lambda: automations.create_flow(req.name, req.trigger, req.steps)
@@ -2178,7 +2282,8 @@ async def automations_create(req: AutomationCreateRequest, _auth: None = Depends
 
 
 @app.delete("/automations/{flow_id}")
-async def automations_delete(flow_id: str, _auth: None = Depends(require_auth)):
+async def automations_delete(flow_id: str, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: automations.delete_flow(flow_id))
 
@@ -2202,7 +2307,8 @@ async def agenda_list(_auth: None = Depends(require_auth)):
 
 
 @app.post("/agenda")
-async def agenda_add(req: AgendaAddRequest, _auth: None = Depends(require_auth)):
+async def agenda_add(req: AgendaAddRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     ev = await loop.run_in_executor(
         None, lambda: agenda.add_event(req.title, req.date, req.time, req.note)
@@ -2213,7 +2319,8 @@ async def agenda_add(req: AgendaAddRequest, _auth: None = Depends(require_auth))
 
 
 @app.post("/agenda/parse")
-async def agenda_parse(req: AgendaParseRequest, _auth: None = Depends(require_auth)):
+async def agenda_parse(req: AgendaParseRequest, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     """自然言語の予定文を解釈して登録する。"""
     loop = asyncio.get_event_loop()
     ev = await loop.run_in_executor(None, lambda: agenda.parse_and_add(req.text, req.today))
@@ -2223,7 +2330,8 @@ async def agenda_parse(req: AgendaParseRequest, _auth: None = Depends(require_au
 
 
 @app.delete("/agenda/{event_id}")
-async def agenda_delete(event_id: str, _auth: None = Depends(require_auth)):
+async def agenda_delete(event_id: str, _auth: None = Depends(require_auth),
+    _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: agenda.delete_event(event_id))
 
@@ -2530,7 +2638,8 @@ async def image_engines(_auth: None = Depends(require_auth)):
 
 @app.post("/image/generate")
 async def image_generate(req: ImageGenerateRequest, request: Request,
-                         _auth: None = Depends(require_auth)):
+                         _auth: None = Depends(require_auth),
+                         user_id: str = Depends(current_user)):
     """同じ指示で複数バリエーションを作る。save=Trueで生成物（履歴）に保存。"""
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(
@@ -2540,7 +2649,7 @@ async def image_generate(req: ImageGenerateRequest, request: Request,
         return JSONResponse(status_code=400, content=res)
     # 履歴に保存する前に絶対URLへ直す（保存後だと相対URLが残ってしまう）
     for img in res.get("images", []):
-        img["url"] = _abs_media_url(request, img.get("url", ""))
+        img["url"] = _media_url(request, img.get("url", ""), user_id)
     if req.save:
         def _save():
             import artifacts

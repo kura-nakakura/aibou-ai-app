@@ -72,5 +72,7 @@ test("案内文に、押す場所が書いてある", () => {
   const key = firstRunSteps(NOTHING).find((s) => s.key === "ai-key")!;
   expect(key.hint).toContain("KEYCHAIN");
   const db = firstRunSteps(NOTHING).find((s) => s.key === "db")!;
-  expect(db.hint).toContain("消えます");           // 放置したときに何が起きるか
+  // 放置したときに何が起きるかを言う。以前は「消えます」だったが、
+  // 黙って消すのをやめて、その場で断るようにしたので文言も変えた
+  expect(db.hint).toContain("保存できません");
 });

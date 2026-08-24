@@ -44,7 +44,8 @@ export function firstRunSteps(input: FirstRunInput): FirstRunStep[] {
       key: "db",
       done: !!input.db?.connected,
       title: "保存先をつなぐ",
-      hint: "つながるまで、会話やタスクはこの端末を閉じると消えます。設定 › DIAGNOSTICS から。",
+      hint: "自分のSupabaseにつなぐまで、タスク・予定・ノートは保存できません"
+        + "（作ろうとすると理由が出ます）。拡張機能 › Supabase から。",
     },
   ];
 }

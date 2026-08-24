@@ -23,6 +23,8 @@
 # =====================================================================
 
 import base64
+import hashlib
+import hmac
 import os
 import re
 import uuid
@@ -739,6 +741,49 @@ def image_url(img_id: str) -> str:
     """フロントが <img src> に使えるURL。API_BASE が分かればフルURLにする。"""
     base = (os.environ.get("PUBLIC_API_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
     return f"{base}/hf/image/{img_id}" if base else f"/hf/image/{img_id}"
+
+
+# ── 画像を「どのDBから読むか」の手形 ────────────────────────────
+#
+# <img src> はヘッダを付けられないので、画像を配る入口は認証を通していない。
+# ところが保存先は人によって違う（各自のSupabase）。認証が無いということは
+# 「誰の保存先を見ればいいか」も分からないということで、自分のDBに保存した
+# 画像が読めなかった（「画像が読み込めない」の正体）。
+#
+# そこでURLに、署名した短い手形を載せる。中身は利用者IDだけで、
+# 署名があるので他人のIDを騙れない。
+
+def _sign_secret() -> bytes:
+    import config as _c
+    raw = (os.environ.get("KEYCHAIN_SECRET") or getattr(_c, "SUPABASE_SERVICE_KEY", "")
+           or getattr(_c, "SUPABASE_URL", "") or "aibou-local")
+    return hashlib.sha256(str(raw).encode("utf-8")).digest()
+
+
+def sign_owner(user_id: str) -> str:
+    """利用者IDから手形を作る。空なら空（既定のDBを見る）。"""
+    uid = (user_id or "").strip()
+    if not uid:
+        return ""
+    body = base64.urlsafe_b64encode(uid.encode("utf-8")).decode("ascii").rstrip("=")
+    sig = hmac.new(_sign_secret(), body.encode("ascii"), hashlib.sha256).hexdigest()[:16]
+    return f"{body}.{sig}"
+
+
+def verify_owner(token: str) -> str:
+    """手形から利用者IDを取り出す。壊れていれば空（既定のDBを見る）。"""
+    t = (token or "").strip()
+    if not t or "." not in t:
+        return ""
+    body, _, sig = t.partition(".")
+    want = hmac.new(_sign_secret(), body.encode("ascii"), hashlib.sha256).hexdigest()[:16]
+    if not hmac.compare_digest(sig, want):
+        return ""
+    try:
+        pad = "=" * (-len(body) % 4)
+        return base64.urlsafe_b64decode(body + pad).decode("utf-8")
+    except Exception:
+        return ""
 
 
 # ── 状態（UIが「何ができるか」を判断するため） ─────────────────────
