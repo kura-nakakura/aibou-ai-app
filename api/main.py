@@ -2546,6 +2546,30 @@ async def artifacts_list(_auth: None = Depends(require_auth)):
     return {"items": await loop.run_in_executor(None, artifacts.list_artifacts)}
 
 
+class ArtifactCreateRequest(BaseModel):
+    kind: str = "document"
+    title: str
+    content: str
+    mime: str = ""
+
+
+@app.post("/artifacts")
+async def artifacts_create(req: ArtifactCreateRequest,
+                           _auth: None = Depends(require_auth),
+                           _store: None = Depends(require_storage)):
+    """作ったものを保管する。端末を変えても残るように。
+
+    ARCHIVE（作ったアプリ）もここへ入れる。「作ったもの」の置き場を2つ持つと、
+    どちらを見ればいいか分からなくなるので、artifacts に寄せている。
+    """
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: artifacts.create(req.kind, req.title, req.content, req.mime))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
 @app.get("/artifacts/{artifact_id}")
 async def artifacts_get(artifact_id: str, _auth: None = Depends(require_auth)):
     """1件の完全な内容（content 込み）。ダウンロードに使う。"""

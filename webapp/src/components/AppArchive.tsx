@@ -12,11 +12,18 @@
  *   html   … ブラウザで動く1ファイルアプリ／ページ。開いて確認できる
  *   python … Streamlit のコード。手元で streamlit run が要る（古い生成物）
  *
- * localStorage に保存（key: forge_app_archive）。
+ * 保存先:
+ *   ・自分のDBの artifacts（「生成物」と同じ場所）。端末を変えても残る。
+ *   ・localStorage は手元の控え。オフラインでも見られる。
+ *
+ * 「作ったもの」の置き場を2つ持つと、どちらを見ればいいか分からなくなるので、
+ * すでにある artifacts に寄せた（新しい表は作らない）。
+ * 以前は localStorage だけだったので、端末を変えると作ったアプリが消えていた。
  */
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { API_URL, artifactCreate, artifactGet, artifactsList, artifactDelete } from "@/lib/api";
 
 interface ArchiveApp {
   id: string;
@@ -27,6 +34,8 @@ interface ArchiveApp {
   createdAt: string;
   /** 省略時は python（kind を持たない古い保存物との互換） */
   kind?: "html" | "python";
+  /** 他の端末で作られ、本文はまだ手元に無い */
+  remote?: boolean;
 }
 
 /** 古い保存物には kind が無い。無ければ Streamlit だったとみなす。 */
@@ -71,6 +80,17 @@ export function addToArchive(
     createdAt: new Date().toISOString(),
   };
   saveArchive([app, ...apps]);
+
+  // 自分のDBにも残す。端末を変えても、作ったものが消えないように。
+  // 失敗しても手元には残っているので、ここでは黙って諦める。
+  if (API_URL) {
+    void artifactCreate(
+      kind === "html" ? "webapp" : "app",
+      name,
+      code,
+      kind === "html" ? "text/html" : "text/x-python",
+    ).catch(() => {});
+  }
 }
 
 /** HTMLを別タブで開いて、そのまま動かす。 */
@@ -100,11 +120,66 @@ export default function AppArchive() {
     setApps(loadArchive());
   }, []);
 
+  // 他の端末で作ったものを取り込む。書くだけだと片道で、
+  // 「保存されているのに、この端末では見えない」ことになる。
+  useEffect(() => {
+    if (!API_URL) return;
+    let alive = true;
+    artifactsList()
+      .then((items) => {
+        if (!alive) return;
+        const mine = items.filter((a) => a.kind === "webapp" || a.kind === "app");
+        if (mine.length === 0) return;
+        setApps((prev) => {
+          const known = new Set(prev.map((a) => a.name + a.createdAt.slice(0, 10)));
+          const extra: ArchiveApp[] = mine
+            .filter((a) => !known.has(a.title + (a.created_at ?? "").slice(0, 10)))
+            .map((a) => ({
+              id: a.id,
+              name: a.title,
+              prompt: "",
+              code: "",                       // 本文は開いたときに取りに行く
+              kind: a.kind === "webapp" ? "html" : "python",
+              createdAt: a.created_at ?? new Date().toISOString(),
+              remote: true,
+            }));
+          if (extra.length === 0) return prev;
+          const next = [...prev, ...extra]
+            .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+          saveArchive(next);
+          return next;
+        });
+      })
+      .catch(() => { /* 取れなくても手元の分は見られる */ });
+    return () => { alive = false; };
+  }, []);
+
+  /** 本文が手元に無いもの（他の端末で作った）を取りに行く。 */
+  const fetchCode = useCallback(async (app: ArchiveApp): Promise<string> => {
+    if (app.code) return app.code;
+    if (!API_URL) return "";
+    try {
+      const body = await artifactGet(app.id);
+      const code = body?.content ?? "";
+      if (code) {
+        setApps((prev) => {
+          const next = prev.map((a) => (a.id === app.id ? { ...a, code } : a));
+          saveArchive(next);
+          return next;
+        });
+      }
+      return code;
+    } catch {
+      return "";
+    }
+  }, []);
+
   const handleDelete = (id: string) => {
     if (!window.confirm("このアプリのコードを削除しますか？（元に戻せません）")) return;
     const next = apps.filter((a) => a.id !== id);
     setApps(next);
     saveArchive(next);
+    if (API_URL) void artifactDelete(id).catch(() => {});
     if (viewingId === id) setViewingId(null);
   };
 
@@ -184,7 +259,7 @@ export default function AppArchive() {
                   {kindOf(app) === "html" && (
                     <button
                       type="button"
-                      onClick={() => openHtml(app.code)}
+                      onClick={() => void fetchCode(app).then((c) => c && openHtml(c))}
                       className="rounded-forge border px-2 py-1 text-[10px] tracking-[0.12em] label-mono"
                       style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}
                     >
@@ -193,16 +268,22 @@ export default function AppArchive() {
                   )}
                   <button
                     type="button"
-                    onClick={() => setViewingId(app.id === viewingId ? null : app.id)}
+                    onClick={() => {
+                      if (app.id === viewingId) { setViewingId(null); return; }
+                      void fetchCode(app).then(() => setViewingId(app.id));
+                    }}
                     className="flex-1 rounded-forge border border-panel px-2 py-1 text-[10px] tracking-[0.12em] text-muted transition hover:border-[var(--line)] hover:text-fg-strong label-mono"
                   >
                     {viewingId === app.id ? "COLLAPSE" : "VIEW CODE"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => kindOf(app) === "html"
-                      ? download(`${app.name.replace(/\s+/g, "_")}.html`, app.code, "text/html;charset=utf-8")
-                      : download(`${app.name.replace(/\s+/g, "_")}.py`, app.code, "text/x-python")}
+                    onClick={() => void fetchCode(app).then((c) => {
+                      if (!c) return;
+                      kindOf(app) === "html"
+                        ? download(`${app.name.replace(/\s+/g, "_")}.html`, c, "text/html;charset=utf-8")
+                        : download(`${app.name.replace(/\s+/g, "_")}.py`, c, "text/x-python");
+                    })}
                     className="rounded-forge border border-[var(--line)] bg-[var(--btn-bg)] px-2 py-1 text-[10px] tracking-[0.12em] text-fg-strong transition hover:shadow-glow label-mono"
                   >
                     {kindOf(app) === "html" ? "↓ .html" : "↓ .py"}

@@ -2490,3 +2490,17 @@ export async function conversationDelete(id: string): Promise<boolean> {
   const d = (await res.json().catch(() => ({ ok: false }))) as { ok?: boolean };
   return Boolean(d.ok);
 }
+
+/** POST /artifacts — 作ったものを自分のDBに保管する。 */
+export async function artifactCreate(
+  kind: string, title: string, content: string, mime = "",
+): Promise<{ id?: string; error?: string }> {
+  const res = await fetch(`${requireApiUrl()}/artifacts`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ kind, title, content, mime }),
+  });
+  const d = (await res.json().catch(() => ({}))) as { id?: string; error?: string; detail?: string };
+  if (!res.ok && !d.error) return { error: d.detail ?? `保管できませんでした (${res.status})` };
+  return d;
+}
