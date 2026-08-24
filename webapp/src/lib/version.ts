@@ -5,4 +5,4 @@
  * glance whether the live site is serving the latest deployment (vs. a cached
  * old build or a stale immutable deployment URL).
  */
-export const APP_VERSION = "2026.08.21 · ui-r80 TIDY";
+export const APP_VERSION = "2026.08.21 · ui-r81 SAY WHAT IT DOES";

@@ -1,9 +1,17 @@
 "use client";
 
 /**
- * Vault — Document Vault（知識）. Manage notebooks of text knowledge, then
- * ask questions answered from the selected notebook. FORGE OS look.
- * Stays alive when the backend / Supabase is unconfigured (catch → empty).
+ * Vault — 資料から答える画面。
+ *
+ * 資料を入れておくと、その中身だけを見て答える。ネットの一般論ではなく、
+ * 入れた資料に書いてあることだけを言うのがこの画面の値打ち。
+ *
+ * 点検で分かったこと: 他のモードは冒頭で「何をする画面か」を言っているのに、
+ * ここだけ空の一覧が出るだけだった。初めて来た人は「ノートブック」が何なのか、
+ * 作ると何が起きるのかが分からないまま止まる。説明書には書いてあったので、
+ * 同じことを画面にも出す。
+ *
+ * バックエンド/Supabase が未設定でも落ちない（catch → 空）。
  */
 
 import { motion } from "framer-motion";
@@ -257,6 +265,24 @@ export default function Vault() {
 
   return (
     <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col gap-3 overflow-y-auto pb-2">
+      {/* この画面が何をするものかを最初に言う。他のモードと揃える */}
+      <div className="panel p-3">
+        <div className="mb-1.5 text-[10px] tracking-[0.2em] text-muted label-mono">
+          VAULT とは
+        </div>
+        <p className="text-[11px] leading-relaxed text-fg">
+          <span className="text-fg-strong">入れた資料の中身だけを見て答える</span>画面です。
+          ネットの一般論ではなく、その資料に書いてあることだけを言います。
+        </p>
+        <div className="mt-2 flex flex-col gap-1 border-t border-panel pt-2 text-[10px] leading-relaxed text-muted">
+          <div>▸ 社内規程・マニュアル・議事録を入れておくと、聞くだけで引ける</div>
+          <div>▸ 答えるときは、資料のどこに書いてあったかも一緒に出す</div>
+          <div className="text-muted/70">
+            ※ 文字として入っているPDFだけ読めます。スキャンした写真だけのPDFは読めません。
+          </div>
+        </div>
+      </div>
+
       {/* Notebooks: list + create */}
       <div className="panel p-3">
         <label className="mb-2 block text-[10px] tracking-[0.2em] text-muted label-mono">
@@ -266,13 +292,20 @@ export default function Vault() {
         {loading ? (
           <div className="text-center text-xs text-muted">読み込み中…</div>
         ) : notebooks.length === 0 ? (
-          <p className="text-[11px] leading-relaxed text-muted">
-            ノートブックがまだありません。下の入力欄から最初の知識ノートを作成してください。
-            <br />
-            <span className="text-[10px] text-muted/70">
-              （Supabase未接続の場合はここに表示されません）
-            </span>
-          </p>
+          <div className="text-[11px] leading-relaxed">
+            <p className="text-fg">
+              まず<span className="text-fg-strong">入れ物</span>を1つ作ります。
+              下の欄に名前を入れて「作成」を押してください。
+            </p>
+            <p className="mt-1 text-muted">
+              例：「社内規程」「商品マニュアル」「議事録」。
+              テーマごとに分けておくと、聞いたときに関係ない資料が混ざりません。
+            </p>
+            <p className="mt-1 text-[10px] text-muted/70">
+              ※ 保存先がまだ決まっていないと、作った入れ物は残りません
+              （拡張機能 → Supabase）。
+            </p>
+          </div>
         ) : (
           <div className="flex flex-wrap gap-2">
             {notebooks.map((nb) => {

@@ -71,6 +71,11 @@ export default function SnsMode() {
           <span className="text-[10px] tracking-[0.24em] text-muted label-mono">SNS SUPPORT</span>
         </div>
         <h2 className="label-mono text-glow text-sm text-fg-strong">SNS投稿サポート</h2>
+        {/* 見出しだけだと、何を入れて何が返るのかが分からない */}
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+          伝えたいことを1行書くと、<span className="text-fg">投稿先ごとの書き方に合わせた文案</span>を作ります。
+          文字数やタグの付け方は、選んだ投稿先に合わせて変わります。
+        </p>
 
         {/* プラットフォーム */}
         <div className="mt-3 grid grid-cols-2 gap-2">

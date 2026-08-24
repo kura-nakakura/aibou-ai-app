@@ -626,6 +626,7 @@ export default function CodeMode() {
           <h2 className="label-mono text-glow text-sm tracking-[0.24em] text-fg-strong">AI CODING AGENT</h2>
           <p className="mt-2 text-[12px] leading-relaxed text-muted">
             Claude Code のように、日本語の指示でコードを書き・直し・育てるモードです。<br />
+            プログラムを書いて、その場で動かして確かめる画面です。
             テンプレートを選んで始めてください（バックエンド未接続でも編集・プレビュー・ZIP出力は使えます）。
           </p>
         </div>

@@ -679,6 +679,22 @@ export default function Whiteboard() {
           backgroundPosition: `${view.x}px ${view.y}px`,
         }}
       >
+        {/* 空のキャンバスは、何をする場所なのかも次の一手も分からない。
+            使い始めたら消えるので、作業の邪魔にはならない。 */}
+        {nodes.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center">
+            <div>
+              <p className="text-[12px] text-fg-strong">考えを広げる場所です</p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
+                上の「＋ 付箋」で貼るか、<span className="text-fg">何もない所をダブルクリック</span>すると置けます。
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted/70">
+                付箋どうしは線でつなげます。書いた内容はそのまま保存されます。
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="absolute left-0 top-0" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: "0 0" }}>
           {/* edges (arrows) */}
           <svg className="pointer-events-none absolute -left-[5000px] -top-[5000px]" width="10000" height="10000" aria-hidden>
