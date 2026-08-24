@@ -2324,7 +2324,16 @@ export async function myDatabaseTest(body: { url: string; service_key: string })
 /** POST /account/database — 接続して保存する。 */
 export async function myDatabaseConnect(body: {
   url: string; service_key: string; db_url?: string; label?: string;
-}): Promise<MyDatabase & { ok?: boolean; tables_ready?: boolean; error?: string }> {
+}): Promise<MyDatabase & {
+  ok?: boolean;
+  tables_ready?: boolean;
+  /** 実際に1行書いて消せたか。ここが false なら保存されない */
+  writable?: boolean;
+  /** 繋がったが保存できないときの、次にやること */
+  warning?: string;
+  migrate_error?: string;
+  error?: string;
+}> {
   const res = await fetch(`${requireApiUrl()}/account/database`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),

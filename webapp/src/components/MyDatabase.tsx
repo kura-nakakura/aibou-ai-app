@@ -102,10 +102,16 @@ export default function MyDatabase({ compact = false }: { compact?: boolean } = 
     if (r.error) return { text: r.error, tone: "error" };
     setKey("");                       // 画面に残さない
     await reload();
+
+    // 「繋がった」だけでは足りない。表が無いDBに書くと、各モジュールが
+    // 例外を握ってメモリへ退避し、成功として返す。画面には保存できたように
+    // 見えて、再起動で消える。サーバー側で実際に1行書いて確かめているので、
+    // その結果をそのまま出す。
+    if (!r.writable) {
+      return { text: r.warning ?? "接続しましたが、保存できる状態ではありません", tone: "error" };
+    }
     setOpen(false);
-    return r.tables_ready
-      ? { text: "接続しました。以後このDBに保存されます", tone: "ok" }
-      : { text: "接続しました。次に「テーブルを作成」を押してください", tone: "info" };
+    return { text: "接続しました。書き込みも確認できたので、以後このDBに保存されます", tone: "ok" };
   });
 
   const doMigrate = () => run("migrate", async () => {

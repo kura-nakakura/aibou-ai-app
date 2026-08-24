@@ -89,6 +89,7 @@ def run_stream(instruction: str, history=None, name: str = "AIbou", approval: bo
 
     convo = _build_convo(_system_prompt(name), history, instruction)
     executed: list = []  # 実行したツール名の記録（最終フォールバック用）
+    failed: list = []    # 失敗したツールと理由（成功したように報告しないため）
 
     for step in range(1, MAX_STEPS + 1):
         yield {"phase": "thinking", "step": step}
@@ -102,7 +103,7 @@ def run_stream(instruction: str, history=None, name: str = "AIbou", approval: bo
         call, preface = tools.extract_tool_call(text or "")
         if not call:
             # ツール呼び出し無し＝最終報告。
-            final = (text or "").strip() or "完了しました。"
+            final = (text or "").strip() or _fallback_report(executed, failed)
             yield {"phase": "final", "text": final}
             yield {"phase": "done", "steps": step - 1}
             return
@@ -120,6 +121,8 @@ def run_stream(instruction: str, history=None, name: str = "AIbou", approval: bo
 
         result = tools.execute_tool(tool, params)
         executed.append(tool)
+        if _looks_failed(result):
+            failed.append((tool, result))
         yield {"phase": "observation", "step": step, "tool": tool, "result": result}
 
         # 実行の痕跡を会話に足して次のステップへ。
@@ -137,9 +140,35 @@ def run_stream(instruction: str, history=None, name: str = "AIbou", approval: bo
     except Exception:
         final = ""
     if not (final or "").strip():
-        final = f"実行しました（{'、'.join(executed) or '操作なし'}）。"
+        final = _fallback_report(executed, failed)
     yield {"phase": "final", "text": final.strip()}
     yield {"phase": "done", "steps": MAX_STEPS}
+
+
+# ツールの結果は文字列で返る（絶対に raise しない作りのため）。
+# 成功と失敗を見分ける手掛かりは、その文面しかない。
+_FAIL_MARKS = ("失敗", "エラー", "できません", "ませんでした",
+               "不明なツール", "が空です", "見つかりません", "保存先")
+
+
+def _fallback_report(executed: list, failed: list) -> str:
+    """生成が文章を返さなかったときの受け皿。
+
+    ここで一律に「完了しました」「実行しました」と書くと、全部失敗していても
+    成功したように読める。エージェントは実際に手を動かすので、この嘘は重い。
+    """
+    if failed:
+        lines = "、".join(f"{t}（{r}）" for t, r in failed[:3])
+        more = f" ほか{len(failed) - 3}件" if len(failed) > 3 else ""
+        return f"うまくいかなかったものがあります：{lines}{more}"
+    if executed:
+        return f"実行しました（{'、'.join(executed)}）。"
+    return "完了しました。"
+
+
+def _looks_failed(result: str) -> bool:
+    r = (result or "")
+    return any(m in r for m in _FAIL_MARKS)
 
 
 def _friendly_error(e: Exception) -> str:

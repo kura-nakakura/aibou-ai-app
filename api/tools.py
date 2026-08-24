@@ -887,13 +887,45 @@ _DISPATCH = {
 }
 
 
+# アプリのDBに書き込むツール。保存先が無いときに実行すると、メモリに入って
+# 消えるのに「追加しました」と返ってしまう。HTTPの入口は require_storage で
+# 塞いだが、エージェントはモジュールを直接呼ぶのでそこを通らない。
+# 同じ嘘がここでも起きるので、ここでも塞ぐ。
+#
+# 外部サービスに書くもの（Googleカレンダー・メール・Notion・通知）は対象外。
+# あちらに残るので、こちらの保存先とは関係がない。
+_TOOLS_THAT_PERSIST = {
+    "add_task", "complete_task", "add_agenda", "board_add_note",
+    "remember", "save_note", "create_automation", "create_mission",
+    "enqueue_income", "schedule_add",
+}
+
+_NO_STORAGE_MSG = (
+    "保存先がつながっていないため、保存できませんでした。"
+    "拡張機能（EXTEND）→ Supabase から自分のデータベースを接続してください。"
+    "接続するまで、作ったものは残りません。"
+)
+
+
+def _storage_missing() -> bool:
+    """保存先が無いか。判定できないときは False（止めない側に倒す）。"""
+    try:
+        import config
+        return config.storage_state() == "memory" and config.storage_is_bound()
+    except Exception:
+        return False
+
+
 # === ツール実行のエントリポイント ===========================================
 def execute_tool(name: str, params: dict) -> str:
     """選択されたツールを実行し、人間向けの結果文字列を返す。絶対に raise しない。"""
     params = params or {}
-    handler = _DISPATCH.get((name or "").strip())
+    key = (name or "").strip()
+    handler = _DISPATCH.get(key)
     if handler is None:
         return f"不明なツールです：{name}"
+    if key in _TOOLS_THAT_PERSIST and _storage_missing():
+        return _NO_STORAGE_MSG
     try:
         return handler(params)
     except Exception as e:

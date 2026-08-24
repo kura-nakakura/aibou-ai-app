@@ -22,6 +22,7 @@ import base64
 import hashlib
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
@@ -159,6 +160,34 @@ def check(url: str, service_key: str) -> dict:
 
 
 # ── 台帳の読み書き ─────────────────────────────────────────────────
+def verify_writable(client) -> dict:
+    """本当に書けるかを、実際に1行入れて消して確かめる。
+
+    「繋がった」だけでは足りない。テーブルが無いDBに書くと、各モジュールは
+    例外を握ってメモリへ退避し、成功として返してしまう。画面には保存できた
+    ように見えて、再起動で消える。SQLを流し忘れた人が必ずここに落ちる。
+
+    読めるかだけを見ても分からない（読めても書けないことがある）ので、
+    実際に書いて、消す。
+    """
+    probe_id = f"aibou-probe-{uuid.uuid4()}"
+    try:
+        client.table("tasks").insert({
+            "id": probe_id, "title": "接続確認", "content": "",
+            "status": "pending", "created_at": _now(), "updated_at": _now(),
+        }).execute()
+    except Exception as e:
+        msg = str(e)
+        if "does not exist" in msg or "PGRST205" in msg or "42P01" in msg:
+            return {"ok": False, "reason": "tables_missing"}
+        return {"ok": False, "reason": "write_failed", "detail": msg[:180]}
+    try:
+        client.table("tasks").delete().eq("id", probe_id).execute()
+    except Exception:
+        pass          # 消せなくても書けたことは確かめられた
+    return {"ok": True}
+
+
 def connect(user_id: str, url: str, service_key: str, db_url: str = "", label: str = "") -> dict:
     """接続を確かめてから保存する。"""
     user_id = (user_id or "").strip()
@@ -178,7 +207,40 @@ def connect(user_id: str, url: str, service_key: str, db_url: str = "", label: s
     }
     _write_row(row)
     _clients.pop(user_id, None)     # 作り直させる
-    return {"ok": True, "tables_ready": res.get("tables_ready", False)}
+
+    # ここから先が本題。繋がっただけでは保存できるとは限らない。
+    # テーブルが無ければ作り、そのうえで本当に書けるかを確かめる。
+    # ここを省くと、SQLを流し忘れた人が「保存したのに消える」に落ちる。
+    made = None
+    if not res.get("tables_ready") and db_url:
+        try:
+            made = create_tables(user_id)
+        except Exception as e:
+            made = {"error": str(e)[:180]}
+
+    client = client_for(user_id)
+    check_write = verify_writable(client) if client is not None else {"ok": False, "reason": "no_client"}
+
+    out = {"ok": True, "tables_ready": bool(check_write.get("ok")), "writable": bool(check_write.get("ok"))}
+    if made and made.get("error"):
+        out["migrate_error"] = made["error"]
+    if check_write.get("ok"):
+        return out
+
+    # 書けないまま「接続しました」で終わらせない。何をすればいいかまで返す。
+    if check_write.get("reason") == "tables_missing":
+        out["warning"] = (
+            "接続はできましたが、まだ表（テーブル）がありません。このままでは保存されません。"
+            + ("DB接続URL（postgresql://…）を入れると、ここで自動的に作れます。"
+               if not db_url else
+               "自動作成に失敗しました。Supabaseの SQL Editor で supabase_schema.sql を実行してください。")
+        )
+    elif check_write.get("reason") == "write_failed":
+        out["warning"] = ("接続はできましたが、書き込みが拒否されました。"
+                          f"service_role キーで繋いでいるか確認してください（{check_write.get('detail', '')}）")
+    else:
+        out["warning"] = "接続はできましたが、書き込みを確かめられませんでした。"
+    return out
 
 
 def disconnect(user_id: str) -> dict:
