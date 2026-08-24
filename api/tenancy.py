@@ -256,6 +256,24 @@ def disconnect(user_id: str) -> dict:
     return {"ok": True}
 
 
+def all_connected_users() -> list:
+    """自分のDBを繋いでいる人のIDを全部返す。
+
+    定期実行のように「リクエストが無いところで動くもの」に要る。
+    常駐ループはリクエスト文脈を持たないので、そのままだとサーバー既定のDBしか
+    見えない。各自の予約は各自のDBにあるので、誰がいるかを知る必要がある。
+    """
+    c = _admin_client()
+    if c:
+        try:
+            rows = (c.table(TABLE).select("user_id").execute().data) or []
+            ids = [str(r.get("user_id") or "") for r in rows]
+            return [i for i in ids if i]
+        except Exception:
+            pass
+    return [k for k in _mem_rows.keys() if k]
+
+
 def credentials(user_id: str) -> Tuple[str, str, str]:
     """(url, service_key, db_url) を復号して返す。サーバー内部専用。"""
     row = _read_row(user_id)

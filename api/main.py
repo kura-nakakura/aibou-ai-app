@@ -73,7 +73,10 @@ import video_script
 from memory_store import mem_add, mem_recall, mem_recent
 
 async def _scheduler_loop():
-    """常駐ループ：60秒ごとに定期実行(scheduler.tick)を確認する（best-effort）。
+    """常駐ループ：60秒ごとに定期実行を確認する（best-effort）。
+
+    tick_everyone を呼ぶ。tick だけだとサーバー既定のDBしか見えず、
+    自分のSupabaseを繋いだ人の予約が永久に発火しない。
     あわせて1日1回 Supabase を触って自動一時停止（7日）を防ぐ。
     サーバーがスリープする無料プランでは起きている間のみ動く
     （外部cronは /scheduler/tick と /keepalive）。"""
@@ -82,7 +85,7 @@ async def _scheduler_loop():
         try:
             await asyncio.sleep(60)
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, scheduler.tick)
+            await loop.run_in_executor(None, scheduler.tick_everyone)
             ticks += 1
             if ticks % 1440 == 1:  # 起動直後 + 以後およそ24時間ごと
                 res = await loop.run_in_executor(None, keepalive_mod.ping)
@@ -812,6 +815,29 @@ async def health():
     return {"status": "ok"}
 
 
+def _scheduler_report() -> dict:
+    """定期実行が生きているか。無料プランで寝ていると、朝の予約が飛ぶ。"""
+    last = scheduler.last_tick()
+    at = last.get("at") or ""
+    if not at:
+        return {"状態": "まだ一度も見回りをしていません（起動直後かもしれません）",
+                "動いている": False}
+    try:
+        from datetime import datetime, timezone
+        delta = (datetime.now(timezone.utc) - datetime.fromisoformat(at)).total_seconds()
+    except Exception:
+        return {"状態": "最終確認: " + at, "動いている": True}
+    if delta < 180:
+        return {"状態": "動いています", "動いている": True, "最終確認": at[:19]}
+    return {
+        "状態": f"{int(delta // 60)}分前から止まっています。サーバーが寝ている可能性があります",
+        "動いている": False,
+        "最終確認": at[:19],
+        "対処": "無料プランのサーバーは無操作で寝ます。時刻どおりに動かすには、"
+                "有料プランにするか、外部のcronから /scheduler/tick を定期的に叩いてください",
+    }
+
+
 def _storage_report(bearer: str, x_supabase: str) -> dict:
     """このアカウントのデータがどこへ行くかを、そのまま返す。
 
@@ -913,6 +939,7 @@ async def diagnose(authorization: Optional[str] = Header(default=None),
             "AIの鍵(GEMINI_API_KEY)": bool(config.current_gemini_key()),
         },
         "あなたのデータの保存先": _storage_report(bearer, (x_supabase_token or "").strip()),
+        "定期実行の見回り": _scheduler_report(),
         "ログインの方式": _login_method_report(),
         "受け取ったもの": got,
         "通るか": passes,
@@ -2625,9 +2652,17 @@ async def file_extract(file: UploadFile = File(...), _auth: None = Depends(requi
 # ── 定期実行（スケジューラ） ──────────────────────────────────────────
 
 @app.get("/scheduler")
-async def scheduler_list(_auth: None = Depends(require_auth)):
+async def scheduler_list(_auth: None = Depends(require_auth),
+                         _db: str = Depends(use_own_database)):
+    """予約の一覧と、見回りが生きているか。
+
+    無料プランのサーバーは無操作で寝るので、朝の予約が発火しないことがある。
+    「登録しました」と言われて何も来ないのが一番きついので、
+    最後に見回りをした時刻も一緒に返して、画面から分かるようにする。
+    """
     loop = asyncio.get_event_loop()
-    return {"items": await loop.run_in_executor(None, scheduler.list_schedules)}
+    items = await loop.run_in_executor(None, scheduler.list_schedules)
+    return {"items": items, "last_tick": scheduler.last_tick()}
 
 
 @app.post("/scheduler")
@@ -2900,7 +2935,7 @@ async def keepalive_status(_auth: None = Depends(require_auth)):
 async def scheduler_tick():
     """外部cron（無料のcron-job.org等）から叩く実行トリガ。認証不要（副作用は登録済み定期のみ）。"""
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, scheduler.tick)
+    return await loop.run_in_executor(None, scheduler.tick_everyone)
 
 
 # ── Google 連携（OAuth：スプレッドシート / ドキュメント） ──────────────

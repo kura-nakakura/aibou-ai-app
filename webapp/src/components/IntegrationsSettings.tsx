@@ -13,7 +13,8 @@ import {
   googleDisconnect,
   dbStatus,
   dbMigrate,
-  schedulesList,
+  schedulesWithHealth,
+  schedulerLooksAsleep,
   scheduleAdd,
   scheduleDelete,
   keepaliveStatus,
@@ -135,8 +136,19 @@ function SchedulerPanel() {
   const [days, setDays] = useState<string[]>([]);  // 空 = 毎日
   const [busy, setBusy] = useState(false);
 
+  // 見回りが生きているか。無料プランのサーバーは無操作で寝るので、
+  // 登録できたのに朝になっても何も来ない、が起こりうる。
+  // 注意書きを読ませるより、いまの状態を出すほうが早い。
+  const [asleep, setAsleep] = useState(false);
+  const [lastAt, setLastAt] = useState("");
+
   const load = useCallback(async () => {
-    try { setItems(await schedulesList()); } catch { /* ignore */ }
+    try {
+      const { items: list, health } = await schedulesWithHealth();
+      setItems(list);
+      setAsleep(schedulerLooksAsleep(health));
+      setLastAt(health?.at ?? "");
+    } catch { /* ignore */ }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
@@ -162,6 +174,26 @@ function SchedulerPanel() {
   return (
     <div className="mb-4 rounded-forge border border-panel p-3">
       <div className="mb-2 text-[10px] tracking-[0.2em] text-muted label-mono">定期実行 — SCHEDULER</div>
+
+      {/* 登録できたのに何も来ない、を起こさないために状態を出す */}
+      {items.length > 0 && (
+        <div className="mb-2 rounded-forge border p-2 text-[11px] leading-relaxed"
+             style={{ borderColor: asleep ? "#ffd07f55" : "#60d39455",
+                      color: asleep ? "#ffd07f" : "#60d394" }}>
+          {asleep ? (
+            <>
+              見回りが止まっています。このままだと時刻になっても実行されません。
+              <span className="mt-1 block text-muted">
+                無料プランのサーバーは、しばらく使われないと寝ます。時刻どおりに動かすには、
+                有料プランにするか、下の外部cronの方法を使ってください。
+                {lastAt && <span className="ml-1">（最終確認 {lastAt.slice(11, 16)}）</span>}
+              </span>
+            </>
+          ) : (
+            <>✓ 見回りは動いています（1分ごとに確認しています）</>
+          )}
+        </div>
+      )}
       <div className="flex gap-2">
         <input
           type="time" value={time} onChange={(e) => setTime(e.target.value)}

@@ -136,6 +136,69 @@ def _due(schedules: List[dict]) -> List[dict]:
     return due
 
 
+# 最後に見回りをした時刻。常駐ループが生きているかの唯一の手がかり。
+# 無料プランのRenderは無操作で寝るので、朝8時の予約が発火しないことがある。
+# 「登録しました」と言われて何も来ないのが一番きついので、
+# 生きているかどうかを画面から見えるようにする。
+_last_tick: dict = {"at": "", "users": 0, "ran": 0}
+
+
+def last_tick() -> dict:
+    """最後に見回りをした時刻。空なら一度も回っていない。"""
+    return dict(_last_tick)
+
+
+def tick_everyone() -> dict:
+    """全員ぶんの定期実行を回す。常駐ループはこちらを呼ぶ。
+
+    調べて分かったこと: これまで常駐ループは tick() を直接呼んでいた。
+    tick() はリクエスト文脈を持たないので、保存先はサーバー既定のDBになる。
+    各自の予約は各自のDBにあるので、持ち主以外の「毎朝LINEに通知して」は
+    登録はできても永久に発火しなかった。鍵も同じで、その人のLINEトークンは
+    その人のDBにあるため、仮に発火しても送り先が無い。
+
+    ここで人ごとに保存先を差し替えてから回す。そうすると予約も鍵も
+    その人のものが使われる。
+    """
+    out = {"ran": [], "count": 0, "users": 0}
+
+    def _merge(res: dict) -> None:
+        out["ran"].extend(res.get("ran") or [])
+        out["count"] += int(res.get("count") or 0)
+
+    # 1) サーバー既定（持ち主 / 1人運用）
+    try:
+        _merge(tick())
+    except Exception as e:
+        print(f"[scheduler] default tick error: {e}")
+
+    # 2) 自分のDBを繋いでいる人それぞれ
+    try:
+        import tenancy
+        users = tenancy.all_connected_users()
+    except Exception as e:
+        print(f"[scheduler] cannot list users: {e}")
+        return out
+
+    for user_id in users:
+        try:
+            client = tenancy.client_for(user_id)
+            if client is None:
+                continue
+            token = config.bind_request_client(client)
+            try:
+                _merge(tick())
+                out["users"] += 1
+            finally:
+                config.reset_request_client(token)
+        except Exception as e:
+            # 1人ぶんの失敗で、他の人の予約まで止めない
+            print(f"[scheduler] user {user_id[:8]}… tick error: {e}")
+
+    _last_tick.update({"at": _now().isoformat(), "users": out["users"], "ran": out["count"]})
+    return out
+
+
 def tick() -> dict:
     """実行時刻を過ぎた本日未実行のscheduleを実行する。{ran:[{id,instruction,result}]}。"""
     import agent

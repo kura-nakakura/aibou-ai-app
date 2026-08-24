@@ -746,10 +746,33 @@ export interface ScheduleItem {
 }
 
 export async function schedulesList(): Promise<ScheduleItem[]> {
+  return (await schedulesWithHealth()).items;
+}
+
+/** 見回りが生きているか。無料プランのサーバーは無操作で寝るので、
+ *  時刻になっても発火しないことがある。登録できたのに何も来ないのが
+ *  いちばん困るので、状態を一緒に取る。 */
+export interface SchedulerHealth {
+  at: string;
+  users: number;
+  ran: number;
+}
+
+export async function schedulesWithHealth():
+  Promise<{ items: ScheduleItem[]; health: SchedulerHealth | null }> {
   const res = await fetch(`${requireApiUrl()}/scheduler`, { headers: authHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`Schedules failed (${res.status})`);
-  const data = (await res.json().catch(() => ({ items: [] }))) as { items?: ScheduleItem[] };
-  return data.items ?? [];
+  const d = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const h = (d.last_tick ?? null) as SchedulerHealth | null;
+  return { items: asArray<ScheduleItem>(d.items), health: h && h.at ? h : null };
+}
+
+/** 見回りが止まっていないか。3分以上あいていたら寝ている疑い。 */
+export function schedulerLooksAsleep(h: SchedulerHealth | null): boolean {
+  if (!h || !h.at) return true;
+  const t = Date.parse(h.at);
+  if (!Number.isFinite(t)) return false;
+  return Date.now() - t > 3 * 60 * 1000;
 }
 
 /** POST /scheduler — 定期実行を登録する。
