@@ -15,10 +15,9 @@ import uuid
 from typing import List, Optional
 
 import config
+import memstore
 
-_mem_events: List[dict] = []
-
-
+_mem_events = memstore.TenantList()
 def _extract_json(text: str):
     m = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
     raw = m.group(1).strip() if m else None
@@ -74,8 +73,12 @@ def add_event(title: str, date: str = "", time: str = "", note: str = "") -> dic
 
 
 def delete_event(event_id: str) -> dict:
-    global _mem_events
-    _mem_events = [e for e in _mem_events if e.get("id") != event_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_events) - 1, -1, -1):
+        e = _mem_events[_i]
+        if not (e.get("id") != event_id):
+            del _mem_events[_i]
     c = config.get_supabase()
     if c:
         try:

@@ -20,11 +20,10 @@ import uuid
 from typing import List, Optional
 
 import config
+import memstore
 import flow_engine
 
-_mem_flows: List[dict] = []
-
-# 種別は flow_engine と共通（片方だけ増えてずれないように参照する）
+_mem_flows = memstore.TenantList()   # 種別は flow_engine と共通（片方だけ増えてずれないように参照する）
 STEP_TYPES = list(flow_engine.STEP_TYPES)
 
 
@@ -108,8 +107,12 @@ def create_flow(name: str, trigger: Optional[dict] = None, steps: Optional[list]
 
 
 def delete_flow(flow_id: str) -> dict:
-    global _mem_flows
-    _mem_flows = [f for f in _mem_flows if f.get("id") != flow_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_flows) - 1, -1, -1):
+        f = _mem_flows[_i]
+        if not (f.get("id") != flow_id):
+            del _mem_flows[_i]
     c = config.get_supabase()
     if c:
         try:

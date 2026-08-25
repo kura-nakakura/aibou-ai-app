@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import config
+import memstore
 
 TABLE = "conversations"
 
@@ -32,9 +33,7 @@ MAX_CHARS_PER_MESSAGE = 8000
 MAX_CONVERSATIONS = 200
 
 # 保存先が無いときの控え（1人運用・オフライン）。プロセスが死ぬと消える。
-_mem: List[dict] = []
-
-
+_mem = memstore.TenantList()
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 

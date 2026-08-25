@@ -174,3 +174,50 @@ def test_deleting_stops_it(monkeypatch):
     h = hooks_mod.create("", "auto-1")
     hooks_mod.delete(h["id"])
     assert client.post(f"/hook/{h['token']}").status_code == 404
+
+
+# ── 連打よけ ─────────────────────────────────────────────────────
+def test_hammering_is_refused(monkeypatch):
+    """外に開いた入口なので、URLを知っている人が連打できてしまう。
+    1回ごとにAIが動くため、無料枠が一気に削られる。"""
+    import automations
+    ran = []
+    monkeypatch.setattr(automations, "run_flow", lambda fid: ran.append(fid) or {"ran": 1})
+    hooks_mod._last_fired.clear()
+
+    h = hooks_mod.create("", "auto-1")
+    assert client.post(f"/hook/{h['token']}").status_code == 200
+    r2 = client.post(f"/hook/{h['token']}")
+    assert r2.status_code == 429
+    assert "空けて" in r2.json()["detail"]
+    assert len(ran) == 1          # 2回目は本当に動いていない
+
+
+def test_the_limit_is_per_hook(monkeypatch):
+    """1つが連打されても、別のトリガーまで止めない。"""
+    import automations
+    monkeypatch.setattr(automations, "run_flow", lambda fid: {"ran": 1})
+    hooks_mod._last_fired.clear()
+
+    a = hooks_mod.create("", "auto-1")
+    b = hooks_mod.create("", "auto-2")
+    assert client.post(f"/hook/{a['token']}").status_code == 200
+    assert client.post(f"/hook/{b['token']}").status_code == 200
+
+
+def test_the_limit_is_short_enough_for_real_use(monkeypatch):
+    """時報や定期実行の用途を邪魔しない長さであること。
+    長くしすぎると、5分ごとのcronすら弾いてしまう。"""
+    assert hooks_mod.MIN_INTERVAL_SEC <= 60
+
+
+def test_after_the_interval_it_runs_again(monkeypatch):
+    import automations
+    monkeypatch.setattr(automations, "run_flow", lambda fid: {"ran": 1})
+    hooks_mod._last_fired.clear()
+
+    h = hooks_mod.create("", "auto-1")
+    client.post(f"/hook/{h['token']}")
+    # 時間を進める代わりに、記録を消す（時計を待たない）
+    hooks_mod._last_fired.clear()
+    assert client.post(f"/hook/{h['token']}").status_code == 200

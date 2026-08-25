@@ -15,10 +15,9 @@ from datetime import datetime, timezone, timedelta
 from typing import List
 
 import config
+import memstore
 
-_mem: List[dict] = []
-
-
+_mem = memstore.TenantList()
 def _now():
     return datetime.now(timezone(timedelta(hours=9)))  # JST
 
@@ -96,8 +95,12 @@ def add(instruction: str, time: str = "08:00", days="daily", automation_id: str 
 
 
 def delete(schedule_id: str) -> dict:
-    global _mem
-    _mem = [s for s in _mem if s.get("id") != schedule_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem) - 1, -1, -1):
+        s = _mem[_i]
+        if not (s.get("id") != schedule_id):
+            del _mem[_i]
     c = config.get_supabase()
     if c:
         try:

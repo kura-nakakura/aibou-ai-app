@@ -25,6 +25,7 @@ import time
 from typing import Dict, List, Optional
 
 import config
+import memstore
 
 # ── 暗号化（Fernet, マスターシークレットから鍵導出） ──────────────
 _ENC_PREFIX = "enc:v1:"
@@ -134,9 +135,7 @@ KNOWN_KEYS: List[Dict[str, str]] = [
 #
 # 誰のDBにも繋いでいないとき（自分用に立てた1人運用）は、これまで通り
 # プロセス内辞書と環境変数で動く。
-_mem_keys: Dict[str, str] = {}
-
-# その人のクライアントにぶら下げる、復号済みの鍵
+_mem_keys = memstore.TenantDict()   # その人のクライアントにぶら下げる、復号済みの鍵
 _KEYS_NOTE = "_aibou_keys"
 
 # サーバー側だけが決めてよい設定（利用者のDBの値で上書きさせない）。

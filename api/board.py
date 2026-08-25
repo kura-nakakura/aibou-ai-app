@@ -13,8 +13,9 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import config
+import memstore
 
-_mem_boards: List[dict] = []  # [{id, name, nodes, edges, updated_at}]
+_mem_boards = memstore.TenantList()   # [{id, name, nodes, edges, updated_at}]
 
 MAX_NODES = 500
 MAX_TEXT = 2000
@@ -179,10 +180,13 @@ def rename_board(board_id: str, name: str) -> dict:
 
 
 def delete_board(board_id: str) -> dict:
-    global _mem_boards
     if not board_id:
         return {"error": "board_id is required"}
-    _mem_boards = [b for b in _mem_boards if b["id"] != board_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。その場で削る。
+    for _i in range(len(_mem_boards) - 1, -1, -1):
+        b = _mem_boards[_i]
+        if not (b["id"] != board_id):
+            del _mem_boards[_i]
     c = config.get_supabase()
     if c:
         try:

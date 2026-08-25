@@ -18,11 +18,10 @@ import re
 import uuid
 
 import config
+import memstore
 
 # Supabase が無いときの保存先。他のストアと同じく、設定が無くても使える。
-_mem_notebooks: list = []
-
-
+_mem_notebooks = memstore.TenantList()
 def _mem_find(notebook_id: str):
     for nb in _mem_notebooks:
         if nb.get("id") == notebook_id:

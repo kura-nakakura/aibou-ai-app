@@ -32,12 +32,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import config
+import memstore
 import flow_engine
 
-_mem_ais: list = []
-_mem_workflows: list = []
-
-# 実行の上限は flow_engine と共通（片方だけ変わってずれないように参照する）
+_mem_ais = memstore.TenantList()
+_mem_workflows = memstore.TenantList()   # 実行の上限は flow_engine と共通（片方だけ変わってずれないように参照する）
 MAX_STEPS = flow_engine.MAX_STEPS
 
 
@@ -86,7 +85,6 @@ def create_ai(name: str, persona: str = "", model: str = "", rules: str = "") ->
 
 
 def delete_ai(ai_id: str) -> dict:
-    global _mem_ais
     c = config.get_supabase()
     if c:
         try:
@@ -94,7 +92,11 @@ def delete_ai(ai_id: str) -> dict:
             return {"ok": True}
         except Exception as e:
             return {"error": str(e)}
-    _mem_ais = [a for a in _mem_ais if a.get("id") != ai_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。その場で削る。
+    for _i in range(len(_mem_ais) - 1, -1, -1):
+        a = _mem_ais[_i]
+        if not (a.get("id") != ai_id):
+            del _mem_ais[_i]
     return {"ok": True}
 
 
@@ -133,7 +135,6 @@ def create_workflow(name: str, steps: list) -> dict:
 
 
 def delete_workflow(wf_id: str) -> dict:
-    global _mem_workflows
     c = config.get_supabase()
     if c:
         try:
@@ -141,7 +142,11 @@ def delete_workflow(wf_id: str) -> dict:
             return {"ok": True}
         except Exception as e:
             return {"error": str(e)}
-    _mem_workflows = [w for w in _mem_workflows if w.get("id") != wf_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。その場で削る。
+    for _i in range(len(_mem_workflows) - 1, -1, -1):
+        w = _mem_workflows[_i]
+        if not (w.get("id") != wf_id):
+            del _mem_workflows[_i]
     return {"ok": True}
 
 

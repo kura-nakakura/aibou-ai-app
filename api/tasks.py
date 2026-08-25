@@ -18,11 +18,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import config
+import memstore
 
 # インメモリストア（Supabase未設定時のフォールバック）
-_mem_tasks: list = []
-
-
+_mem_tasks = memstore.TenantList()
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -152,7 +151,10 @@ def delete_task(task_id: str) -> dict:
             return {"error": f"delete failed: {e}"}
 
     # インメモリ fallback
-    global _mem_tasks
     before = len(_mem_tasks)
-    _mem_tasks = [t for t in _mem_tasks if t.get("id") != task_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。その場で削る。
+    for _i in range(len(_mem_tasks) - 1, -1, -1):
+        t = _mem_tasks[_i]
+        if not (t.get("id") != task_id):
+            del _mem_tasks[_i]
     return {"ok": len(_mem_tasks) < before}

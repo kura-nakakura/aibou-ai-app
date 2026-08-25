@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import config
+import memstore
 
 # Supabase 未設定時のフォールバック（新しい順に先頭へ積む）。
-_mem_artifacts: List[dict] = []
-
+_mem_artifacts = memstore.TenantList()
 MAX_CONTENT = 200_000  # 1ファイルの上限（安全弁）
 
 
@@ -121,8 +121,12 @@ def get(artifact_id: str) -> Optional[dict]:
 
 
 def delete(artifact_id: str) -> dict:
-    global _mem_artifacts
-    _mem_artifacts = [a for a in _mem_artifacts if a.get("id") != artifact_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_artifacts) - 1, -1, -1):
+        a = _mem_artifacts[_i]
+        if not (a.get("id") != artifact_id):
+            del _mem_artifacts[_i]
     c = config.get_supabase()
     if c:
         try:

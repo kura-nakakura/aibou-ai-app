@@ -2988,6 +2988,17 @@ async def hook_fire(token: str):
         # 存在しないのか合言葉が違うのかは区別しない（総当たりの手掛かりを与えない）
         raise HTTPException(status_code=404, detail="このトリガーは見つかりませんでした")
 
+    hook_id = str(row.get("id") or "")
+    if hooks_mod.too_soon(hook_id):
+        # 連打よけ。1回ごとにAIが動くので、無料枠を守る。
+        # 429 を返すのは、叩く側（cronやショートカット）が
+        # 「失敗」ではなく「間隔を空けろ」と分かるようにするため。
+        raise HTTPException(
+            status_code=429,
+            detail=f"続けて実行はできません。{int(hooks_mod.MIN_INTERVAL_SEC)}秒ほど空けてください",
+        )
+    hooks_mod.note_fired(hook_id)
+
     def _run():
         # その人の保存先と鍵で動かす（外から叩かれるので文脈が無い）
         owner = str(row.get("user_id") or "")
@@ -3001,7 +3012,7 @@ async def hook_fire(token: str):
                 config.reset_request_client(bound)
 
     res = await loop.run_in_executor(None, _run)
-    await loop.run_in_executor(None, lambda: hooks_mod.mark_used(str(row.get("id") or "")))
+    await loop.run_in_executor(None, lambda: hooks_mod.mark_used(hook_id))
     if isinstance(res, dict) and res.get("error"):
         return JSONResponse(status_code=400, content=res)
     return {"ok": True, "ran": res}

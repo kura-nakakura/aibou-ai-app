@@ -34,6 +34,7 @@ from typing import List, Optional, Tuple
 import requests
 
 import config
+import memstore
 import keychain
 
 ROUTER_BASE = "https://router.huggingface.co/hf-inference"
@@ -131,10 +132,8 @@ ROLES = {
             "where": "CAPTURE"},
 }
 
-_mem_models: List[dict] = []
-_mem_images: List[dict] = []
-
-
+_mem_models = memstore.TenantList()
+_mem_images = memstore.TenantList()
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -641,8 +640,12 @@ def update_check(model_row_id: str, ok: bool, message: str = "") -> Optional[dic
 def delete_model(model_row_id: str) -> dict:
     """台帳から削除する。割り当て中だった役割は外す（幽霊参照を残さない）。"""
     row = get_model(model_row_id)
-    global _mem_models
-    _mem_models = [m for m in _mem_models if m.get("id") != model_row_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_models) - 1, -1, -1):
+        m = _mem_models[_i]
+        if not (m.get("id") != model_row_id):
+            del _mem_models[_i]
     c = config.get_supabase()
     if c:
         try:

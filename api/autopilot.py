@@ -15,12 +15,11 @@ import uuid
 from typing import List, Optional
 
 import config
+import memstore
 import notify
 
 # Supabase 未設定時のフォールバック
-_mem_missions: List[dict] = []
-
-
+_mem_missions = memstore.TenantList()
 def _extract_json_array(text: str):
     """```json フェンス or 最初の [ ... ] を JSON 配列として取り出す。失敗時 None。"""
     m = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
@@ -185,8 +184,12 @@ def run_step(mission_id: str) -> dict:
 
 
 def delete_mission(mission_id: str) -> dict:
-    global _mem_missions
-    _mem_missions = [m for m in _mem_missions if m.get("id") != mission_id]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_missions) - 1, -1, -1):
+        m = _mem_missions[_i]
+        if not (m.get("id") != mission_id):
+            del _mem_missions[_i]
     c = config.get_supabase()
     if c:
         try:

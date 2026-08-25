@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 import config
+import memstore
 import llm
 
 # カテゴリ（UIのタブと対応）
@@ -27,9 +28,7 @@ _CATEGORY_KEYS = {c["key"] for c in CATEGORIES}
 MAX_PROFILE_CHARS = 14_000
 
 # Supabase 未設定時のプロセス内フォールバック
-_mem_entries: list = []
-
-
+_mem_entries = memstore.TenantList()
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -90,8 +89,12 @@ def delete_entry(entry_id: str) -> dict:
             return {"ok": True}
         except Exception:
             pass
-    global _mem_entries
-    _mem_entries = [e for e in _mem_entries if e["id"] != eid]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_entries) - 1, -1, -1):
+        e = _mem_entries[_i]
+        if not (e["id"] != eid):
+            del _mem_entries[_i]
     return {"ok": True}
 
 

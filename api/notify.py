@@ -12,14 +12,13 @@ import uuid
 from typing import Dict, List
 
 import config
+import memstore
 import keychain
 
 _TIMEOUT = 8  # 秒
 
 # 内部通知ログ（ホーム画面の「通知」に表示）。Supabase `notifications`、無ければメモリ。
-_mem_notes: List[dict] = []
-
-
+_mem_notes = memstore.TenantList()
 def log_internal(message: str, channel: str = "system") -> dict:
     """アプリ内通知を1件記録する（送信の成否に関わらず履歴として残す）。"""
     note = {

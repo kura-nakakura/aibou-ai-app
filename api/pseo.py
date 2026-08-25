@@ -21,12 +21,13 @@ from typing import List, Optional
 
 import compliance
 import config
+import memstore
 import llm
 
 MAX_PAGES_PER_PLAN = 200
 STATUSES = ("draft", "approved", "rejected")
 
-_mem_pages: List[dict] = []  # Supabase 未設定時のフォールバック
+_mem_pages = memstore.TenantList()   # Supabase 未設定時のフォールバック
 
 
 def _now_iso() -> str:
@@ -153,8 +154,12 @@ def save_page(page: dict, status: str = "draft") -> dict:
                 return res.data[0]
         except Exception:
             pass
-    global _mem_pages
-    _mem_pages = [p for p in _mem_pages if p.get("slug") != slug]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_pages) - 1, -1, -1):
+        p = _mem_pages[_i]
+        if not (p.get("slug") != slug):
+            del _mem_pages[_i]
     _mem_pages.insert(0, row)
     return row
 
@@ -210,8 +215,12 @@ def set_status(slug: str, status: str) -> dict:
 
 
 def delete_page(slug: str) -> dict:
-    global _mem_pages
-    _mem_pages = [p for p in _mem_pages if p.get("slug") != slug]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_pages) - 1, -1, -1):
+        p = _mem_pages[_i]
+        if not (p.get("slug") != slug):
+            del _mem_pages[_i]
     c = config.get_supabase()
     if c:
         try:

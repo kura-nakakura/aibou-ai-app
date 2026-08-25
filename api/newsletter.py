@@ -17,12 +17,12 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import config
+import memstore
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 
-_mem_subs: List[dict] = []      # Supabase未設定時のフォールバック
-_mem_issues: List[dict] = []
-
+_mem_subs = memstore.TenantList()   # Supabase未設定時のフォールバック
+_mem_issues = memstore.TenantList()
 STATUSES = ("pending", "confirmed", "unsubscribed")
 
 
@@ -76,8 +76,12 @@ def subscribe(email: str, source: str = "") -> dict:
             c.table("subscribers").upsert(row).execute()
         except Exception:
             pass
-    global _mem_subs
-    _mem_subs = [s for s in _mem_subs if s.get("email") != email]
+    # 入れ物ごと置き換えると、保存先ごとに分けている意味が消える。
+    # その場で削る。
+    for _i in range(len(_mem_subs) - 1, -1, -1):
+        s = _mem_subs[_i]
+        if not (s.get("email") != email):
+            del _mem_subs[_i]
     _mem_subs.insert(0, row)
 
     sent = _send_confirmation(email, row["token"])

@@ -26,13 +26,12 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import config
+import memstore
 
 TABLE = "hooks"
 
 # 保存先が無いときの控え（1人運用）。プロセスが死ぬと消える。
-_mem: List[dict] = []
-
-
+_mem = memstore.TenantList()
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -133,6 +132,27 @@ def delete(hook_id: str) -> dict:
     before = len(_mem)
     _mem[:] = [r for r in _mem if r.get("id") != hid]
     return {"ok": True, "removed": before - len(_mem)}
+
+
+# 連打よけ。1つのトリガーは、この間隔より短く続けては動かさない。
+#
+# 外に開いた入口なので、URLを知っている人が連打できてしまう。1回ごとに
+# AIが動くため、無料枠が一気に削られる。実際の用途（時報・定期実行）で
+# 数十秒に何度も叩く必要は無いので、短い間隔を1つ引いておく。
+MIN_INTERVAL_SEC = 20.0
+_last_fired: dict = {}
+
+
+def too_soon(hook_id: str) -> bool:
+    """直前に動かしたばかりか。連打を弾くために見る。"""
+    import time
+    last = _last_fired.get(hook_id)
+    return bool(last and (time.monotonic() - last) < MIN_INTERVAL_SEC)
+
+
+def note_fired(hook_id: str) -> None:
+    import time
+    _last_fired[hook_id] = time.monotonic()
 
 
 def find_by_token(token: str) -> Optional[dict]:
