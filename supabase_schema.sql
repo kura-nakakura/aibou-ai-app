@@ -145,6 +145,21 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority text DEFAULT 'mid';   -- hig
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due text DEFAULT '';           -- YYYY-MM-DD
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS project text DEFAULT '';       -- グループ名
 
+-- 🪝 外から動かすためのトリガー（Webhook）
+-- URLを1つ知られただけで何でもできる、にはしない。
+-- 起動できるのは、あらかじめ結びつけた自動化1つだけ。
+CREATE TABLE IF NOT EXISTS hooks (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  token_id     text NOT NULL,
+  user_id      text DEFAULT '',
+  automation_id text NOT NULL,
+  label        text DEFAULT '',
+  uses         integer DEFAULT 0,
+  last_used_at text DEFAULT '',
+  created_at   timestamptz DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token_id);
+
 -- 💬 CHAT：会話履歴
 -- 端末を変えても続きから読めるように、その人のDBに残す。
 -- 本文は jsonb に丸ごと入れる（1件ずつ読み書きするので、行を分ける利点が薄い）。

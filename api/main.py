@@ -43,6 +43,7 @@ import fileread
 import forge
 import gh
 import gservice
+import hooks as hooks_mod
 import guide as guide_mod
 import tenancy
 import hfhub
@@ -2931,9 +2932,100 @@ async def keepalive_status(_auth: None = Depends(require_auth)):
     return await loop.run_in_executor(None, keepalive_mod.status)
 
 
+# ── 外から動かす入口（Webhookトリガー） ─────────────────────────────
+
+class HookCreateRequest(BaseModel):
+    automation_id: str
+    label: str = ""
+
+
+@app.get("/hooks")
+async def hooks_list(_auth: None = Depends(require_auth),
+                     _db: str = Depends(use_own_database)):
+    """自分のトリガー一覧（起動用URLつき）。"""
+    loop = asyncio.get_event_loop()
+    return {"items": await loop.run_in_executor(None, lambda: hooks_mod.list_hooks())}
+
+
+@app.post("/hooks")
+async def hooks_create(req: HookCreateRequest, user_id: str = Depends(current_user),
+                       _auth: None = Depends(require_auth),
+                       _store: None = Depends(require_storage)):
+    """トリガーを作る。起動できるのは、結びつけた自動化1つだけ。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(
+        None, lambda: hooks_mod.create(user_id, req.automation_id, req.label))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.delete("/hooks/{hook_id}")
+async def hooks_delete(hook_id: str, _auth: None = Depends(require_auth),
+                       _store: None = Depends(require_storage)):
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: hooks_mod.delete(hook_id))
+    if res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.post("/hook/{token}")
+async def hook_fire(token: str):
+    """外部から自動化を1つ起動する。認証はこの合言葉そのもの。
+
+    iOSのショートカット、スプレッドシートのスクリプト、IFTTT、
+    各自のSupabase（pg_cron）など、URLを叩けるものなら何でも起動側になれる。
+    どれも無料で、こちらは何も足さなくていい。
+
+    合言葉が漏れても、できるのは「その自動化を動かす」ことだけ。
+    任意の命令は実行できない（作る時点で1つに結びつけてある）。
+    """
+    loop = asyncio.get_event_loop()
+
+    row = await loop.run_in_executor(None, lambda: hooks_mod.find_by_token(token))
+    if not row:
+        # 存在しないのか合言葉が違うのかは区別しない（総当たりの手掛かりを与えない）
+        raise HTTPException(status_code=404, detail="このトリガーは見つかりませんでした")
+
+    def _run():
+        # その人の保存先と鍵で動かす（外から叩かれるので文脈が無い）
+        owner = str(row.get("user_id") or "")
+        client = tenancy.client_for(owner) if owner else None
+        bound = config.bind_request_client(client) if client is not None else None
+        try:
+            import automations
+            return automations.run_flow(str(row.get("automation_id") or ""))
+        finally:
+            if bound is not None:
+                config.reset_request_client(bound)
+
+    res = await loop.run_in_executor(None, _run)
+    await loop.run_in_executor(None, lambda: hooks_mod.mark_used(str(row.get("id") or "")))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return {"ok": True, "ran": res}
+
+
 @app.post("/scheduler/tick")
-async def scheduler_tick():
-    """外部cron（無料のcron-job.org等）から叩く実行トリガ。認証不要（副作用は登録済み定期のみ）。"""
+async def scheduler_tick(authorization: Optional[str] = Header(default=None),
+                         x_app_token: Optional[str] = Header(default=None)):
+    """外部cron（GitHub Actions / cron-job.org 等）から叩く実行トリガ。
+
+    副作用は「登録済みの定期実行を、時刻を過ぎていれば走らせる」だけで、
+    同じ日に二度は走らない。とはいえ、叩かれるたびにAIが動くので、
+    URLを知られると無料枠を削られる。共通トークンを設定している場合は
+    それを要求する（設定していなければ、これまで通り誰でも叩ける）。
+
+    ここを厳しくしすぎると、cron側の設定漏れで定期実行が丸ごと死ぬ。
+    「設定してあるなら守る、していないなら通す」に留める。
+    """
+    if config.APP_TOKEN:
+        bearer = ""
+        if authorization and authorization.strip().lower().startswith("bearer "):
+            bearer = authorization.strip()[7:].strip()
+        if bearer != config.APP_TOKEN and (x_app_token or "").strip() != config.APP_TOKEN:
+            raise HTTPException(status_code=401, detail="この入口には共通トークンが必要です")
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, scheduler.tick_everyone)
 

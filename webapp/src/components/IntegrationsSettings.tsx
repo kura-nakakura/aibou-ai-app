@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import FreeOps from "@/components/FreeOps";
 import {
   API_URL,
   googleStatus,
@@ -193,6 +194,11 @@ function SchedulerPanel() {
             <>✓ 見回りは動いています（1分ごとに確認しています）</>
           )}
         </div>
+      )}
+
+      {/* 止まっているときだけ手順を開いて出す。動いているのに並べても雑音になる */}
+      {items.length > 0 && asleep && (
+        <div className="mb-2"><FreeOps /></div>
       )}
       <div className="flex gap-2">
         <input
