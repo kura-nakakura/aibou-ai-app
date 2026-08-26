@@ -417,6 +417,10 @@ class KeySetRequest(BaseModel):
     value: str = ""
 
 
+class KeyRescueRequest(BaseModel):
+    names: List[str] = []
+
+
 class VaultGenerateRequest(BaseModel):
     notebook_id: str
     instruction: str = ""
@@ -3209,11 +3213,39 @@ async def list_keys(_auth: None = Depends(require_auth)):
 
 @app.post("/keys")
 async def set_key(req: KeySetRequest, _auth: None = Depends(require_auth)):
-    """キーを保存/更新する。"""
+    """キーを保存/更新する。
+
+    保存先に本当に書けたかどうかを persisted で返す。書けていないのに
+    「保存しました」で終わらせると、次の更新で消えたときに理由が分からない。
+    """
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, lambda: keychain.set_key(req.name, req.value))
     if isinstance(result, dict) and result.get("error"):
-        return JSONResponse(status_code=400, content=result)
+        return JSONResponse(status_code=(409 if result.get("needs_storage") else 400),
+                            content=result)
+    return result
+
+
+@app.get("/keys/orphans")
+async def keys_orphans(_auth: None = Depends(require_auth),
+                       _owner: None = Depends(require_owner)):
+    """自分のDBを繋ぐ前の保存先に残っている鍵を探す（名前とマスクだけ）。
+
+    持ち主専用。分ける前のDBには他の利用者の鍵も混ざっているため。
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, keychain.orphaned_keys)
+
+
+@app.post("/keys/rescue")
+async def keys_rescue(req: KeyRescueRequest,
+                      _auth: None = Depends(require_auth),
+                      _owner: None = Depends(require_owner)):
+    """前の保存先に残っている鍵を、いまの保存先へ写す。"""
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: keychain.rescue_keys(req.names))
+    if isinstance(result, dict) and result.get("error"):
+        return JSONResponse(status_code=409, content=result)
     return result
 
 

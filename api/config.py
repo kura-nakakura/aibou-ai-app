@@ -333,6 +333,15 @@ def get_supabase():
     if bound is not None:
         # ("set", client) の形で入っている。client が None なら「保存しない」。
         return bound[1]
+    return default_supabase()
+
+
+def default_supabase():
+    """サーバー既定のSupabase。リクエストごとの差し替えを無視する。
+
+    使ってよいのは「差し替える前はどこに入っていたか」を確かめるときだけ。
+    普段のデータ操作でこれを呼ぶと、その人のDBではなく共有のDBに触れてしまう。
+    """
     global _supabase_client, _supabase_tried
     if _supabase_client is not None:
         return _supabase_client

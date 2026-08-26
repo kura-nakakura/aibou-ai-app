@@ -16,7 +16,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   API_URL, deleteKey, googleAuthStartUrl, googleDisconnect, googleStatus,
-  listKeys, myDatabase, profileGet, sendNotify, setKey,
+  keyOrphans, keyRescue, listKeys, myDatabase, profileGet, sendNotify, setKey,
+  type ApiKeyInfo, type OrphanKey,
 } from "@/lib/api";
 import {
   EXTENSIONS, GROUP_LABEL, GROUP_ORDER, NO_KEY_FEATURES, isConnected, visibleExtensions,
@@ -28,6 +29,8 @@ import MyDatabase from "@/components/MyDatabase";
 
 export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") => void }) {
   const [keysSet, setKeysSet] = useState<Set<string>>(new Set());
+  const [keyInfo, setKeyInfo] = useState<Map<string, ApiKeyInfo>>(new Map());
+  const [orphans, setOrphans] = useState<OrphanKey[]>([]);
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
   const [google, setGoogle] = useState<{ configured: boolean; connected: boolean } | null>(null);
   const [dbOn, setDbOn] = useState(false);
@@ -38,15 +41,20 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
   const load = useCallback(async () => {
     if (!API_URL) { setLoading(false); return; }
     setError(null);
-    const [keys, prof, g, db] = await Promise.all([
+    const [keys, prof, g, db, orph] = await Promise.all([
       listKeys().catch((e) => { setError(explain(e, "連携状況の読み込み")); return null; }),
       profileGet().catch(() => null),
       googleStatus().catch(() => null),
       myDatabase().catch(() => null),
+      keyOrphans().catch(() => null),
     ]);
-    if (keys) setKeysSet(new Set(keys.filter((k) => k.set).map((k) => k.name)));
+    if (keys) {
+      setKeysSet(new Set(keys.filter((k) => k.set).map((k) => k.name)));
+      setKeyInfo(new Map(keys.map((k) => [k.name, k])));
+    }
     if (prof) setIsOwner(Boolean(prof.is_owner));
     setGoogle(g);
+    setOrphans(orph?.items ?? []);
     // 既定DBに保存されている人も「保存先は決まっている」ので済み扱いにする
     setDbOn(Boolean(db?.connected) || Boolean(db?.using_server_db));
     setLoading(false);
@@ -64,6 +72,12 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
   }, [google, keysSet, dbOn]);
 
   const doneCount = exts.filter((e) => connectedOf(e) === true).length;
+
+  /** 入っているが、更新すると消える鍵。 */
+  const volatile = useMemo(
+    () => [...keyInfo.values()].filter((k) => k.set && k.where === "memory"),
+    [keyInfo],
+  );
 
   if (!API_URL) {
     return (
@@ -87,6 +101,23 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
       </div>
 
       {error && <div className="panel p-3 text-[11px] leading-relaxed text-[#ff9b9b]">⚠️ {error}</div>}
+
+      {/* 前の保存先に残っている鍵。「入れたのに未設定に戻った」の正体はこれ */}
+      {orphans.length > 0 && <RescueBanner items={orphans} onDone={() => void load()} />}
+
+      {/* 更新すると消える鍵。持っていること自体は伝わっているので、
+          消えてから気づくのではなく、いま伝える */}
+      {volatile.length > 0 && (
+        <div className="panel p-3 text-[11px] leading-relaxed"
+             style={{ borderColor: "#ffd07f55", color: "#ffd07f" }}>
+          ⚠️ 次の鍵は、いまサーバーのメモリにだけ置かれています。アプリを更新すると消えます:
+          <span className="text-fg-strong"> {volatile.map((k) => k.label || k.name).join("、")}</span>
+          <br />
+          <span className="text-muted">
+            拡張機能の「Supabase」で保存先をつなぐと、更新しても残るようになります。
+          </span>
+        </div>
+      )}
 
       {loading ? (
         <div className="panel p-6 text-center text-[10px] tracking-[0.2em] text-muted label-mono">
@@ -143,10 +174,76 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
           ext={open}
           connected={connectedOf(open)}
           google={google}
+          info={keyInfo}
           onClose={() => setOpen(null)}
           onChanged={() => void load()}
         />
       )}
+    </div>
+  );
+}
+
+/* ── 鍵がどこに入っているか ───────────────────────────────────────
+   「設定済み」だけでは、更新で消えるものと残るものが見分けられない。  */
+function WhereBadge({ info }: { info?: ApiKeyInfo }) {
+  if (!info?.set) return null;
+  const s = info.where === "db"
+    ? { text: "保存済み", color: "#60d394" }
+    : info.where === "server"
+      ? { text: "サーバー設定", color: "var(--muted)" }
+      : { text: "一時・更新で消えます", color: "#ffd07f" };
+  return (
+    <span className="ml-1.5 text-[10px] label-mono" style={{ color: s.color }}>
+      {info.masked} · {s.text}
+    </span>
+  );
+}
+
+/* ── 前の保存先に取り残された鍵 ───────────────────────────────────
+   利用者ごとにDBを分ける前、鍵はサーバー既定のDBに入っていた。
+   あとから自分のDBを繋ぐと読む先がそちらに変わるので、前に入れた鍵が
+   「未設定」に見える。消えたのではなく、前の場所に残っている。      */
+function RescueBanner({ items, onDone }: { items: OrphanKey[]; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await keyRescue(items.map((i) => i.name));
+      setNote(r.count > 0 ? `${r.count}件を取り込みました` : "取り込めるものがありませんでした");
+      onDone();
+    } catch (e) {
+      setNote(explain(e, "取り込み"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel p-3" style={{ borderColor: "#ffd07f55" }}>
+      <div className="mb-1 text-[11px] leading-relaxed" style={{ color: "#ffd07f" }}>
+        以前この端末で入れた鍵が、いまの保存先とは別の場所に残っています。
+      </div>
+      <p className="mb-2 text-[11px] leading-relaxed text-muted">
+        自分のデータベースを繋ぐ前に保存したものです。消えてはいません。
+        取り込むと、いまの保存先へ写して、そのまま使えるようになります。
+      </p>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {items.map((i) => (
+          <span key={i.name}
+                className="rounded-forge border border-panel px-2 py-1 text-[10px] text-fg label-mono">
+            {i.label} <span className="text-muted">{i.masked}</span>
+          </span>
+        ))}
+      </div>
+      <button type="button" onClick={() => void run()} disabled={busy}
+              className="rounded-forge border px-3 py-2 text-[11px] label-mono disabled:opacity-40"
+              style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}>
+        {busy ? "…" : "いまの保存先に取り込む"}
+      </button>
+      {note && <p role="status" aria-live="polite" className="mt-1.5 text-[11px] text-muted">{note}</p>}
     </div>
   );
 }
@@ -173,10 +270,11 @@ function Card({ ext, state, onOpen }:
 }
 
 /* ── 詳細（本文に出す。祖先の transform に captured されないように） ── */
-function Detail({ ext, connected, google, onClose, onChanged }: {
+function Detail({ ext, connected, google, info, onClose, onChanged }: {
   ext: Extension;
   connected: boolean | null;
   google: { configured: boolean; connected: boolean } | null;
+  info: Map<string, ApiKeyInfo>;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -185,6 +283,12 @@ function Detail({ ext, connected, google, onClose, onChanged }: {
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+
+  /** この連携の鍵が、保存先に残っていない（更新すると消える）。 */
+  const fragile = ext.fields.some((f) => {
+    const k = info.get(f.name);
+    return Boolean(k?.set) && k?.where === "memory";
+  });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -203,10 +307,18 @@ function Detail({ ext, connected, google, onClose, onChanged }: {
         setNote({ text: "値を入れてから保存してください", ok: false });
         return;
       }
-      for (const [name, value] of entries) await setKey(name, value);
+      // 「保存しました」と言い切れるのは、本当に残ったときだけ。
+      // 書けていないのに成功と出すと、次の更新で消えた理由が分からなくなる。
+      const warnings: string[] = [];
+      for (const [name, value] of entries) {
+        const r = await setKey(name, value);
+        if (!r.persisted && r.warning) warnings.push(r.warning);
+      }
       setValues({});
       onChanged();
-      setNote({ text: "保存しました", ok: true });
+      setNote(warnings.length > 0
+        ? { text: warnings[0], ok: false }
+        : { text: "保存しました", ok: true });
     } catch (e) {
       setNote({ text: explain(e, "保存"), ok: false });
     } finally {
@@ -260,10 +372,19 @@ function Detail({ ext, connected, google, onClose, onChanged }: {
         </div>
 
         {connected === true && (
-          <div className="mb-2 rounded-forge border p-2 text-[11px]"
-               style={{ borderColor: "#60d39455", color: "#60d394" }}>
-            ✓ 連携できています
-          </div>
+          fragile ? (
+            /* いま動くことと、残ることは別。緑で「できています」と出したうえで
+               下の欄に「消えます」と書くと、どちらを信じればいいか分からない。 */
+            <div className="mb-2 rounded-forge border p-2 text-[11px] leading-relaxed"
+                 style={{ borderColor: "#ffd07f55", color: "#ffd07f" }}>
+              いまは使えますが、この鍵は保存先に残っていません。アプリを更新すると消えます。
+            </div>
+          ) : (
+            <div className="mb-2 rounded-forge border p-2 text-[11px]"
+                 style={{ borderColor: "#60d39455", color: "#60d394" }}>
+              ✓ 連携できています
+            </div>
+          )
         )}
 
         {/* ① 何ができるようになるか。ここが「入れる理由」 */}
@@ -301,6 +422,7 @@ function Detail({ ext, connected, google, onClose, onChanged }: {
                        className="text-[10px] tracking-[0.14em] text-muted label-mono">
                   {f.label}
                 </label>
+                <WhereBadge info={info.get(f.name)} />
                 <input
                   id={`ext-${f.name}`}
                   value={values[f.name] ?? ""}

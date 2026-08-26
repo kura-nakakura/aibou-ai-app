@@ -2058,6 +2058,21 @@ export interface ApiKeyInfo {
   hint?: string;
   masked: string;
   set: boolean;
+  /**
+   * どこに入っているか。ここが無いと「入れたのに未設定に戻る」の原因が分からない。
+   *   db     … 保存先のデータベース（アプリを更新しても残る）
+   *   server … 管理者がサーバーに入れた共通の鍵
+   *   memory … プロセスの中だけ。更新すると消える
+   */
+  where?: "db" | "server" | "memory" | "";
+  persisted?: boolean;
+}
+
+/** 前の保存先に取り残された鍵（持ち主のみ）。値は返ってこない。 */
+export interface OrphanKey {
+  name: string;
+  label: string;
+  masked: string;
 }
 
 /** GET /keys — masked list of known + stored API keys (full values never returned). */
@@ -2068,16 +2083,55 @@ export async function listKeys(): Promise<ApiKeyInfo[]> {
   return data.items ?? [];
 }
 
-/** POST /keys — store/update a key. */
-export async function setKey(name: string, value: string): Promise<{ ok: boolean; masked?: string }> {
+/**
+ * POST /keys — store/update a key.
+ *
+ * persisted は「本当に残ったか」。false のときは、サーバーが更新されると
+ * その鍵は消える。呼び出し側は warning をそのまま画面に出すこと
+ * （黙って握ると「入れたのに未設定に戻る」に逆戻りする）。
+ */
+export async function setKey(
+  name: string,
+  value: string,
+): Promise<{ ok: boolean; masked?: string; persisted: boolean; warning?: string }> {
   const res = await fetch(`${requireApiUrl()}/keys`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name, value }),
   });
-  const data = (await res.json().catch(() => ({}))) as { ok?: boolean; masked?: string; error?: string };
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean; masked?: string; error?: string; persisted?: boolean; warning?: string;
+  };
   if (!res.ok) throw new Error(data.error ?? `Set key failed (${res.status})`);
-  return { ok: Boolean(data.ok), masked: data.masked };
+  return {
+    ok: Boolean(data.ok),
+    masked: data.masked,
+    persisted: data.persisted !== false,
+    warning: data.warning,
+  };
+}
+
+/** GET /keys/orphans — 自分のDBを繋ぐ前の保存先に残っている鍵（持ち主のみ）。 */
+export async function keyOrphans(): Promise<{ available: boolean; items: OrphanKey[] }> {
+  const res = await fetch(`${requireApiUrl()}/keys/orphans`, {
+    headers: authHeaders(), cache: "no-store",
+  });
+  if (!res.ok) return { available: false, items: [] };   // 持ち主でなければ静かに何も出さない
+  const data = (await res.json().catch(() => ({}))) as { available?: boolean; items?: OrphanKey[] };
+  return { available: Boolean(data.available), items: asArray<OrphanKey>(data.items) };
+}
+
+/** POST /keys/rescue — 前の保存先に残っている鍵を、いまの保存先へ写す。 */
+export async function keyRescue(names: string[] = []): Promise<{ moved: string[]; count: number }> {
+  const res = await fetch(`${requireApiUrl()}/keys/rescue`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ names }),
+  });
+  const data = (await res.json().catch(() => ({}))) as
+    { moved?: string[]; count?: number; error?: string };
+  if (!res.ok) throw new Error(data.error ?? `Rescue failed (${res.status})`);
+  return { moved: asArray<string>(data.moved), count: asNumber(data.count) };
 }
 
 /** DELETE /keys/{name} — remove a stored key. */
