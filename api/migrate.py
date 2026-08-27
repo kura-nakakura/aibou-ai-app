@@ -20,7 +20,7 @@ EXPECTED_TABLES = [
     "hf_models", "hf_images",
     # あとから足した表。ここに入れ忘れると、実際は欠けているのに
     # 「テーブルは揃っています」と表示されてしまう。
-    "conversations", "hooks", "user_connections",
+    "conversations", "hooks", "user_connections", "agent_rules",
 ]
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

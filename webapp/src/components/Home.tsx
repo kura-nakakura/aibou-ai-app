@@ -40,6 +40,7 @@ import {
   WIDGET_META, defaultLayout, loadLayout, saveLayout, visible, move,
   toggleHidden, toggleWide, isWide, type HomeLayout, type WidgetId,
 } from "@/lib/homeLayout";
+import AgentTrace, { TOOL_LABELS, type AgentStep } from "@/components/AgentTrace";
 import Markdown from "@/components/Markdown";
 import FirstRun from "@/components/FirstRun";
 import CalendarPanel from "@/components/CalendarPanel";
@@ -325,44 +326,11 @@ function RingDial({ label, value, onClick }: { label: string; value: number; onC
 }
 
 /* ── Agent console (手足となって動く自律エージェント) ─────────────── */
-const TOOL_LABELS: Record<string, string> = {
-  add_task: "タスクを追加",
-  add_agenda: "予定を追加",
-  list_state: "現在の状況を確認",
-  create_document: "ドキュメントを作成",
-  create_spreadsheet: "スプレッドシートを作成",
-  create_slides: "スライドを作成",
-  create_google_slides: "Googleスライドを作成",
-  google_sheet: "Googleスプレッドシート作成",
-  google_doc: "Googleドキュメント作成",
-  notion_add: "Notionに追記",
-  create_automation: "自動化フローを作成",
-  run_automation: "自動化を実行",
-  create_mission: "ミッションを作成",
-  calendar_add: "カレンダーに追加",
-  calendar_list: "カレンダーを確認",
-  send_email: "メールを送信",
-  email_inbox: "受信メールを確認",
-  web_search: "Webを検索",
-  web_read: "ページを読む",
-  generate_image: "画像を生成",
-  schedule_add: "定期実行を登録",
-  schedule_list: "定期実行を確認",
-  remember: "記憶する",
-  recall: "記憶を思い出す",
-  enqueue_income: "副業ジョブを投入",
-  income_status: "副業の状況を確認",
-  notify: "通知を送信",
-  save_note: "ノートに保存",
-};
 
 type Pending = { tool: string; params: Record<string, unknown>; note?: string };
 
-type Step =
-  | { kind: "thinking" }
-  | { kind: "tool"; tool: string; note?: string }
-  | { kind: "observation"; result: string }
-  | { kind: "error"; detail: string };
+/** 経過表示の型と見た目は AgentTrace に集約した（CHATと揃えるため）。 */
+type Step = AgentStep;
 
 const SUGGESTIONS = [
   "新規事業の提案スライドを作って",
@@ -389,6 +357,7 @@ function AgentConsole({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [steps, setSteps] = useState<Step[]>([]);
+  const [totalMs, setTotalMs] = useState<number | undefined>(undefined);
   const [answer, setAnswer] = useState("");
   const [ran, setRan] = useState(false);
   const [approval, setApproval] = useState(true);   // 実行前に確認（機微な操作）
@@ -407,6 +376,7 @@ function AgentConsole({
     setBusy(true);
     setRan(true);
     setSteps([]);
+    setTotalMs(undefined);
     setAnswer("");
     setPending(null);
     setInput("");
@@ -419,15 +389,22 @@ function AgentConsole({
       approval,
       (ev: AgentEvent) => {
         switch (ev.phase) {
+          case "prepare":
+            // 返事が始まる前の工程。ここが重いとそのまま待ち時間になるので出す。
+            setSteps((s) => [...s.filter((x) => x.kind !== "thinking"),
+                             { kind: "prepare", what: ev.what || "準備", detail: ev.detail, ms: ev.ms }]);
+            break;
           case "thinking":
             setSteps((s) => [...s.filter((x) => x.kind !== "thinking"), { kind: "thinking" }]);
             break;
           case "tool":
             actedRef.current = true;
-            setSteps((s) => [...s.filter((x) => x.kind !== "thinking"), { kind: "tool", tool: ev.tool || "", note: ev.note }]);
+            // ms は「考えていた時間」。ツール名の横に出すと、どこで待ったかが分かる
+            setSteps((s) => [...s.filter((x) => x.kind !== "thinking"),
+                             { kind: "tool", tool: ev.tool || "", note: ev.note, ms: ev.ms }]);
             break;
           case "observation":
-            setSteps((s) => [...s, { kind: "observation", result: ev.result || "" }]);
+            setSteps((s) => [...s, { kind: "observation", result: ev.result || "", ms: ev.ms }]);
             break;
           case "approval":
             setSteps((s) => s.filter((x) => x.kind !== "thinking"));
@@ -439,6 +416,9 @@ function AgentConsole({
           case "final":
             setSteps((s) => s.filter((x) => x.kind !== "thinking"));
             setAnswer(ev.text || "");
+            break;
+          case "done":
+            setTotalMs(ev.total_ms);
             break;
         }
       },
@@ -568,35 +548,11 @@ function AgentConsole({
             </div>
           ) : (
             <div className="flex flex-col gap-1.5 py-1">
-              <AnimatePresence initial={false}>
-                {steps.map((step, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, x: -6 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="text-[11px] leading-relaxed"
-                  >
-                    {step.kind === "thinking" && (
-                      <span className="flex items-center gap-1.5 text-[var(--accent)]">
-                        <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity }}>◈</motion.span>
-                        <span className="text-muted">考えています…</span>
-                      </span>
-                    )}
-                    {step.kind === "tool" && (
-                      <span className="text-fg">
-                        <span className="text-[var(--accent)]">→</span> {TOOL_LABELS[step.tool] || step.tool}
-                        {step.note ? <span className="text-muted"> — {step.note}</span> : null}
-                      </span>
-                    )}
-                    {step.kind === "observation" && (
-                      <span className="block pl-4 text-[10px] text-muted">✓ {step.result}</span>
-                    )}
-                    {step.kind === "error" && (
-                      <span className="text-[#ff9b9b]">⚠ {step.detail}</span>
-                    )}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+              <AgentTrace
+                steps={steps}
+                toolLabel={(n) => TOOL_LABELS[n] || n}
+                totalMs={busy ? undefined : totalMs}
+              />
               {answer && (
                 <div className="mt-1 rounded-forge border border-panel bg-[rgba(255,255,255,0.02)] p-2.5 text-[12px] leading-relaxed text-fg">
                   <Markdown text={answer} />

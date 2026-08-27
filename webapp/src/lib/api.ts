@@ -462,7 +462,7 @@ export function codeGenerateStream(
 
 /* ---------------- HOME agent (手足となって動く) ---------------- */
 export interface AgentEvent {
-  phase: "start" | "thinking" | "tool" | "observation" | "approval" | "final" | "done" | "error";
+  phase: "start" | "prepare" | "thinking" | "tool" | "observation" | "approval" | "final" | "done" | "error";
   step?: number;
   tool?: string;
   params?: Record<string, unknown>;
@@ -472,6 +472,12 @@ export interface AgentEvent {
   detail?: string;
   steps?: number;
   awaiting_approval?: boolean;
+  /** prepare のとき、何の準備だったか（記憶の読み込み・指示文の組み立てなど）。 */
+  what?: string;
+  /** 直前のイベントからの経過ミリ秒＝その工程にかかった時間。 */
+  ms?: number;
+  /** 開始からの合計ミリ秒。 */
+  total_ms?: number;
 }
 
 /**
@@ -2139,6 +2145,52 @@ export async function deleteKey(name: string): Promise<boolean> {
   const res = await fetch(`${requireApiUrl()}/keys/${encodeURIComponent(name)}`, { method: "DELETE", headers: authHeaders() });
   const data = (await res.json().catch(() => ({ ok: false }))) as { ok?: boolean };
   return Boolean(data.ok);
+}
+
+/* ---------------- Rules (AIbouに守らせる決まりごと) ---------------- */
+export interface RuleInfo {
+  path: string;
+  title: string;
+  applies: "always" | "tool" | "mode" | "topic";
+  targets: string[];
+  preview: string;
+}
+
+/** GET /rules — 取り込み済みのルール。GitHubには触らない（保存済みを読むだけ）。 */
+export async function rulesStatus(): Promise<{ repo: string; count: number; items: RuleInfo[] }> {
+  const res = await fetch(`${requireApiUrl()}/rules`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) return { repo: "", count: 0, items: [] };
+  const d = (await res.json().catch(() => ({}))) as
+    { repo?: string; count?: number; items?: RuleInfo[] };
+  return { repo: d.repo ?? "", count: asNumber(d.count), items: asArray<RuleInfo>(d.items) };
+}
+
+/**
+ * POST /rules/sync — GitHubのメモを取り込む。
+ *
+ * GitHubに触るのはここだけ。会話のたびに取りに行くと、その往復がそのまま
+ * 返事の待ち時間になるので、取り込みは押したときだけにしてある。
+ */
+export async function rulesSync(repo = "", path = ""): Promise<{
+  count: number; persisted: boolean; warning?: string;
+  by_applies?: Record<string, number>;
+}> {
+  const res = await fetch(`${requireApiUrl()}/rules/sync`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ repo, path }),
+  });
+  const d = (await res.json().catch(() => ({}))) as {
+    count?: number; persisted?: boolean; warning?: string; error?: string;
+    by_applies?: Record<string, number>;
+  };
+  if (!res.ok) throw new Error(d.error ?? `Rules sync failed (${res.status})`);
+  return {
+    count: asNumber(d.count),
+    persisted: d.persisted !== false,
+    warning: d.warning,
+    by_applies: d.by_applies,
+  };
 }
 
 /* ---------------- Proactive ---------------- */

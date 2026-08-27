@@ -24,6 +24,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import type { CoreState } from "./CoreOrb";
+import AgentTrace, { type AgentStep as TraceStep } from "@/components/AgentTrace";
 import Markdown from "@/components/Markdown";
 import {
   API_URL,
@@ -52,13 +53,9 @@ export interface ChatSettings {
 }
 
 /** エージェントの実行過程（考えた→道具を使った→結果を見た）。 */
-export interface AgentStep {
-  kind: "thinking" | "tool" | "observation" | "error";
-  tool?: string;
-  note?: string;
-  result?: string;
-  detail?: string;
-}
+/** 経過表示の型と見た目は AgentTrace に集約した（HOMEと揃えるため）。
+ *  他のファイルが Chat から import しているので、ここから出し直す。 */
+export type AgentStep = TraceStep;
 
 /** 承認待ちの操作（メール送信など、取り消せないもの）。 */
 interface PendingAct { tool: string; params: Record<string, unknown>; note?: string }
@@ -73,6 +70,8 @@ interface Message {
   error?: boolean;
   /** エージェントとして動いたターンの実行記録（会話ターンでは undefined）。 */
   steps?: AgentStep[];
+  /** そのターン全体でかかった時間（ミリ秒）。遅さの原因を後から辿れるように残す。 */
+  totalMs?: number;
   /** このターンで承認を待っている操作。 */
   await?: PendingAct;
 }
@@ -473,16 +472,21 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
           text, history, settings.name || undefined, approval,
           (ev: AgentEvent) => {
             switch (ev.phase) {
+              case "prepare":
+                // 返事が始まる前の工程。ここが重いとそのまま待ち時間になるので出す。
+                setSteps((s) => [...s.filter((x) => x.kind !== "thinking"),
+                  { kind: "prepare", what: ev.what || "準備", detail: ev.detail, ms: ev.ms }]);
+                break;
               case "thinking":
                 setSteps((s) => [...s.filter((x) => x.kind !== "thinking"), { kind: "thinking" }]);
                 break;
               case "tool":
                 actedRef.current = true;
                 setSteps((s) => [...s.filter((x) => x.kind !== "thinking"),
-                  { kind: "tool", tool: ev.tool || "", note: ev.note }]);
+                  { kind: "tool", tool: ev.tool || "", note: ev.note, ms: ev.ms }]);
                 break;
               case "observation":
-                setSteps((s) => [...s, { kind: "observation", result: ev.result || "" }]);
+                setSteps((s) => [...s, { kind: "observation", result: ev.result || "", ms: ev.ms }]);
                 break;
               case "approval":
                 setSteps((s) => s.filter((x) => x.kind !== "thinking"));
@@ -498,6 +502,10 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
                 setSteps((s) => s.filter((x) => x.kind !== "thinking"));
                 setMessages((prev) => prev.map((m) => (
                   m.id === assistantId ? { ...m, content: ev.text || "", pending: false } : m)));
+                break;
+              case "done":
+                setMessages((prev) => prev.map((m) => (
+                  m.id === assistantId ? { ...m, totalMs: ev.total_ms } : m)));
                 break;
             }
           },
@@ -1342,22 +1350,8 @@ function MessageBubble({ message, onRegenerate, onApprove, onReject }: {
         {/* エージェントとして動いたターンは、何をしたかを本文の前に出す。
             結果だけ見せると「勝手に何かした」ように見えるので、必ず経過を残す。 */}
         {message.steps && message.steps.length > 0 && (
-          <div className="mb-2 flex flex-col gap-1 border-b border-panel pb-2">
-            {message.steps.map((st, i) => (
-              <div key={i} className="flex items-start gap-1.5 text-[10px] leading-relaxed">
-                {st.kind === "thinking" ? (
-                  <span className="text-muted label-mono">◈ 考えています…</span>
-                ) : st.kind === "tool" ? (
-                  <span className="text-[var(--accent)] label-mono">
-                    ⚙ {st.tool}{st.note ? ` — ${st.note}` : ""}
-                  </span>
-                ) : st.kind === "observation" ? (
-                  <span className="whitespace-pre-wrap text-muted">↳ {(st.result || "").slice(0, 300)}</span>
-                ) : (
-                  <span className="text-[#ff9b9b]">⚠ {st.detail}</span>
-                )}
-              </div>
-            ))}
+          <div className="mb-2 border-b border-panel pb-2">
+            <AgentTrace steps={message.steps} animate={false} totalMs={message.totalMs} />
           </div>
         )}
 

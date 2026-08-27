@@ -6,6 +6,7 @@
 #
 # 進捗は Claude Code 風に逐次イベントで流す（run_stream がジェネレータ）:
 #   {"phase": "start"}
+#   {"phase": "prepare", "what": "指示文の組み立て"}   # 返事が始まる前の準備
 #   {"phase": "thinking", "step": n}
 #   {"phase": "tool", "step": n, "tool": "add_task", "params": {...}, "note": "..."}
 #   {"phase": "observation", "step": n, "tool": "...", "result": "..."}
@@ -13,10 +14,21 @@
 #   {"phase": "done", "steps": n}
 #   {"phase": "error", "detail": "..."}   # 生成失敗時（done は必ず続けて出す）
 #
+# すべてのイベントに ms（直前のイベントからの経過）と total_ms（開始からの合計）
+# を付ける。理由:
+#   これまでは「考えています…」としか出せず、遅いと感じたときに、どこが遅いのか
+#   画面から分からなかった。準備が重いのか、生成が重いのか、ツールが重いのかで
+#   打ち手はまったく違う。時間が出ていれば、それを見て決められる。
+#
+#   prepare を分けたのも同じ理由。記憶やルールの読み込みは返事が始まる前に
+#   終わらせる必要があるので、そこが重くなると待ち時間に直結するが、
+#   ループの外にあるためイベントが1つも出ていなかった。
+#
 # 設計方針は既存モジュールと統一：設定が欠けても絶対に crash させない。
 # =====================================================================
 
 import json
+import time
 from datetime import datetime, timezone, timedelta
 
 import llm
@@ -61,6 +73,52 @@ def _system_prompt(name: str) -> str:
     )
 
 
+# ルールは無くても動くべきもの。読めなくても絶対に止めない。
+def _rules_always() -> str:
+    try:
+        import rules
+        return rules.always_block()
+    except Exception:
+        return ""
+
+
+def _rules_topic(text: str) -> str:
+    try:
+        import rules
+        return rules.for_topic(text)
+    except Exception:
+        return ""
+
+
+def _rules_for_tool(tool: str) -> str:
+    try:
+        import rules
+        return rules.for_tool(tool)
+    except Exception:
+        return ""
+
+
+def _stamper():
+    """イベントに経過時間を刻む関数を作る。
+
+    ms       … 直前のイベントからの経過（その工程にかかった時間）
+    total_ms … 開始からの合計
+
+    monotonic を使う（時計合わせで巻き戻っても負の値にならない）。
+    """
+    t0 = time.monotonic()
+    last = [t0]
+
+    def stamp(ev: dict) -> dict:
+        now = time.monotonic()
+        ev["ms"] = int((now - last[0]) * 1000)
+        ev["total_ms"] = int((now - t0) * 1000)
+        last[0] = now
+        return ev
+
+    return stamp
+
+
 def _build_convo(system_prompt: str, history, instruction: str) -> str:
     """system + 直近履歴 + 今回の指示 を single-prompt に結合する。"""
     lines = [system_prompt, "\n--- 会話履歴 ---"]
@@ -81,49 +139,85 @@ def run_stream(instruction: str, history=None, name: str = "AIbou", approval: bo
     approval=True のとき、機微なツール（SENSITIVE_TOOLS）は実行せず 'approval'
     イベントを出して停止する（人間が承認したら /agent/execute で実行する）。"""
     instruction = (instruction or "").strip()
-    yield {"phase": "start"}
+    stamp = _stamper()
+    yield stamp({"phase": "start"})
     if not instruction:
-        yield {"phase": "final", "text": "指示が空です。何をしましょうか？"}
-        yield {"phase": "done", "steps": 0}
+        yield stamp({"phase": "final", "text": "指示が空です。何をしましょうか？"})
+        yield stamp({"phase": "done", "steps": 0})
         return
 
-    convo = _build_convo(_system_prompt(name), history, instruction)
+    # 準備（返事が始まる前にやること）。ここが重いと待ち時間に直結するので、
+    # 何をどれだけ待ったのかが分かるよう、工程として出す。
+    system_prompt = _system_prompt(name)
+
+    # 人が書いたルール。GitHubには触らない（同期済みの内容を読むだけ）。
+    always = _rules_always()
+    topic = _rules_topic(instruction)
+    if always or topic:
+        system_prompt += "\n\n" + "\n\n".join(x for x in (always, topic) if x)
+        yield stamp({"phase": "prepare", "what": "ルールを読む",
+                     "detail": f"{len(always) + len(topic):,}字"})
+
+    convo = _build_convo(system_prompt, history, instruction)
+    yield stamp({"phase": "prepare", "what": "指示文の組み立て",
+                 "detail": f"{len(convo):,}字"})
+
     executed: list = []  # 実行したツール名の記録（最終フォールバック用）
     failed: list = []    # 失敗したツールと理由（成功したように報告しないため）
+    rules_shown: set = set()   # ツール別ルールを見せた相手（同じ物を繰り返さない）
 
     for step in range(1, MAX_STEPS + 1):
-        yield {"phase": "thinking", "step": step}
+        yield stamp({"phase": "thinking", "step": step})
         try:
             text = llm.generate_text(convo + "\nアシスタント:", max_tokens=STEP_MAX_TOKENS)
         except Exception as e:
-            yield {"phase": "error", "detail": _friendly_error(e)}
-            yield {"phase": "done", "steps": step - 1}
+            yield stamp({"phase": "error", "detail": _friendly_error(e)})
+            yield stamp({"phase": "done", "steps": step - 1})
             return
 
         call, preface = tools.extract_tool_call(text or "")
         if not call:
             # ツール呼び出し無し＝最終報告。
             final = (text or "").strip() or _fallback_report(executed, failed)
-            yield {"phase": "final", "text": final}
-            yield {"phase": "done", "steps": step - 1}
+            yield stamp({"phase": "final", "text": final})
+            yield stamp({"phase": "done", "steps": step - 1})
             return
 
         tool = (call.get("tool") or "").strip()
         params = call.get("params") or {}
 
+        # そのツールにルールがあるなら、実行する前に一度だけ読ませて、
+        # 呼び直させる。取り返しのつかない操作（投稿・送信）の直前に必ず通るので、
+        # 「書いてあるのに守らなかった」が起きにくい。
+        # 1つのツールにつき1回だけ（毎回やると同じ所を回り続ける）。
+        rule_text = _rules_for_tool(tool)
+        if rule_text and tool not in rules_shown:
+            rules_shown.add(tool)
+            yield stamp({"phase": "prepare", "what": f"{tool} のルールを確認",
+                         "detail": f"{len(rule_text):,}字"})
+            convo += (
+                f"\nアシスタント: {_MARKER}{json.dumps(call, ensure_ascii=False)}"
+                f"\n<<<TOOL_RESULT>>> {rule_text}\n"
+                "（まだ実行していません。上のルールに沿って内容を直し、"
+                "同じツールをもう一度呼んでください）"
+            )
+            continue
+
         # 承認モード：機微なツールは実行せず、ユーザーの承認を待つ。
         if approval and tool in SENSITIVE_TOOLS:
-            yield {"phase": "approval", "step": step, "tool": tool, "params": params, "note": (preface or "").strip()}
-            yield {"phase": "done", "steps": step - 1, "awaiting_approval": True}
+            yield stamp({"phase": "approval", "step": step, "tool": tool,
+                         "params": params, "note": (preface or "").strip()})
+            yield stamp({"phase": "done", "steps": step - 1, "awaiting_approval": True})
             return
 
-        yield {"phase": "tool", "step": step, "tool": tool, "params": params, "note": (preface or "").strip()}
+        yield stamp({"phase": "tool", "step": step, "tool": tool,
+                     "params": params, "note": (preface or "").strip()})
 
         result = tools.execute_tool(tool, params)
         executed.append(tool)
         if _looks_failed(result):
             failed.append((tool, result))
-        yield {"phase": "observation", "step": step, "tool": tool, "result": result}
+        yield stamp({"phase": "observation", "step": step, "tool": tool, "result": result})
 
         # 実行の痕跡を会話に足して次のステップへ。
         convo += (
@@ -141,8 +235,8 @@ def run_stream(instruction: str, history=None, name: str = "AIbou", approval: bo
         final = ""
     if not (final or "").strip():
         final = _fallback_report(executed, failed)
-    yield {"phase": "final", "text": final.strip()}
-    yield {"phase": "done", "steps": MAX_STEPS}
+    yield stamp({"phase": "final", "text": final.strip()})
+    yield stamp({"phase": "done", "steps": MAX_STEPS})
 
 
 # ツールの結果は文字列で返る（絶対に raise しない作りのため）。

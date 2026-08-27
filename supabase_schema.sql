@@ -160,6 +160,21 @@ CREATE TABLE IF NOT EXISTS hooks (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hooks_token ON hooks(token_id);
 
+-- agent_rules … 「AIbouに守らせるルール」。GitHub（Obsidianの保管庫）から取り込む。
+-- 人が書いたメモをそのまま行動指針にするための置き場で、AIbouは読むだけ・書かない。
+-- 同期のたびに丸ごと入れ替える（消したメモが残らないように）。
+CREATE TABLE IF NOT EXISTS agent_rules (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  path       text NOT NULL,
+  title      text DEFAULT '',
+  applies    text DEFAULT 'always',   -- always / tool / mode / topic
+  targets    text DEFAULT '',         -- 適用先をカンマ区切りで（tool名 / モード名 / 言葉）
+  body       text DEFAULT '',
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_rules_applies ON agent_rules(applies);
+
+
 -- 💬 CHAT：会話履歴
 -- 端末を変えても続きから読めるように、その人のDBに残す。
 -- 本文は jsonb に丸ごと入れる（1件ずつ読み書きするので、行を分ける利点が薄い）。

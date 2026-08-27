@@ -44,6 +44,7 @@ import forge
 import gh
 import gservice
 import hooks as hooks_mod
+import rules
 import guide as guide_mod
 import tenancy
 import hfhub
@@ -419,6 +420,11 @@ class KeySetRequest(BaseModel):
 
 class KeyRescueRequest(BaseModel):
     names: List[str] = []
+
+
+class RulesSyncRequest(BaseModel):
+    repo: str = ""
+    path: str = ""
 
 
 class VaultGenerateRequest(BaseModel):
@@ -3246,6 +3252,31 @@ async def keys_rescue(req: KeyRescueRequest,
     result = await loop.run_in_executor(None, lambda: keychain.rescue_keys(req.names))
     if isinstance(result, dict) and result.get("error"):
         return JSONResponse(status_code=409, content=result)
+    return result
+
+
+# ── ルール（AIbouに守らせる決まりごと） ──────────────────────────
+
+@app.get("/rules")
+async def rules_status(_auth: None = Depends(require_auth)):
+    """取り込み済みのルール一覧。GitHubには触らない（保存済みを読むだけ）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, rules.status)
+
+
+@app.post("/rules/sync")
+async def rules_sync(req: RulesSyncRequest,
+                     _auth: None = Depends(require_auth),
+                     _store: None = Depends(require_storage)):
+    """GitHubのメモを取り込む。GitHubに触るのはここだけ。
+
+    会話のたびに取りに行くと、その往復がそのまま待ち時間になる。
+    取り込みは「同期したとき」に限り、ふだんは保存済みから読む。
+    """
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: rules.sync(req.repo, req.path))
+    if isinstance(result, dict) and result.get("error"):
+        return JSONResponse(status_code=400, content=result)
     return result
 
 

@@ -252,6 +252,32 @@ export const EXTENSIONS: Extension[] = [
     ],
   },
   {
+    id: "rules",
+    name: "ルール（Obsidian）",
+    tagline: "守ってほしいことをメモに書いておくと、AIbouが従う",
+    group: "work",
+    kind: "keys",
+    unlocks: [
+      "「Xに投稿するときは絵文字を使わない」のような約束を、メモに書いて守らせる",
+      "投稿・送信のような取り消せない操作の直前に、必ずルールを読ませる",
+      "メモを直せば、AIbouの振る舞いがその場で変わる（作り直し不要）",
+    ],
+    warning: "GitHubのトークンが先に必要です。リポジトリは必ず private にしてください。"
+           + "AIbouはこのメモを読むだけで、書き換えません。",
+    fields: [
+      { name: "RULES_REPO", label: "置き場（owner/name）", placeholder: "yourname/aibou-rules" },
+      { name: "RULES_PATH", label: "フォルダ（空ならリポジトリ全体）", placeholder: "ルール", optional: true },
+    ],
+    howto: [
+      "GitHubで private のリポジトリを1つ作る（例: aibou-rules）",
+      "Obsidianの保管庫をそこに置く（Obsidian Git プラグインが楽です）",
+      "メモの先頭に「---」で囲んで 適用: ツール / 対象: x_post のように書く",
+      "適用は 常時・ツール・モード・話題 の4つ。書かなければ常時になる",
+      "ここに置き場を保存して、「ルールを同期」を押す",
+      "同期したときだけGitHubを読むので、ふだんの返事は遅くなりません",
+    ],
+  },
+  {
     id: "notion",
     name: "Notion",
     tagline: "決まったページにメモを書き足す",

@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   API_URL, deleteKey, googleAuthStartUrl, googleDisconnect, googleStatus,
-  keyOrphans, keyRescue, listKeys, myDatabase, profileGet, sendNotify, setKey,
+  keyOrphans, keyRescue, listKeys, myDatabase, profileGet, rulesSync, sendNotify, setKey,
   type ApiKeyInfo, type OrphanKey,
 } from "@/lib/api";
 import {
@@ -339,6 +339,36 @@ function Detail({ ext, connected, google, info, onClose, onChanged }: {
     }
   };
 
+  /** GitHubのメモを取り込む。読み込みはここだけで、会話中には走らせない。 */
+  const syncRules = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await rulesSync();
+      if (r.count === 0) {
+        setNote({ text: r.warning || "読めるメモがありませんでした", ok: false });
+      } else {
+        const kinds = r.by_applies || {};
+        const detail = [
+          kinds.always ? `常時${kinds.always}` : "",
+          kinds.tool ? `ツール${kinds.tool}` : "",
+          kinds.mode ? `モード${kinds.mode}` : "",
+          kinds.topic ? `話題${kinds.topic}` : "",
+        ].filter(Boolean).join("・");
+        setNote({
+          text: `${r.count}件のルールを取り込みました${detail ? `（${detail}）` : ""}`
+              + (r.persisted ? "" : "。ただし保存先に書けていないため、更新すると消えます"),
+          ok: r.persisted,
+        });
+      }
+      onChanged();
+    } catch (e) {
+      setNote({ text: explain(e, "ルールの同期"), ok: false });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const test = async () => {
     setBusy(true);
     setNote(null);
@@ -454,6 +484,14 @@ function Detail({ ext, connected, google, info, onClose, onChanged }: {
                 <button type="button" onClick={() => void test()} disabled={busy}
                         className="rounded-forge border border-panel px-3 py-2 text-[11px] text-fg-strong label-mono disabled:opacity-40">
                   テスト送信
+                </button>
+              )}
+              {/* ルールは「同期したときだけ」GitHubを読む。
+                  会話のたびに読むと、その往復がそのまま返事の待ち時間になる。 */}
+              {ext.id === "rules" && connected === true && (
+                <button type="button" onClick={() => void syncRules()} disabled={busy}
+                        className="rounded-forge border border-panel px-3 py-2 text-[11px] text-fg-strong label-mono disabled:opacity-40">
+                  ルールを同期
                 </button>
               )}
             </div>
