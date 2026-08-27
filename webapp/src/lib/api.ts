@@ -802,7 +802,16 @@ export async function scheduleDelete(id: string): Promise<boolean> {
 }
 
 /* ---------------- Google integration (Sheets / Docs) ---------------- */
-export interface GoogleStatus { configured: boolean; connected: boolean }
+export interface GoogleStatus {
+  configured: boolean;
+  connected: boolean;
+  /**
+   * 繋いでいるGoogleアカウント。
+   * 「作ったと言われたのにドライブに無い」の原因が、見に行ったのと違う
+   * アカウントに繋いでいた、ということがある。どこに作られるのかを出す。
+   */
+  account?: string;
+}
 
 /** GET /google/status — whether Google is configured + connected. */
 export async function googleStatus(): Promise<GoogleStatus> {

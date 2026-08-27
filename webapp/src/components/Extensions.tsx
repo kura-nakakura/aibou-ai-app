@@ -17,7 +17,7 @@ import { createPortal } from "react-dom";
 import {
   API_URL, deleteKey, googleAuthStartUrl, googleDisconnect, googleStatus,
   keyOrphans, keyRescue, listKeys, myDatabase, profileGet, rulesSync, sendNotify, setKey,
-  type ApiKeyInfo, type OrphanKey,
+  type ApiKeyInfo, type GoogleStatus, type OrphanKey,
 } from "@/lib/api";
 import {
   EXTENSIONS, GROUP_LABEL, GROUP_ORDER, NO_KEY_FEATURES, isConnected, visibleExtensions,
@@ -32,7 +32,7 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
   const [keyInfo, setKeyInfo] = useState<Map<string, ApiKeyInfo>>(new Map());
   const [orphans, setOrphans] = useState<OrphanKey[]>([]);
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
-  const [google, setGoogle] = useState<{ configured: boolean; connected: boolean } | null>(null);
+  const [google, setGoogle] = useState<GoogleStatus | null>(null);
   const [dbOn, setDbOn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -273,7 +273,7 @@ function Card({ ext, state, onOpen }:
 function Detail({ ext, connected, google, info, onClose, onChanged }: {
   ext: Extension;
   connected: boolean | null;
-  google: { configured: boolean; connected: boolean } | null;
+  google: GoogleStatus | null;
   info: Map<string, ApiKeyInfo>;
   onClose: () => void;
   onChanged: () => void;
@@ -499,6 +499,15 @@ function Detail({ ext, connected, google, info, onClose, onChanged }: {
         )}
 
         {/* ④ Google は許可（OAuth）まで済ませて初めて使える */}
+        {ext.kind === "oauth" && google?.connected && google.account && (
+          /* どのアカウントに作られるのかを先に見せる。
+             「作ったと言われたのにドライブに無い」の原因が、見に行ったのと
+             違うアカウントに繋いでいた、ということがある。 */
+          <p className="mb-2 rounded-forge border border-panel p-2 text-[11px] leading-relaxed text-muted">
+            ファイルは <span className="text-fg-strong">{google.account}</span> のドライブに作られます。
+            別のアカウントのドライブを見ていると、見つかりません。
+          </p>
+        )}
         {ext.kind === "oauth" && (
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
             {google?.connected ? (

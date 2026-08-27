@@ -11,7 +11,9 @@
 # 設計方針は他モジュールと統一：設定が欠けても絶対に crash しない。
 # =====================================================================
 
+import json
 import os
+import uuid
 
 import keychain
 
@@ -58,7 +60,16 @@ def connected() -> bool:
 
 
 def status() -> dict:
-    return {"configured": configured(), "connected": connected()}
+    """UI用の状態。繋いでいるアカウントも返す。
+
+    「作ったと言われたのにドライブに無い」の原因が、見に行ったのと違う
+    アカウントに繋いでいた、ということがある。どこに作られるのかを
+    先に見せておけば、その取り違えに気づける。
+    """
+    out = {"configured": configured(), "connected": connected()}
+    if out["connected"]:
+        out["account"] = account_email()
+    return out
 
 
 def auth_url(redirect: str) -> str:
@@ -135,6 +146,115 @@ def _err_not_connected() -> dict:
     return {"ok": False, "error": "Google未接続です（Settings→Google連携で『接続』してください）"}
 
 
+# ── 作ったと言う前に、本当にあるか確かめる ───────────────────────────
+# 報告: 「Googleドライブにファイルを作った」と言われたのに、ドライブに無かった。
+#
+# API が 200 を返しても、それだけでは足りない。本文の書き込みが別リクエストで、
+# そちらが失敗しても成功として返っていた（中身が空のまま「作成しました」）。
+# 繋いでいるアカウントが、見に行ったドライブと違うこともある。
+#
+# 作った直後にドライブへ問い合わせて、実在と持ち主を確かめる。
+# 1往復増えるが、「作ったと言われた物が無い」より軽い。
+def _verify_in_drive(tok: str, file_id: str) -> dict:
+    if not (tok and file_id):
+        return {"ok": False, "error": "確認できませんでした"}
+    try:
+        r = requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {tok}"},
+            params={"fields": "id,name,webViewLink,trashed,owners(emailAddress)"},
+            timeout=20)
+        if r.status_code != 200:
+            d = r.json() if r.content else {}
+            return {"ok": False,
+                    "error": (d.get("error") or {}).get("message") or f"HTTP {r.status_code}"}
+        d = r.json() or {}
+        if d.get("trashed"):
+            return {"ok": False, "error": "作成されましたが、ゴミ箱に入っています"}
+        owners = d.get("owners") or []
+        return {"ok": True,
+                "name": d.get("name") or "",
+                "link": d.get("webViewLink") or "",
+                "account": (owners[0].get("emailAddress") if owners else "") or ""}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:160]}
+
+
+def _check_write(resp) -> str:
+    """本文の書き込みが通ったか。失敗の理由を返す（成功なら空文字）。
+
+    ここを見ずに握りつぶしていたので、中身が空のまま「作成しました」になっていた。
+    """
+    try:
+        if resp is None:
+            return "本文を書き込めませんでした"
+        if 200 <= resp.status_code < 300:
+            return ""
+        d = resp.json() if resp.content else {}
+        return ((d.get("error") or {}).get("message")
+                or f"本文を書き込めませんでした（HTTP {resp.status_code}）")
+    except Exception as e:
+        return f"本文を書き込めませんでした（{str(e)[:120]}）"
+
+
+def account_email() -> str:
+    """いま繋いでいるGoogleアカウント。どこに作られたのかを言えるようにする。"""
+    tok = _access_token()
+    if not tok:
+        return ""
+    try:
+        r = requests.get("https://www.googleapis.com/drive/v3/about",
+                         headers={"Authorization": f"Bearer {tok}"},
+                         params={"fields": "user(emailAddress)"}, timeout=15)
+        if r.status_code != 200:
+            return ""
+        return ((r.json() or {}).get("user") or {}).get("emailAddress") or ""
+    except Exception:
+        return ""
+
+
+def upload_file(name: str, content: str, mime: str = "text/plain") -> dict:
+    """Googleドライブにファイルを作る（Googleドキュメント形式ではなく、そのまま）。
+
+    これまで作れたのは Docs / Sheets / Slides だけだった。「ドライブにファイルを
+    作って」に当たるツールが無く、AIbouの中に保存するだけの機能が選ばれて
+    「作成しました」と返っていた。ここを埋める。
+    """
+    name = (name or "").strip() or "無題.txt"
+    tok = _access_token()
+    if not tok:
+        return _err_not_connected()
+    body = content if isinstance(content, str) else str(content or "")
+    boundary = "aibou" + uuid.uuid4().hex
+    meta = json.dumps({"name": name}, ensure_ascii=False)
+    payload = (
+        f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n"
+        f"--{boundary}\r\nContent-Type: {mime}; charset=UTF-8\r\n\r\n{body}\r\n"
+        f"--{boundary}--\r\n"
+    ).encode("utf-8")
+    try:
+        r = requests.post(
+            "https://www.googleapis.com/upload/drive/v3/files",
+            headers={"Authorization": f"Bearer {tok}",
+                     "Content-Type": f"multipart/related; boundary={boundary}"},
+            params={"uploadType": "multipart", "fields": "id,name,webViewLink"},
+            data=payload, timeout=45)
+        d = r.json() if r.content else {}
+        fid = d.get("id")
+        if not fid:
+            return {"ok": False,
+                    "error": (d.get("error") or {}).get("message") or "作成に失敗しました"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:160]}
+
+    seen = _verify_in_drive(tok, fid)
+    if not seen.get("ok"):
+        return {"ok": False, "error": f"作成の確認が取れませんでした（{seen.get('error')}）"}
+    return {"ok": True, "id": fid, "name": seen.get("name") or name,
+            "url": seen.get("link") or d.get("webViewLink") or "",
+            "account": seen.get("account", "")}
+
+
 def create_sheet(title: str, rows) -> dict:
     """Google スプレッドシートを作成し rows を書き込む。{ok, url, id} / {ok:False, error}。"""
     tok = _access_token()
@@ -153,14 +273,24 @@ def create_sheet(title: str, rows) -> dict:
         for row in (rows or []):
             cells = row if isinstance(row, (list, tuple)) else [row]
             values.append(["" if c is None else str(c) for c in cells])
+        write_err = ""
         if values:
-            requests.put(
+            wr = requests.put(
                 f"https://sheets.googleapis.com/v4/spreadsheets/{sid}/values/A1",
                 headers=headers, params={"valueInputOption": "RAW"},
                 json={"values": values}, timeout=30)
-        return {"ok": True, "url": url, "id": sid}
+            write_err = _check_write(wr)
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+    seen = _verify_in_drive(tok, sid)
+    if not seen.get("ok"):
+        return {"ok": False, "error": f"作成の確認が取れませんでした（{seen.get('error')}）"}
+    out = {"ok": True, "url": seen.get("link") or url, "id": sid,
+           "account": seen.get("account", "")}
+    if write_err:
+        out["warning"] = f"表は作られましたが、中身が入っていません（{write_err}）"
+    return out
 
 
 def create_doc(title: str, content: str) -> dict:
@@ -176,15 +306,25 @@ def create_doc(title: str, content: str) -> dict:
         did = d.get("documentId")
         if not did:
             return {"ok": False, "error": (d.get("error") or {}).get("message") or "作成に失敗しました"}
+        write_err = ""
         if content:
-            requests.post(
+            wr = requests.post(
                 f"https://docs.googleapis.com/v1/documents/{did}:batchUpdate",
                 headers=headers,
                 json={"requests": [{"insertText": {"location": {"index": 1}, "text": content}}]},
                 timeout=30)
-        return {"ok": True, "url": f"https://docs.google.com/document/d/{did}/edit", "id": did}
+            write_err = _check_write(wr)
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+    seen = _verify_in_drive(tok, did)
+    if not seen.get("ok"):
+        return {"ok": False, "error": f"作成の確認が取れませんでした（{seen.get('error')}）"}
+    out = {"ok": True, "id": did, "account": seen.get("account", ""),
+           "url": seen.get("link") or f"https://docs.google.com/document/d/{did}/edit"}
+    if write_err:
+        out["warning"] = f"ファイルは作られましたが、本文が入っていません（{write_err}）"
+    return out
 
 
 # ── Google Slides ────────────────────────────────────────────────────
@@ -268,12 +408,22 @@ def create_presentation(title: str, slides, theme: str = "") -> dict:
         if first_slide_id and reqs:
             reqs.append({"deleteObject": {"objectId": first_slide_id}})
 
+        write_err = ""
         if reqs:
-            requests.post(f"https://slides.googleapis.com/v1/presentations/{pid}:batchUpdate",
-                          headers=headers, json={"requests": reqs}, timeout=45)
-        return {"ok": True, "url": f"https://docs.google.com/presentation/d/{pid}/edit", "id": pid}
+            wr = requests.post(f"https://slides.googleapis.com/v1/presentations/{pid}:batchUpdate",
+                               headers=headers, json={"requests": reqs}, timeout=45)
+            write_err = _check_write(wr)
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+    seen = _verify_in_drive(tok, pid)
+    if not seen.get("ok"):
+        return {"ok": False, "error": f"作成の確認が取れませんでした（{seen.get('error')}）"}
+    out = {"ok": True, "id": pid, "account": seen.get("account", ""),
+           "url": seen.get("link") or f"https://docs.google.com/presentation/d/{pid}/edit"}
+    if write_err:
+        out["warning"] = f"ファイルは作られましたが、中身が入っていません（{write_err}）"
+    return out
 
 
 # ── Google Calendar ──────────────────────────────────────────────────

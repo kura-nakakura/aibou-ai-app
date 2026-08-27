@@ -63,16 +63,23 @@ def test_gservice_create_sheet_mocked(monkeypatch):
 
     class FakeResp:
         content = b"{}"
-        def __init__(self, d):
-            self._d = d
+        def __init__(self, d, status=200):
+            self._d, self.status_code = d, status
         def json(self):
             return self._d
 
     monkeypatch.setattr(gservice.requests, "post",
                         lambda *a, **k: FakeResp({"spreadsheetId": "sid1", "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/sid1"}))
     monkeypatch.setattr(gservice.requests, "put", lambda *a, **k: FakeResp({}))
+    # 作成後にドライブへ実在を確かめに行くようになった（作りっぱなしにしない）
+    monkeypatch.setattr(gservice.requests, "get", lambda *a, **k: FakeResp(
+        {"id": "sid1", "name": "表", "trashed": False,
+         "webViewLink": "https://docs.google.com/spreadsheets/d/sid1",
+         "owners": [{"emailAddress": "me@example.com"}]}))
     res = gservice.create_sheet("表", [["a", "b"], ["1", "2"]])
     assert res["ok"] is True and "sid1" in res["url"]
+    assert res.get("warning") is None, "中身は書けているのに警告が出ている"
+    assert res.get("account") == "me@example.com"
 
 
 # ── Google: エンドポイント ───────────────────────────────────────────

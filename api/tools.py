@@ -61,11 +61,17 @@ TOOLS_DOC = (
     '- list_state: 今のタスク・予定・副業ジョブ・未読通知の件数と概要を取得する（状況把握に使う） '
     "/ params: { }\n"
     '- create_document: Markdownのドキュメントを生成してAibou内に保存（ダウンロード可）。'
+    '★Googleドライブには入らない。「ドライブに」「Googleに」と言われたら使わず '
+    'drive_upload か google_doc を使うこと。'
     'contentには完成した本文を自分で書いて渡す '
     '/ params: { "title": "見出し", "content": "Markdown本文" }\n'
-    '- create_spreadsheet: 表データからCSVスプレッドシートを生成して保存（ダウンロード可）。'
+    '- create_spreadsheet: 表データからCSVスプレッドシートを生成してAibou内に保存（ダウンロード可）。'
+    '★Googleドライブには入らない。ドライブに置くなら google_sheet を使う。'
     'rowsは1行目を見出しにした二次元配列 '
     '/ params: { "title": "表の名前", "rows": [["名前","金額"],["家賃","80000"]] }\n'
+    '- drive_upload: Googleドライブにファイルをそのまま作る（Google連携が必要）。'
+    '「ドライブにファイルを作って」はこれ。作った直後に実在を確認して報告する '
+    '/ params: { "name": "メモ.txt", "content": "本文", "mime": "text/plain" }\n'
     '- create_slides: スライド資料（プレゼン）を作る。topicを渡すと内容も自動生成、'
     'slides配列で直接指定も可。ビジュアル表示・PDF/Googleスライド化できる '
     '/ params: { "topic": "新規事業の提案", "n": 6 }  または '
@@ -437,6 +443,23 @@ def _rows_to_csv(rows) -> str:
     return buf.getvalue()
 
 
+def _where_saved_note() -> str:
+    """AIbouの中に保存したときの但し書き。
+
+    報告: 「Googleドライブにファイルを作って」に対して、この機能が選ばれ、
+    「作成しました」とだけ返っていた。ドライブを見ても無い。
+    どこに置いたのかを毎回書く。Googleに繋いでいる人には、行き先も示す。
+    """
+    note = "（保存先はAIbouの中です。Googleドライブではありません）"
+    try:
+        import gservice
+        if gservice.connected():
+            note += "ドライブに置きたいときは drive_upload / google_doc を使ってください。"
+    except Exception:
+        pass
+    return note
+
+
 def _do_create_document(params: dict) -> str:
     """Markdown ドキュメントを生成して Aibou 内に保存（ダウンロード可）。"""
     title = (params.get("title") or "").strip()
@@ -448,7 +471,28 @@ def _do_create_document(params: dict) -> str:
         art = artifacts.create("document", title or "ドキュメント", content, "text/markdown")
     except Exception as e:
         return f"ドキュメントの作成に失敗しました：{e}"
-    return f"ドキュメント「{art.get('title')}」を作成しました。HOMEの『生成物』からダウンロードできます。"
+    return (f"ドキュメント「{art.get('title')}」をAIbou内に保存しました"
+            f"（HOMEの『生成物』からダウンロードできます）。{_where_saved_note()}")
+
+
+def _do_drive_upload(params: dict) -> str:
+    """Googleドライブにファイルを作る（作った直後に実在を確かめる）。"""
+    name = (params.get("name") or params.get("title") or "").strip()
+    content = params.get("content")
+    content = content if isinstance(content, str) else str(content or "")
+    mime = (params.get("mime") or "").strip() or "text/plain"
+    if not content.strip():
+        return "ファイルの中身が空です。"
+    try:
+        import gservice
+        res = gservice.upload_file(name, content, mime)
+    except Exception as e:
+        return f"Googleドライブへの作成に失敗しました：{e}"
+    if not res.get("ok"):
+        return f"Googleドライブに作成できませんでした：{res.get('error')}"
+    who = f"（{res['account']} のドライブ）" if res.get("account") else ""
+    return (f"Googleドライブに「{res.get('name')}」を作成し、"
+            f"実在を確認しました{who}：{res.get('url')}")
 
 
 def _do_create_spreadsheet(params: dict) -> str:
@@ -466,7 +510,8 @@ def _do_create_spreadsheet(params: dict) -> str:
     except Exception as e:
         return f"スプレッドシートの作成に失敗しました：{e}"
     n = csv_text.strip().count("\n") + 1
-    return f"スプレッドシート「{art.get('title')}」を作成しました（{n}行・CSV）。HOMEの『生成物』からダウンロードできます。"
+    return (f"スプレッドシート「{art.get('title')}」をAIbou内に保存しました（{n}行・CSV。"
+            f"HOMEの『生成物』からダウンロードできます）。{_where_saved_note()}")
 
 
 def _do_create_slides(params: dict) -> str:
@@ -520,7 +565,11 @@ def _do_create_google_slides(params: dict) -> str:
         return f"Googleスライドの作成に失敗しました：{e}"
     if not res.get("ok"):
         return f"Googleスライドを作成できませんでした：{res.get('error')}"
-    return f"Googleスライド「{deck.get('title')}」を作成しました：{res.get('url')}"
+    if res.get("warning"):
+        return f"Googleスライド「{deck.get('title')}」：{res['warning']} {res.get('url')}"
+    who = f"（{res['account']} のドライブ）" if res.get("account") else ""
+    return (f"Googleスライド「{deck.get('title')}」を作成し、"
+            f"実在を確認しました{who}：{res.get('url')}")
 
 
 def _do_google_sheet(params: dict) -> str:
@@ -536,7 +585,11 @@ def _do_google_sheet(params: dict) -> str:
         return f"Googleスプレッドシートの作成に失敗しました：{e}"
     if not res.get("ok"):
         return f"Googleスプレッドシートを作成できませんでした：{res.get('error')}"
-    return f"Googleスプレッドシート「{title or '無題'}」を作成しました：{res.get('url')}"
+    if res.get("warning"):
+        return f"Googleスプレッドシート「{title or '無題'}」：{res['warning']} {res.get('url')}"
+    who = f"（{res['account']} のドライブ）" if res.get("account") else ""
+    return (f"Googleスプレッドシート「{title or '無題'}」を作成し、"
+            f"実在を確認しました{who}：{res.get('url')}")
 
 
 def _do_google_doc(params: dict) -> str:
@@ -552,7 +605,11 @@ def _do_google_doc(params: dict) -> str:
         return f"Googleドキュメントの作成に失敗しました：{e}"
     if not res.get("ok"):
         return f"Googleドキュメントを作成できませんでした：{res.get('error')}"
-    return f"Googleドキュメント「{title or '無題'}」を作成しました：{res.get('url')}"
+    if res.get("warning"):
+        return f"Googleドキュメント「{title or '無題'}」：{res['warning']} {res.get('url')}"
+    who = f"（{res['account']} のドライブ）" if res.get("account") else ""
+    return (f"Googleドキュメント「{title or '無題'}」を作成し、"
+            f"実在を確認しました{who}：{res.get('url')}")
 
 
 def _do_calendar_add(params: dict) -> str:
@@ -865,6 +922,7 @@ _DISPATCH = {
     "create_google_slides": _do_create_google_slides,
     "google_sheet": _do_google_sheet,
     "google_doc": _do_google_doc,
+    "drive_upload": _do_drive_upload,
     "calendar_add": _do_calendar_add,
     "calendar_list": _do_calendar_list,
     "send_email": _do_send_email,

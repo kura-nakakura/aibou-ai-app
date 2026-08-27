@@ -122,8 +122,8 @@ def test_gservice_create_presentation_mocked(monkeypatch):
 
     class FakeResp:
         content = b"{}"
-        def __init__(self, d):
-            self._d = d
+        def __init__(self, d, status=200):
+            self._d, self.status_code = d, status
         def json(self):
             return self._d
 
@@ -136,8 +136,14 @@ def test_gservice_create_presentation_mocked(monkeypatch):
         return FakeResp({})
 
     monkeypatch.setattr(gservice.requests, "post", fake_post)
+    # 作成後にドライブへ実在を確かめに行くようになった（作りっぱなしにしない）
+    monkeypatch.setattr(gservice.requests, "get", lambda *a, **k: FakeResp(
+        {"id": "pid1", "name": "提案", "trashed": False,
+         "webViewLink": "https://docs.google.com/presentation/d/pid1/edit",
+         "owners": [{"emailAddress": "me@example.com"}]}))
     res = gservice.create_presentation("提案", [{"title": "背景", "bullets": ["a", "b"]}])
     assert res["ok"] is True and "pid1" in res["url"] and calls["batch"] == 1
+    assert res.get("warning") is None, "中身は書けているのに警告が出ている"
 
 
 # ── ④ スライド1枚ごとの編集（Genspark相当） ──────────────────────────

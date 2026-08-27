@@ -216,6 +216,7 @@ export const EXTENSIONS: Extension[] = [
       "表をスプレッドシートとして書き出す",
       "文章をGoogleドキュメントにする",
       "スライドをGoogleスライドにする",
+      "ドライブにファイルをそのまま作る（作った直後に実在を確認します）",
     ],
     fields: [
       { name: "GOOGLE_CLIENT_ID", label: "クライアントID", placeholder: "…apps.googleusercontent.com" },

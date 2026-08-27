@@ -30,6 +30,7 @@ export const TOOL_LABELS: Record<string, string> = {
   create_google_slides: "Googleスライドを作成",
   google_sheet: "Googleスプレッドシート作成",
   google_doc: "Googleドキュメント作成",
+  drive_upload: "Googleドライブに作成",
   notion_add: "Notionに追記",
   create_automation: "自動化フローを作成",
   run_automation: "自動化を実行",
