@@ -174,6 +174,37 @@ CREATE TABLE IF NOT EXISTS agent_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_rules_applies ON agent_rules(applies);
 
+-- 👀 watch_state … 見張りの「どこまで見たか」。
+-- 品目ごとの鍵を覚えておき、次に見たとき増えたぶんだけを報せる。
+-- これが無いと毎回ぜんぶ並べることになり、2回目から誰も読まなくなる。
+CREATE TABLE IF NOT EXISTS watch_state (
+  source     text PRIMARY KEY,         -- tasks / agenda / work / mail / slack / line
+  enabled    boolean DEFAULT true,
+  seen       jsonb DEFAULT '[]'::jsonb,-- 見たことのある品目の鍵（新しい順・上限あり）
+  last_error text DEFAULT '',          -- 前回読めなかった理由。同じ失敗を鳴らし続けないため
+  last_run   text DEFAULT '',
+  started    boolean DEFAULT false,    -- 初回は一斉通知を出さないための印
+  updated_at timestamptz DEFAULT now()
+);
+
+
+-- 📥 inbox_messages … 外から届いたメッセージ（いまはLINE）。
+-- LINEのMessaging APIは「送る」と「受け取る」が別の口で、受け取りは
+-- LINE側からこちらへPOSTしてもらう形になる。その置き場。
+CREATE TABLE IF NOT EXISTS inbox_messages (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel     text NOT NULL DEFAULT 'line',
+  sender      text DEFAULT '',
+  text        text DEFAULT '',
+  external_id text DEFAULT '',         -- 送り主が付けたID。同じものを二重に入れない
+  ts          text DEFAULT '',
+  read        boolean DEFAULT false,
+  created_at  timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_inbox_messages_channel ON inbox_messages(channel, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inbox_messages_external ON inbox_messages(external_id);
+
+
 
 -- 💬 CHAT：会話履歴
 -- 端末を変えても続きから読めるように、その人のDBに残す。

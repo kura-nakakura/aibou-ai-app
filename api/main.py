@@ -47,6 +47,8 @@ import hooks as hooks_mod
 import rules
 import guide as guide_mod
 import tenancy
+import watch
+import inbox as inbox_mod
 import hfhub
 import imagegen
 import income
@@ -425,6 +427,11 @@ class KeyRescueRequest(BaseModel):
 class RulesSyncRequest(BaseModel):
     repo: str = ""
     path: str = ""
+
+
+class WatchSourceRequest(BaseModel):
+    source: str = ""
+    enabled: bool = True
 
 
 class VaultGenerateRequest(BaseModel):
@@ -3278,6 +3285,110 @@ async def rules_sync(req: RulesSyncRequest,
     if isinstance(result, dict) and result.get("error"):
         return JSONResponse(status_code=400, content=result)
     return result
+
+
+# ── 見張り（監視して、変わったときだけ報せる） ──────────────────────
+
+@app.get("/watch")
+async def watch_report(new_only: bool = False, _auth: None = Depends(require_auth)):
+    """いま気にすべきものと、各対象を読めているかどうか。
+
+    読めなかった対象は省かずに返す。省くと画面が「新着なし」に見えるが、
+    実際は見に行けていないだけ、ということが起きる。
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: watch.report(new_only=new_only))
+
+
+@app.post("/watch/check")
+async def watch_check(_auth: None = Depends(require_auth)):
+    """いますぐ見回って、新着があれば通知する（画面の「今すぐ確認」）。"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: watch.tick(force=True))
+
+
+@app.post("/watch/source")
+async def watch_source(req: WatchSourceRequest,
+                       _auth: None = Depends(require_auth),
+                       _store: None = Depends(require_storage)):
+    """対象ごとに見張りを止める/再開する。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: watch.set_enabled(req.source, req.enabled))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@app.get("/watch/inbox")
+async def watch_inbox(channel: str = "", limit: int = 50,
+                      user_id: str = Depends(current_user),
+                      _auth: None = Depends(require_auth)):
+    """外から届いたメッセージ（いまはLINE）と、受信の窓口URLの状態。"""
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(
+        None, lambda: inbox_mod.list_messages(channel=channel, limit=limit))
+    st = await loop.run_in_executor(None, lambda: inbox_mod.status(user_id))
+    return {"ok": True, "items": items, **st}
+
+
+@app.post("/watch/inbox/read")
+async def watch_inbox_read(channel: str = "", _auth: None = Depends(require_auth)):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: inbox_mod.mark_all_read(channel))
+
+
+# ── LINE の受信口 ────────────────────────────────────────────────────
+# ここだけは認証を付けない。呼ぶのは LINE のサーバーであって、
+# ログイン中のブラウザではないため。代わりに、届いた本文そのものを
+# チャネルシークレットで署名検証する。検証を通らないものは捨てる。
+
+async def _handle_line_webhook(request: Request, token: str = "") -> JSONResponse:
+    raw = await request.body()
+    signature = request.headers.get("x-line-signature", "")
+    loop = asyncio.get_event_loop()
+
+    def _work() -> dict:
+        bound = None
+        if token:
+            user_id = inbox_mod.resolve_token(token)
+            if not user_id:
+                return {"status": 404, "body": {"ok": False, "error": "unknown webhook"}}
+            client = tenancy.client_for(user_id)
+            if client is not None:
+                bound = config.bind_request_client(client)
+        try:
+            secret = (keychain.get_key("LINE_CHANNEL_SECRET") or "").strip()
+            if not secret:
+                # 検証できない状態で受け入れると、誰でも書き込める口になる。
+                # 受け取らないほうが安全なので断る。
+                return {"status": 503,
+                        "body": {"ok": False, "error": "LINE_CHANNEL_SECRET が未設定です"}}
+            if not inbox_mod.verify_line_signature(raw, signature, secret):
+                return {"status": 403, "body": {"ok": False, "error": "signature mismatch"}}
+            import json as _json
+            try:
+                payload = _json.loads(raw.decode("utf-8") or "{}")
+            except Exception:
+                return {"status": 400, "body": {"ok": False, "error": "invalid json"}}
+            return {"status": 200, "body": inbox_mod.ingest_line(payload)}
+        finally:
+            if bound is not None:
+                config.reset_request_client(bound)
+
+    res = await loop.run_in_executor(None, _work)
+    return JSONResponse(status_code=res["status"], content=res["body"])
+
+
+@app.post("/line/webhook")
+async def line_webhook(request: Request):
+    """1人で使っている場合の受信口（サーバー既定の保存先に入る）。"""
+    return await _handle_line_webhook(request)
+
+
+@app.post("/line/webhook/{token}")
+async def line_webhook_for_user(token: str, request: Request):
+    """利用者ごとの受信口。URLの合言葉で持ち主を割り出して、その人の保存先に入れる。"""
+    return await _handle_line_webhook(request, token=token)
 
 
 @app.delete("/keys/{name}")

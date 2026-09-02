@@ -117,10 +117,15 @@ export const EXTENSIONS: Extension[] = [
       "自動実行が終わったらLINEに通知",
       "失敗したときにLINEに通知",
       "毎朝のブリーフィングをLINEに送る",
+      "見張りが新しい動きを見つけたらLINEに通知",
+      "LINEに届いたメッセージをAIbouが見張る（チャネルシークレットが要る）",
     ],
     fields: [
       { name: "LINE_CHANNEL_TOKEN", label: "チャネルアクセストークン", placeholder: "長い英数字", secret: true },
       { name: "LINE_TO_USER_ID", label: "宛先ユーザーID（空でOK）", placeholder: "U… ／ 空なら友だち全員", optional: true },
+      // 受信は送信と別物。送るだけなら要らないので、任意にしてある
+      // （必須にすると、これまで通知だけ使っていた人が突然「未接続」になる）。
+      { name: "LINE_CHANNEL_SECRET", label: "チャネルシークレット（受信する場合）", secret: true, optional: true },
     ],
     howto: [
       "developers.line.biz にLINEアカウントでログインする",
@@ -128,6 +133,9 @@ export const EXTENSIONS: Extension[] = [
       "できた公式アカウントを、自分のLINEで友だち追加する",
       "チャネル設定 → Messaging API → 「チャネルアクセストークン（長期）」を発行",
       "その文字列をコピーして、ここに貼る",
+      "（受信もするなら）チャネル基本設定 → チャネルシークレット をコピーして貼る",
+      "（受信もするなら）Messaging API → Webhook URL に、HOMEの見張りに出ているURLを貼り、"
+        + "「Webhookの利用」をONにする",
     ],
     warning:
       "以前の「LINE Notify」は2025年3月末で終了しました。古いトークンでは届きません。"
@@ -142,9 +150,13 @@ export const EXTENSIONS: Extension[] = [
     unlocks: [
       "自動実行の結果をSlackチャンネルに投稿",
       "失敗したときにSlackに通知",
+      "Slackの新しい発言をAIbouが見張る（Botトークンが要る）",
     ],
     fields: [
       { name: "SLACK_WEBHOOK", label: "Incoming Webhook URL", placeholder: "https://hooks.slack.com/services/…", secret: true },
+      // Webhookは投稿しかできない仕組み。読むには別物のトークンが要る。
+      { name: "SLACK_BOT_TOKEN", label: "Botトークン（読む場合）", placeholder: "xoxb-…", secret: true, optional: true },
+      { name: "SLACK_CHANNELS", label: "見るチャンネル（空なら全部）", placeholder: "C0123ABCD,C0456EFGH", optional: true },
     ],
     howto: [
       "api.slack.com/apps で「Create New App」→ From scratch",
@@ -152,8 +164,13 @@ export const EXTENSIONS: Extension[] = [
       "左メニューの「Incoming Webhooks」をONにする",
       "「Add New Webhook to Workspace」で投稿先チャンネルを選ぶ",
       "できた https://hooks.slack.com/… をコピーして、ここに貼る",
+      "（読むなら）「OAuth & Permissions」→ Bot Token Scopes に "
+        + "channels:history / channels:read / groups:history / im:history / users:read を追加",
+      "（読むなら）「Install to Workspace」して、xoxb- で始まるトークンをここに貼る",
+      "（読むなら）読ませたいチャンネルで /invite してBotを入れる",
     ],
-    warning: "このURLを知っている人は誰でもそのチャンネルに投稿できます。共有しないでください。",
+    warning: "このURLを知っている人は誰でもそのチャンネルに投稿できます。共有しないでください。"
+      + "なお、Webhookは投稿専用です。読むには別途Botトークンが要ります。",
   },
   {
     id: "discord",

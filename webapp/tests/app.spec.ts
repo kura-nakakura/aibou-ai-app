@@ -466,8 +466,10 @@ test("HOME widgets can be reordered, hidden, restored and remembered", async ({ 
   await page.getByRole("button", { name: /カスタマイズ/ }).click();
   await expect(page.getByText("非表示（タップで戻す）")).toBeVisible({ timeout: 5_000 });
 
-  // 計器盤を先頭へ
-  await page.getByLabel("計器盤を前へ").click();
+  // 計器盤を先頭へ（間に何個あっても届くよう、先頭に来るまで押す）
+  for (let i = 0; i < 8 && (await ids())[0] !== "dials"; i++) {
+    await page.getByLabel("計器盤を前へ").click();
+  }
   await expect.poll(async () => (await ids())[0]).toBe("dials");
 
   // 通知を隠す → トレイから戻すと元の位置に返る

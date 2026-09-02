@@ -163,15 +163,30 @@ def tick_everyone() -> dict:
     ここで人ごとに保存先を差し替えてから回す。そうすると予約も鍵も
     その人のものが使われる。
     """
-    out = {"ran": [], "count": 0, "users": 0}
+    out = {"ran": [], "count": 0, "users": 0, "watched": 0}
 
     def _merge(res: dict) -> None:
         out["ran"].extend(res.get("ran") or [])
         out["count"] += int(res.get("count") or 0)
 
+    def _round() -> None:
+        """1人ぶんの見回り。予約の実行と、見張りの両方をここで済ませる。
+
+        見張りを別の周回にすると、保存先の差し替えをもう一度やることになる。
+        同じ人のところにいる間に両方やるほうが、往復も少なく取り違えもない。
+        """
+        _merge(tick())
+        try:
+            import watch
+            if watch.tick(force=False).get("notified"):
+                out["watched"] += 1
+        except Exception as e:
+            # 見張りの失敗で、予約の実行まで止めない
+            print(f"[scheduler] watch error: {e}")
+
     # 1) サーバー既定（持ち主 / 1人運用）
     try:
-        _merge(tick())
+        _round()
     except Exception as e:
         print(f"[scheduler] default tick error: {e}")
 
@@ -190,7 +205,7 @@ def tick_everyone() -> dict:
                 continue
             token = config.bind_request_client(client)
             try:
-                _merge(tick())
+                _round()
                 out["users"] += 1
             finally:
                 config.reset_request_client(token)

@@ -9,13 +9,15 @@
  * こうしないとアプリを更新したときに新機能が永久に出てこない。
  */
 
-export type WidgetId = "agent" | "dials" | "agenda" | "notifications" | "artifacts" | "connect";
+export type WidgetId =
+  "agent" | "watch" | "dials" | "agenda" | "notifications" | "artifacts" | "connect";
 
 export interface WidgetMeta { label: string; hint: string }
 
 /** 表示名（カスタマイズ画面と非表示トレイで使う）。 */
 export const WIDGET_META: Record<WidgetId, WidgetMeta> = {
   agent: { label: "エージェント", hint: "指示すると実際に動く" },
+  watch: { label: "見張り", hint: "タスク・予定・メール・Slack・LINEの新着" },
   dials: { label: "計器盤", hint: "タスク・予定などの件数" },
   agenda: { label: "予定", hint: "今日以降の予定" },
   notifications: { label: "通知", hint: "未読のお知らせ" },
@@ -25,7 +27,7 @@ export const WIDGET_META: Record<WidgetId, WidgetMeta> = {
 
 /** 既定の並び（現在の見た目と同じ順序）。 */
 export const DEFAULT_ORDER: WidgetId[] = [
-  "agent", "dials", "agenda", "notifications", "artifacts", "connect",
+  "agent", "watch", "dials", "agenda", "notifications", "artifacts", "connect",
 ];
 
 /** 既定で横長にするもの（3カラムのうち2つ分）。 */

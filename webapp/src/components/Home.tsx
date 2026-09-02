@@ -44,6 +44,7 @@ import AgentTrace, { TOOL_LABELS, type AgentStep } from "@/components/AgentTrace
 import Markdown from "@/components/Markdown";
 import FirstRun from "@/components/FirstRun";
 import CalendarPanel from "@/components/CalendarPanel";
+import WatchPanel from "@/components/WatchPanel";
 
 type View = "chat" | "me" | "capture" | "code" | "vault" | "income" | "tasks" | "studio" | "autopilot" | "board" | "archive" | "home" | "guide";
 
@@ -111,6 +112,8 @@ export default function Home({
     switch (id) {
       case "agent":
         return <AgentConsole settings={settings} offline={offline} onDidAct={refresh} onNavigate={onNavigate} />;
+      case "watch":
+        return <WatchPanel offline={offline} />;
       case "dials":
         return <InstrumentCluster dials={dials} loading={!summary && !offline} />;
       case "agenda":

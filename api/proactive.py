@@ -66,7 +66,48 @@ def _recent_highlights(limit: int = 4) -> List[str]:
     return highlights
 
 
-def _fallback_briefing(date_label: str, greeting: str, pending: int, highlights: List[str]) -> str:
+def _watch_material() -> tuple:
+    """見張りの結果を (素材, 見に行けなかったことの報告) で返す。
+
+    ブリーフィングにタスクも予定もメールも入っていなかったのが元の問題。
+    材料は全部あるのに集めていなかった。ここで集める。
+
+    2つに分けて返すのは、後半をAIに通さないため。「メールが読めていません」を
+    AIにまとめさせると、丸められて消えることがある。そこは消してはいけない。
+    """
+    try:
+        import watch
+        data = watch.collect(force=True)
+    except Exception:
+        return "", ""
+
+    material: List[str] = []
+    troubles: List[str] = []
+    for b in data.get("sources") or []:
+        if b.get("skipped") and not b.get("fresh"):
+            continue
+        if b.get("setup_needed"):
+            continue                      # 未設定は毎朝言うことではない
+        if not b.get("ok"):
+            troubles.append(f"・{b['label']}：{b.get('error', '')}")
+            continue
+        items = b.get("items") or []
+        if not items:
+            continue
+        material.append(f"{b['label']}（{len(items)}件）:")
+        for it in items[:5]:
+            material.append(f"- {it.get('title', '')}"
+                            + (f"（{it.get('detail', '')[:60]}）" if it.get("detail") else ""))
+
+    trouble_text = ""
+    if troubles:
+        trouble_text = ("\n\n⚠ 次のものは確認できていません（新着が無いのではありません）:\n"
+                        + "\n".join(troubles))
+    return "\n".join(material), trouble_text
+
+
+def _fallback_briefing(date_label: str, greeting: str, pending: int,
+                       highlights: List[str], watch_text: str = "") -> str:
     """Gemini が無い/失敗したときの、素のテンプレ・ブリーフィング。"""
     lines = [
         f"{greeting}、ボス。本日は {date_label} です。",
@@ -75,6 +116,9 @@ def _fallback_briefing(date_label: str, greeting: str, pending: int, highlights:
         lines.append(f"承認待ちのジョブが {pending} 件あります。お時間のあるときにご確認ください。")
     else:
         lines.append("承認待ちのジョブはありません。")
+    if watch_text:
+        lines.append("")
+        lines.append(watch_text)
     if highlights:
         lines.append("直近のハイライト：")
         for h in highlights:
@@ -95,12 +139,13 @@ def build_briefing() -> str:
     greeting = _greeting_for_now()
     pending = _pending_count()
     highlights = _recent_highlights(limit=4)
+    watch_text, trouble_text = _watch_material()
 
-    fallback = _fallback_briefing(date_label, greeting, pending, highlights)
+    fallback = _fallback_briefing(date_label, greeting, pending, highlights, watch_text)
 
     model = config.get_gemini_model()
     if model is None:
-        return fallback
+        return fallback + trouble_text
 
     # Gemini に「素材」を渡し、短い秘書口調のブリーフィングにまとめてもらう。
     highlight_block = (
@@ -114,6 +159,8 @@ def build_briefing() -> str:
         "・全体で3〜5文程度の短さ。箇条書きは使わず、自然な文章で。\n"
         "・最初に時間帯に合った挨拶と日付に触れる。\n"
         "・承認待ち件数があれば軽く促す。0件なら無理に触れなくてよい。\n"
+        "・期限の来たタスク・今日の予定・新着メールがあれば、必ず触れる（ここが本題）。\n"
+        "・件数を勝手に増やしたり減らしたりしない。素材に無いことは書かない。\n"
         "・ハイライトがあれば1〜2点だけ自然に拾う。\n"
         "・最後に今日への前向きな一言を添える。\n"
         "・前置きや説明は不要。ブリーフィング本文だけを出力する。\n\n"
@@ -121,15 +168,18 @@ def build_briefing() -> str:
         f"挨拶: {greeting}\n"
         f"日付: {date_label}\n"
         f"承認待ちジョブ件数: {pending} 件\n"
+        f"いま気にすべきこと:\n{watch_text or '（特になし）'}\n"
         f"直近のハイライト:\n{highlight_block}\n"
     )
 
     try:
         resp = model.generate_content(prompt)
         text = (getattr(resp, "text", "") or "").strip()
-        return text or fallback
     except Exception:
-        return fallback
+        text = ""
+    # 読めなかったものは AI に通さず、そのまま末尾に足す。
+    # まとめさせると「特に問題ありません」に化けることがあり、それが一番困る。
+    return (text or fallback) + trouble_text
 
 
 # ローカル確認用（python proactive.py で素のブリーフィングを表示）

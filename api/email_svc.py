@@ -115,6 +115,10 @@ def inbox(limit: int = 5) -> dict:
             m = email_lib.message_from_bytes(msg_data[0][1])
             frm = parseaddr(_decode(m.get("From", "")))
             items.append({
+                # Message-ID は送信側が付ける、そのメール固有の名札。
+                # これが無いと見張りが「同じメールか別のメールか」を判断できず、
+                # 件名が同じメールを1通と数えたり、毎回新着と数えたりする。
+                "id": (m.get("Message-ID") or "").strip(),
                 "from": frm[1] or _decode(m.get("From", "")),
                 "subject": _decode(m.get("Subject", "")),
                 "date": m.get("Date", ""),

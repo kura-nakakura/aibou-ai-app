@@ -51,12 +51,14 @@ test("garbage input falls back to the default", () => {
 });
 
 /* ── 並べ替え ───────────────────────────────────────────────────── */
+// ウィジェットが増えても壊れないよう、名前ではなく既定の並びの位置で書く。
 test("moving a widget swaps it with its neighbour", () => {
+  const [first, second] = DEFAULT_ORDER;
   let l = defaultLayout();
-  l = move(l, "dials", -1);
-  expect(visible(l).slice(0, 2)).toEqual(["dials", "agent"]);
-  l = move(l, "dials", 1);
-  expect(visible(l).slice(0, 2)).toEqual(["agent", "dials"]);
+  l = move(l, second, -1);
+  expect(visible(l).slice(0, 2)).toEqual([second, first]);
+  l = move(l, second, 1);
+  expect(visible(l).slice(0, 2)).toEqual([first, second]);
 });
 
 test("moving past the ends does nothing", () => {
@@ -66,13 +68,14 @@ test("moving past the ends does nothing", () => {
 });
 
 test("moving skips over hidden widgets", () => {
-  // dials を隠すと、agent の次に見えているのは agenda。
+  // 2番目を隠すと、1番目の次に見えているのは3番目。
   // 隠れたものと入れ替えても見た目が変わらないので、見えている順で動かす。
-  let l = toggleHidden(defaultLayout(), "dials");
-  expect(visible(l).slice(0, 2)).toEqual(["agent", "agenda"]);
-  l = move(l, "agenda", -1);
-  expect(visible(l)[0]).toBe("agenda");
-  expect(visible(l)[1]).toBe("agent");
+  const [first, second, third] = DEFAULT_ORDER;
+  let l = toggleHidden(defaultLayout(), second);
+  expect(visible(l).slice(0, 2)).toEqual([first, third]);
+  l = move(l, third, -1);
+  expect(visible(l)[0]).toBe(third);
+  expect(visible(l)[1]).toBe(first);
 });
 
 test("moving a hidden widget is a no-op", () => {

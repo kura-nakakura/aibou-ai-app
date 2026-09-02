@@ -60,6 +60,10 @@ TOOLS_DOC = (
     '/ params: { "title": "予定名", "date": "2026-07-17", "time": "15:00" }\n'
     '- list_state: 今のタスク・予定・副業ジョブ・未読通知の件数と概要を取得する（状況把握に使う） '
     "/ params: { }\n"
+    '- watch_report: 見張りの報告。期限の来たタスク・今日の予定・業務・新着メール・Slack・LINEを '
+    'まとめて確認する。「何かあった？」「状況は？」「新着ある？」に使う。'
+    '読めなかった対象はその理由も返るので、そのまま伝えること '
+    '/ params: { "new_only": false }\n'
     '- create_document: Markdownのドキュメントを生成してAibou内に保存（ダウンロード可）。'
     '★Googleドライブには入らない。「ドライブに」「Googleに」と言われたら使わず '
     'drive_upload か google_doc を使うこと。'
@@ -339,6 +343,22 @@ def _do_board_add_note(params: dict) -> str:
         return f"付箋の追加に失敗しました：{res['error']}"
     where = f"「{res.get('board')}」" if res.get("board") else "ホワイトボード"
     return f"{where}に付箋を追加しました（現在 {res.get('count')}枚）。BOARDモードで確認できます。"
+
+
+def _do_watch_report(params: dict) -> str:
+    """見張りの報告をそのまま返す。
+
+    list_state との違いは、外（メール・Slack・LINE・Googleカレンダー）まで
+    見に行くことと、読めなかった対象を理由つきで返すこと。
+    「新着はありません」と「見に行けていません」を混ぜないための道具。
+    """
+    try:
+        import watch
+        res = watch.report(new_only=bool(params.get("new_only")))
+    except Exception as e:
+        return f"見張りの報告を作れませんでした：{str(e)[:150]}"
+    text = (res.get("text") or "").strip()
+    return text or "いま気にすべきものはありません。"
 
 
 def _do_list_state(_params: dict) -> str:
@@ -916,6 +936,7 @@ _DISPATCH = {
     "add_agenda": _do_add_agenda,
     "board_add_note": _do_board_add_note,
     "list_state": _do_list_state,
+    "watch_report": _do_watch_report,
     "create_document": _do_create_document,
     "create_spreadsheet": _do_create_spreadsheet,
     "create_slides": _do_create_slides,

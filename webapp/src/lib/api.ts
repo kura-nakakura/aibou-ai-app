@@ -2202,6 +2202,108 @@ export async function rulesSync(repo = "", path = ""): Promise<{
   };
 }
 
+/* ---------------- WATCH（見張り） ---------------- */
+export interface WatchItem {
+  key: string;
+  title: string;
+  detail?: string;
+  when?: string;
+  url?: string;
+  urgent?: boolean;
+  is_new?: boolean;
+}
+
+/**
+ * 監視対象1つぶんの状態。
+ *
+ * ok と setup_needed を分けているのが肝。「読めなかった」と「まだ設定していない」を
+ * 同じ扱いにすると、未設定のSlackが毎回エラーとして出て、本物の失敗が埋もれる。
+ */
+export interface WatchSource {
+  key: string;
+  label: string;
+  enabled: boolean;
+  ok: boolean;
+  error: string;
+  hint: string;
+  warning?: string;
+  skipped: boolean;
+  setup_needed?: boolean;
+  started?: boolean;
+  fresh?: boolean;
+  items: WatchItem[];
+  new: WatchItem[];
+}
+
+export interface WatchReport {
+  text: string;
+  checked_at: string;
+  sources: WatchSource[];
+}
+
+/** GET /watch — いま気にすべきものと、各対象を読めているかどうか。 */
+export async function watchReport(newOnly = false): Promise<WatchReport> {
+  const res = await fetch(`${requireApiUrl()}/watch?new_only=${newOnly ? "true" : "false"}`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) return { text: "", checked_at: "", sources: [] };
+  const d = (await res.json().catch(() => ({}))) as Partial<WatchReport>;
+  return {
+    text: d.text ?? "",
+    checked_at: d.checked_at ?? "",
+    sources: asArray<WatchSource>(d.sources),
+  };
+}
+
+/** POST /watch/check — いますぐ見回って、新着があれば通知する。 */
+export async function watchCheck(): Promise<{ notified: boolean; new: number; text?: string }> {
+  const res = await fetch(`${requireApiUrl()}/watch/check`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  const d = (await res.json().catch(() => ({}))) as
+    { notified?: boolean; new?: number; text?: string };
+  return { notified: d.notified === true, new: asNumber(d.new), text: d.text };
+}
+
+/** POST /watch/source — 対象ごとに見張りを止める / 再開する。 */
+export async function watchSetSource(source: string, enabled: boolean): Promise<boolean> {
+  const res = await fetch(`${requireApiUrl()}/watch/source`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ source, enabled }),
+  });
+  return res.ok;
+}
+
+export interface InboxMessage {
+  id: string; channel: string; sender: string; text: string;
+  read?: boolean; created_at?: string;
+}
+
+/** GET /watch/inbox — 外から届いたメッセージと、受信の窓口URL。 */
+export async function watchInbox(): Promise<{
+  items: InboxMessage[]; path: string; token: string; secret_set: boolean; unread: number;
+}> {
+  const res = await fetch(`${requireApiUrl()}/watch/inbox`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) return { items: [], path: "", token: "", secret_set: false, unread: 0 };
+  const d = (await res.json().catch(() => ({}))) as {
+    items?: InboxMessage[]; path?: string; token?: string;
+    secret_set?: boolean; unread?: number;
+  };
+  return {
+    items: asArray<InboxMessage>(d.items),
+    path: d.path ?? "",
+    token: d.token ?? "",
+    secret_set: d.secret_set === true,
+    unread: asNumber(d.unread),
+  };
+}
+
 /* ---------------- Proactive ---------------- */
 /** GET /briefing — today's proactive briefing text. */
 export async function getBriefing(): Promise<{ text: string }> {
