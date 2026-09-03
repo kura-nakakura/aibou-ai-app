@@ -45,6 +45,8 @@ TABLE = "watch_state"
 MAX_SEEN = 300
 # 1回の報せに載せる品目の数。これを超えたら「ほか N 件」にまとめる。
 MAX_REPORT_ITEMS = 12
+# 保存しておく品目の数（源ごと）。画面に出すぶんだけあればよい。
+MAX_CACHED_ITEMS = 30
 
 # 保存先が無いときの控え
 _mem_state = memstore.TenantDict()
@@ -61,8 +63,8 @@ def _today() -> str:
 # ── 状態（どこまで見たか） ───────────────────────────────────────────
 def _load(source: str) -> dict:
     """源の状態。無ければ「まだ一度も見ていない」を表す形を返す。"""
-    blank = {"source": source, "enabled": True, "seen": [],
-             "last_error": "", "last_run": "", "started": False}
+    blank = {"source": source, "enabled": True, "seen": [], "items": [],
+             "last_error": "", "last_run": "", "started": False, "setup_needed": False}
     c = config.get_supabase()
     if c:
         try:
@@ -70,14 +72,16 @@ def _load(source: str) -> dict:
                     .limit(1).execute().data) or []
             if rows:
                 row = dict(rows[0])
-                row.setdefault("seen", [])
                 # jsonb は文字列で返ってくることがある
-                if isinstance(row.get("seen"), str):
-                    import json
-                    try:
-                        row["seen"] = json.loads(row["seen"])
-                    except Exception:
-                        row["seen"] = []
+                import json
+                for col in ("seen", "items"):
+                    if isinstance(row.get(col), str):
+                        try:
+                            row[col] = json.loads(row[col])
+                        except Exception:
+                            row[col] = []
+                    if row.get(col) is None:
+                        row.pop(col)
                 return {**blank, **row}
         except Exception:
             pass
@@ -92,9 +96,13 @@ def _save(state: dict) -> None:
         "source": source,
         "enabled": bool(state.get("enabled", True)),
         "seen": list(state.get("seen") or [])[:MAX_SEEN],
+        # 前回見えていた品目そのもの。これが無いと、間隔を空けている間に
+        # 画面が「何も無い」に見える（本当は前回の中身がまだ生きている）。
+        "items": list(state.get("items") or [])[:MAX_CACHED_ITEMS],
         "last_error": (state.get("last_error") or "")[:300],
         "last_run": state.get("last_run") or "",
         "started": bool(state.get("started")),
+        "setup_needed": bool(state.get("setup_needed")),
         "updated_at": _now().isoformat(),
     }
     _mem_state[source] = row
@@ -373,31 +381,34 @@ def collect(force: bool = True, only: Optional[List[str]] = None) -> dict:
             out["sources"].append(block)
             continue
 
-        if not _due_to_run(st, s.get("min_interval", 60), force):
-            block["skipped"] = True
-            block["items"] = []
-            block["fresh"] = False
-            out["sources"].append(block)
-            continue
+        if _due_to_run(st, s.get("min_interval", 60), force):
+            try:
+                res = s["collect"]() or {}
+            except Exception as e:
+                # 源の実装が想定外に落ちても、他の源は見る
+                res = {"ok": False, "error": f"読み取りが失敗しました（{str(e)[:120]}）"}
+            block["fresh"] = True
+            block["ok"] = bool(res.get("ok"))
+            block["error"] = res.get("error") or ""
+            block["hint"] = res.get("hint") or ""
+            block["warning"] = res.get("warning") or ""
+            block["setup_needed"] = bool(res.get("skipped"))
+            items = res.get("items") or []
+        else:
+            # 前に見たときの中身をそのまま使う。
+            # ここで空にすると、画面を開くたびにメールやSlackへ実際に繋ぎに
+            # 行かないと何も出せない。開くのが遅かったのは、これが理由だった。
+            block["fresh"] = False          # 今回は見に行っていない印
+            block["error"] = st.get("last_error") or ""
+            block["setup_needed"] = bool(st.get("setup_needed"))
+            block["ok"] = not block["error"] and not block["setup_needed"]
+            items = list(st.get("items") or [])
 
-        try:
-            res = s["collect"]() or {}
-        except Exception as e:
-            # 源の実装が想定外に落ちても、他の源は見る
-            res = {"ok": False, "error": f"読み取りが失敗しました（{str(e)[:120]}）"}
-
-        block["ok"] = bool(res.get("ok"))
-        block["error"] = res.get("error") or ""
-        block["hint"] = res.get("hint") or ""
-        block["warning"] = res.get("warning") or ""
-        block["setup_needed"] = bool(res.get("skipped"))
-        block["fresh"] = True
-        items = res.get("items") or []
+        # 新着かどうかは、控えから出したときも同じように見る。
+        # ここで一律「新着ではない」にすると、画面を開いて拾えた新着が、
+        # そのあとの見回りでも新着として扱われず、通知が出ないまま消える。
         seen = set(st.get("seen") or [])
-        for it in items:
-            it = dict(it)
-            it["is_new"] = it.get("key") not in seen
-            block["items"].append(it)
+        block["items"] = [{**dict(it), "is_new": it.get("key") not in seen} for it in items]
         block["new"] = [i for i in block["items"] if i.get("is_new")]
         out["sources"].append(block)
     return out
@@ -413,13 +424,17 @@ def _remember(block: dict) -> None:
     """見た品目を覚える。次からは新着として数えない。"""
     st = block.get("_state") or _load(block["key"])
     seen = list(st.get("seen") or [])
-    fresh_keys = [i["key"] for i in block.get("items") or [] if i.get("key")]
+    items = block.get("items") or []
+    fresh_keys = [i["key"] for i in items if i.get("key")]
     # 新しいものを前に置き、古い鍵から捨てる
     merged = fresh_keys + [k for k in seen if k not in set(fresh_keys)]
     st["seen"] = merged[:MAX_SEEN]
+    # 中身も控えておく（次に画面を開いたとき、繋ぎ直さずに出せるように）
+    st["items"] = [{k: v for k, v in i.items() if k != "is_new"} for i in items][:MAX_CACHED_ITEMS]
     st["last_run"] = _now().isoformat()
     st["started"] = True
     st["last_error"] = block.get("error") or ""
+    st["setup_needed"] = bool(block.get("setup_needed"))
     _save(st)
 
 
@@ -478,9 +493,35 @@ def render(data: dict, new_only: bool = False) -> str:
     return "\n".join(out).strip()
 
 
-def report(new_only: bool = False) -> dict:
-    """画面や会話から呼ぶ。見に行って、文と内訳を返す（状態は動かさない）。"""
-    data = collect(force=True)
+def _remember_view(data: dict) -> None:
+    """画面に出したぶんを控えておく（次に開いたとき繋ぎ直さずに済むように）。
+
+    「見たことにする」（seen）は動かさない。ここで動かすと、画面をちらっと
+    開いただけで新着が消え、そのあとの見回りで通知が出なくなる。
+    控えるのは中身と、いつ見に行ったかだけ。
+    """
+    for b in data.get("sources") or []:
+        if not b.get("fresh"):
+            continue                      # 見に行っていないものを書き直さない
+        st = b.get("_state") or _load(b["key"])
+        st["items"] = [{k: v for k, v in i.items() if k != "is_new"}
+                       for i in (b.get("items") or [])][:MAX_CACHED_ITEMS]
+        st["last_run"] = _now().isoformat()
+        st["last_error"] = b.get("error") or ""
+        st["setup_needed"] = bool(b.get("setup_needed"))
+        _save(st)
+
+
+def report(new_only: bool = False, force: bool = False) -> dict:
+    """画面や会話から呼ぶ。文と内訳を返す。
+
+    既定では見に行かない。画面を開くたびにメール（IMAPのログイン）や
+    Slack・Googleカレンダーへ実際に繋ぐと、HOMEを開くだけで数秒待たされる。
+    間隔を空けているあいだは、前回の中身をそのまま出す。
+    「今すぐ確認」を押したときだけ force=True で本当に見に行く。
+    """
+    data = collect(force=force)
+    _remember_view(data)
     return {"ok": True, "text": render(data, new_only=new_only), **public(data)}
 
 
@@ -552,6 +593,7 @@ def _remember_error(block: dict) -> None:
     """読めなかったことを覚える。品目は上書きしない（前に見たものを忘れない）。"""
     st = block.get("_state") or _load(block["key"])
     st["last_error"] = block.get("error") or ""
+    st["setup_needed"] = bool(block.get("setup_needed"))
     st["last_run"] = _now().isoformat()
     _save(st)
 

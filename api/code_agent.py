@@ -8,6 +8,8 @@
 # フロー: プロンプト（プロジェクト全体像＋関連ファイル＋指示）→ モデルが
 #   「短い計画」＋SEARCH/REPLACE群を出力 → 適用 → 失敗ブロックは自動リペア1回。
 # コーディング特化モデル（HF: Qwen2.5-Coder 等）を優先使用。
+import jsonout
+
 import json
 import re
 
@@ -413,45 +415,13 @@ def generate(instruction: str, files: list, history: list = None, depth: str = "
 
 # ── 旧JSON形式フォールバック ──────────────────────────────────────
 def _extract_json(text: str):
-    if not text:
-        return None
-    s = text.strip()
-    m = re.search(r"```(?:json)?\s*(.*?)```", s, re.DOTALL)
-    if m:
-        s = m.group(1).strip()
-    start = s.find("{")
-    if start < 0:
-        return None
-    depth, in_str, esc, end = 0, False, False, -1
-    for i in range(start, len(s)):
-        ch = s[i]
-        if in_str:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == '"':
-                in_str = False
-            continue
-        if ch == '"':
-            in_str = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                end = i + 1
-                break
-    if end < 0:
-        return None
-    frag = s[start:end]
-    for cand in (frag, re.sub(r",\s*([}\]])", r"\1", frag)):
-        try:
-            obj = json.loads(cand)
-            return obj if isinstance(obj, dict) else None
-        except Exception:
-            continue
-    return None
+    """出力からJSONの入れ物を取り出す。dictでなければ None。
+
+    ここは本文にソースコード（`{` や `}` を含む）が入るので、括弧の対応を
+    数えて切り出す必要がある。その数え方は jsonout に移してあり、
+    ほかのモードでも同じように効くようにしてある。
+    """
+    return jsonout.extract_dict(text)
 
 
 def _from_json(obj: dict, before: dict) -> dict:

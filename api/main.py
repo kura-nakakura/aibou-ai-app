@@ -2530,7 +2530,8 @@ async def board_get(_auth: None = Depends(require_auth)):
 
 
 @app.post("/board")
-async def board_save(req: BoardSaveRequest, _auth: None = Depends(require_auth)):
+async def board_save(req: BoardSaveRequest, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     """（旧API互換）最初のボードを保存する。"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: board.save_board(req.nodes, req.edges))
@@ -2544,7 +2545,8 @@ async def boards_list(_auth: None = Depends(require_auth)):
 
 
 @app.post("/boards")
-async def boards_create(req: BoardCreateRequest, _auth: None = Depends(require_auth)):
+async def boards_create(req: BoardCreateRequest, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: board.create_board(req.name))
 
@@ -2559,25 +2561,29 @@ async def boards_get(board_id: str, _auth: None = Depends(require_auth)):
 
 
 @app.post("/boards/{board_id}")
-async def boards_save(board_id: str, req: BoardSaveRequest, _auth: None = Depends(require_auth)):
+async def boards_save(board_id: str, req: BoardSaveRequest, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: board.save_board(req.nodes, req.edges, board_id))
 
 
 @app.patch("/boards/{board_id}")
-async def boards_rename(board_id: str, req: BoardRenameRequest, _auth: None = Depends(require_auth)):
+async def boards_rename(board_id: str, req: BoardRenameRequest, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: board.rename_board(board_id, req.name))
 
 
 @app.post("/boards/{board_id}/duplicate")
-async def boards_duplicate(board_id: str, _auth: None = Depends(require_auth)):
+async def boards_duplicate(board_id: str, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: board.duplicate_board(board_id))
 
 
 @app.delete("/boards/{board_id}")
-async def boards_delete(board_id: str, _auth: None = Depends(require_auth)):
+async def boards_delete(board_id: str, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: board.delete_board(board_id))
 
@@ -2684,14 +2690,16 @@ async def scheduler_list(_auth: None = Depends(require_auth),
 
 
 @app.post("/scheduler")
-async def scheduler_add(req: ScheduleRequest, _auth: None = Depends(require_auth)):
+async def scheduler_add(req: ScheduleRequest, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, lambda: scheduler.add(req.instruction, req.time, req.days, req.automation_id))
 
 
 @app.delete("/scheduler/{schedule_id}")
-async def scheduler_delete(schedule_id: str, _auth: None = Depends(require_auth)):
+async def scheduler_delete(schedule_id: str, _auth: None = Depends(require_auth),
+                        _store: None = Depends(require_storage)):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: scheduler.delete(schedule_id))
 
@@ -3290,14 +3298,19 @@ async def rules_sync(req: RulesSyncRequest,
 # ── 見張り（監視して、変わったときだけ報せる） ──────────────────────
 
 @app.get("/watch")
-async def watch_report(new_only: bool = False, _auth: None = Depends(require_auth)):
+async def watch_report(new_only: bool = False, force: bool = False,
+                       _auth: None = Depends(require_auth)):
     """いま気にすべきものと、各対象を読めているかどうか。
 
     読めなかった対象は省かずに返す。省くと画面が「新着なし」に見えるが、
     実際は見に行けていないだけ、ということが起きる。
+
+    force を付けない限り、外（メール・Slack・カレンダー）へは繋ぎに行かず
+    前回の中身を返す。画面を開くたびに繋ぐと、開くだけで数秒待たされる。
     """
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, lambda: watch.report(new_only=new_only))
+    return await loop.run_in_executor(
+        None, lambda: watch.report(new_only=new_only, force=force))
 
 
 @app.post("/watch/check")

@@ -2241,9 +2241,15 @@ export interface WatchReport {
   sources: WatchSource[];
 }
 
-/** GET /watch — いま気にすべきものと、各対象を読めているかどうか。 */
-export async function watchReport(newOnly = false): Promise<WatchReport> {
-  const res = await fetch(`${requireApiUrl()}/watch?new_only=${newOnly ? "true" : "false"}`, {
+/**
+ * GET /watch — いま気にすべきものと、各対象を読めているかどうか。
+ *
+ * force を付けない限り、サーバーは外（メール・Slack・カレンダー）へ繋ぎに
+ * 行かず、前回の中身を返す。画面を開くたびに繋ぐと、開くだけで数秒待たされる。
+ */
+export async function watchReport(newOnly = false, force = false): Promise<WatchReport> {
+  const q = `new_only=${newOnly ? "true" : "false"}&force=${force ? "true" : "false"}`;
+  const res = await fetch(`${requireApiUrl()}/watch?${q}`, {
     headers: authHeaders(),
     cache: "no-store",
   });

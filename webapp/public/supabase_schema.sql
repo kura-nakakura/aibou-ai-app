@@ -181,9 +181,12 @@ CREATE TABLE IF NOT EXISTS watch_state (
   source     text PRIMARY KEY,         -- tasks / agenda / work / mail / slack / line
   enabled    boolean DEFAULT true,
   seen       jsonb DEFAULT '[]'::jsonb,-- 見たことのある品目の鍵（新しい順・上限あり）
+  items      jsonb DEFAULT '[]'::jsonb,-- 前回見えていた中身。画面を開くたびに
+                                       -- メールやSlackへ繋ぎ直さないための控え
   last_error text DEFAULT '',          -- 前回読めなかった理由。同じ失敗を鳴らし続けないため
   last_run   text DEFAULT '',
   started    boolean DEFAULT false,    -- 初回は一斉通知を出さないための印
+  setup_needed boolean DEFAULT false,  -- 未設定（失敗ではない）ことの控え
   updated_at timestamptz DEFAULT now()
 );
 
@@ -203,6 +206,11 @@ CREATE TABLE IF NOT EXISTS inbox_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_inbox_messages_channel ON inbox_messages(channel, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_inbox_messages_external ON inbox_messages(external_id);
+
+-- あとから足した列。既に watch_state を作ってある人にも当たるようにする
+-- （CREATE TABLE IF NOT EXISTS だけだと、既存の表には列が増えない）。
+ALTER TABLE watch_state ADD COLUMN IF NOT EXISTS items jsonb DEFAULT '[]'::jsonb;
+ALTER TABLE watch_state ADD COLUMN IF NOT EXISTS setup_needed boolean DEFAULT false;
 
 
 

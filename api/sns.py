@@ -10,6 +10,8 @@
 # PR案件の場合は景品表示法対応の表記を必ず入れる。
 # =====================================================================
 
+import jsonout
+
 import json
 import re
 
@@ -38,18 +40,12 @@ PR_TAG = "#PR"
 
 
 def _extract_json(text: str):
-    text = text or ""
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
-    raw = m.group(1) if m else None
-    if raw is None:
-        s, e = text.find("{"), text.rfind("}")
-        raw = text[s:e + 1] if s != -1 and e > s else None
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
+    """AIの出力からJSONを取り出す。読めなければ None。
+
+    中身は jsonout に1本化してある（同じ関数が10か所にあり、崩れ方への
+    強さがばらついていたため）。
+    """
+    return jsonout.extract(text)
 
 
 def _norm_tags(tags) -> list:

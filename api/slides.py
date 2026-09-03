@@ -10,6 +10,8 @@
 # 設定が欠けても crash せず、フォールバックのデッキを返す。
 # =====================================================================
 
+import jsonout
+
 import json
 import re
 
@@ -21,19 +23,12 @@ MAX_IMAGES = 5  # 1デッキあたりの自動画像枚数の上限
 
 
 def _extract_json(text: str):
-    text = text or ""
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
-    raw = m.group(1) if m else None
-    if raw is None:
-        s = text.find("{")
-        e = text.rfind("}")
-        raw = text[s:e + 1] if s != -1 and e > s else None
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
+    """AIの出力からJSONを取り出す。読めなければ None。
+
+    中身は jsonout に1本化してある（同じ関数が10か所にあり、崩れ方への
+    強さがばらついていたため）。
+    """
+    return jsonout.extract(text)
 
 
 def _norm_slide(s) -> dict:

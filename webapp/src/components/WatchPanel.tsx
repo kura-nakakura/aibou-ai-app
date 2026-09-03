@@ -46,18 +46,15 @@ export default function WatchPanel({ offline }: { offline: boolean }) {
   const [note, setNote] = useState("");
   const [hook, setHook] = useState<{ path: string; secret_set: boolean } | null>(null);
 
-  const load = useCallback(async () => {
+  // 画面を開いただけのときは、外へ繋ぎに行かせない（前回の中身を出す）。
+  // 「今すぐ確認」を押したときだけ本当に見に行く。
+  const load = useCallback(async (force = false) => {
     if (!API_URL) return;
-    try {
-      setData(await watchReport());
-    } catch {
-      /* 見張りが読めなくてもHOME全体は壊さない */
-    }
-    try {
-      const i = await watchInbox();
-      setHook({ path: i.path, secret_set: i.secret_set });
-    } catch {
-      /* 受信口は任意 */
+    // 2つを直列で待つと、そのぶん表示が遅れる。同時に投げる。
+    const [report, hookInfo] = await Promise.allSettled([watchReport(false, force), watchInbox()]);
+    if (report.status === "fulfilled") setData(report.value);
+    if (hookInfo.status === "fulfilled") {
+      setHook({ path: hookInfo.value.path, secret_set: hookInfo.value.secret_set });
     }
   }, []);
 

@@ -35,8 +35,22 @@ _SCHEMA_CANDIDATES = [
 
 
 def db_url() -> str:
-    """Postgres 接続文字列（KEYCHAIN → 環境変数）。"""
-    return (keychain.get_key("SUPABASE_DB_URL") or os.environ.get("SUPABASE_DB_URL", "") or "").strip()
+    """Postgres 接続文字列（その人が入れたもの → サーバー既定）。
+
+    ここで環境変数へ素直に落とすと事故になる。SUPABASE_DB_URL は
+    「サービスの鍵」ではなく「保存先そのもの」なので、自分のDBを繋いでいる人が
+    自分の接続文字列を入れていないときにサーバー（＝持ち主）のDBへ落ちると、
+      ・持ち主のDBの表の状況を、自分のDBの状況として見てしまう
+        （自分のDBが空でも「テーブルは揃っています」と出る）
+      ・「テーブルを作る」を押すと、持ち主のDBに対してDDLが走る
+    という2つが同時に起きる。自分のDBを繋いでいる人には、
+    自分で入れた接続文字列だけを使う。
+    """
+    import config
+    value, where = keychain.resolve_key("SUPABASE_DB_URL")
+    if where == "server" and config.storage_is_bound():
+        return ""
+    return (value or "").strip()
 
 
 def _read_schema() -> str:
@@ -50,9 +64,15 @@ def _read_schema() -> str:
     return ""
 
 
-def run_migrations() -> dict:
-    """接続文字列があればスキーマを実行してテーブルを作成する。"""
-    url = db_url()
+def run_migrations(url: str = "") -> dict:
+    """接続文字列があればスキーマを実行してテーブルを作成する。
+
+    url を渡せる形にしてあるのは、呼び出し側が「誰のDBか」を明示できるように
+    するため。以前は os.environ を一時的に書き換えて渡していたが、環境変数は
+    プロセス全体で共有なので、同じ瞬間に別の人の要求が走ると、その人のDDLが
+    こちらのDBに流れうる。引数なら混ざらない。
+    """
+    url = (url or db_url()).strip()
     if not url:
         return {"ok": False, "skipped": True, "reason": "SUPABASE_DB_URL が未設定です（KEYCHAINで設定できます）"}
     sql = _read_schema()

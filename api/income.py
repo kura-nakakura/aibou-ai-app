@@ -1,5 +1,7 @@
 # income.py — 副業オートメーション（Mission Control）のAPIロジック。
 # Supabase の income_jobs を直接読み書きし、Geminiで各媒体メタデータを生成する（自己完結）。
+import jsonout
+
 import json
 import re
 
@@ -17,18 +19,12 @@ _INCOME_SYS = (
 
 
 def _extract_json(text: str):
-    """```json フェンス、無ければ最初の { ... } を JSON として取り出す。失敗時 None。"""
-    m = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
-    raw = m.group(1).strip() if m else None
-    if raw is None:
-        s, e = text.find("{"), text.rfind("}")
-        raw = text[s : e + 1] if (s != -1 and e != -1 and e > s) else None
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
+    """AIの出力からJSONを取り出す。読めなければ None。
+
+    中身は jsonout に1本化してある（同じ関数が10か所にあり、崩れ方への
+    強さがばらついていたため）。
+    """
+    return jsonout.extract(text)
 
 
 def list_jobs(status: str | None = None, limit: int = 50) -> list:

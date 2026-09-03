@@ -10,6 +10,8 @@ Gemini に判定させ、生成パラメータ付きの「提案」を返す。�
 ノーコードで“進化”させる安全な方式。
 """
 
+import jsonout
+
 import json
 import re
 
@@ -38,17 +40,12 @@ _SYS = (
 
 
 def _extract_json(text: str):
-    m = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
-    raw = m.group(1).strip() if m else None
-    if raw is None:
-        s, e = text.find("{"), text.rfind("}")
-        raw = text[s:e + 1] if (s != -1 and e != -1 and e > s) else None
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
+    """AIの出力からJSONを取り出す。読めなければ None。
+
+    中身は jsonout に1本化してある（同じ関数が10か所にあり、崩れ方への
+    強さがばらついていたため）。
+    """
+    return jsonout.extract(text)
 
 
 def propose(instruction: str) -> dict:

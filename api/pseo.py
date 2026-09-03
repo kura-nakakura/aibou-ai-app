@@ -12,6 +12,8 @@
 # 他者データのスクレイピングは行わず、自前の軸＋LLMの再構成で作る。
 # =====================================================================
 
+import jsonout
+
 import json
 import re
 import unicodedata
@@ -64,18 +66,12 @@ def plan_pages(axes: List[List[str]], template: str = "", limit: int = 50) -> Li
 
 
 def _extract_json(text: str):
-    text = text or ""
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
-    raw = m.group(1) if m else None
-    if raw is None:
-        s, e = text.find("{"), text.rfind("}")
-        raw = text[s:e + 1] if s != -1 and e > s else None
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
+    """AIの出力からJSONを取り出す。読めなければ None。
+
+    中身は jsonout に1本化してある（同じ関数が10か所にあり、崩れ方への
+    強さがばらついていたため）。
+    """
+    return jsonout.extract(text)
 
 
 def _normalize_content(data, title: str) -> dict:

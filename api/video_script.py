@@ -10,6 +10,8 @@
 # （画像生成モデルは英語プロンプトのほうが安定する）。
 # =====================================================================
 
+import jsonout
+
 import json
 import re
 
@@ -56,18 +58,8 @@ def _system(n: int, aspect: str, tone: str, style: str) -> str:
 
 
 def _extract_json(text: str) -> dict:
-    """モデル出力からJSONを取り出す（```フェンスや前後の説明を許容）。"""
-    t = (text or "").strip()
-    m = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
-    if m:
-        t = m.group(1).strip()
-    i, j = t.find("{"), t.rfind("}")
-    if i != -1 and j > i:
-        t = t[i: j + 1]
-    try:
-        return json.loads(t)
-    except Exception:
-        return {}
+    """モデル出力からJSONを取り出す。読めなければ空のdict（呼び出し側の約束）。"""
+    return jsonout.extract_dict(text) or {}
 
 
 def storyboard(topic: str, n: int = 5, aspect: str = "16:9",

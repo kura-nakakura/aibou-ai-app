@@ -166,17 +166,28 @@ def test_create_tables_needs_the_db_url(monkeypatch):
     assert "DB接続URL" in tenancy.create_tables("user-5").get("error", "")
 
 
-def test_create_tables_does_not_leak_the_db_url_into_the_environment(monkeypatch):
-    """一時的に環境変数へ差し込むが、終わったら必ず元に戻すこと。"""
+def test_create_tables_passes_the_db_url_instead_of_using_the_environment(monkeypatch):
+    """誰のDBかは引数で渡すこと。環境変数は一切さわらないこと。
+
+    以前は os.environ["SUPABASE_DB_URL"] を一時的に書き換えて渡していた。
+    終わったら戻していたので一見安全に見えるが、環境変数はプロセス全体で1つ
+    しかなく、ここはスレッドの上で動く。差し替えている最中に別の人の要求が
+    同じ変数を読むと、その人のテーブル作成がこちらのDBに対して走る。
+    """
     _reset()
     monkeypatch.setattr(tenancy, "check", lambda u, k: {"ok": True})
     tenancy.connect("user-6", "https://abc.supabase.co", "k" * 60, "postgresql://secret-db")
+
     import migrate
-    monkeypatch.setattr(migrate, "run_migrations", lambda: {"ok": True})
+    seen = {}
+    monkeypatch.setattr(migrate, "run_migrations",
+                        lambda url="": (seen.update(url=url), {"ok": True})[1])
     import os
     monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
     tenancy.create_tables("user-6")
-    assert os.environ.get("SUPABASE_DB_URL") is None
+
+    assert seen["url"] == "postgresql://secret-db", "接続先が引数で渡っていない"
+    assert os.environ.get("SUPABASE_DB_URL") is None, "環境変数を汚している"
 
 
 # ── HTTP経路 ───────────────────────────────────────────────────────

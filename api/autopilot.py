@@ -9,6 +9,8 @@ api/autopilot.py — オートパイロット（ゴール自動実行エンジ�
 （外部サービスが無くても crash しない）。
 """
 
+import jsonout
+
 import json
 import re
 import uuid
@@ -21,18 +23,8 @@ import notify
 # Supabase 未設定時のフォールバック
 _mem_missions = memstore.TenantList()
 def _extract_json_array(text: str):
-    """```json フェンス or 最初の [ ... ] を JSON 配列として取り出す。失敗時 None。"""
-    m = re.search(r"```json\s*(.*?)```", text, re.DOTALL)
-    raw = m.group(1).strip() if m else None
-    if raw is None:
-        s, e = text.find("["), text.rfind("]")
-        raw = text[s:e + 1] if (s != -1 and e != -1 and e > s) else None
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return None
+    """出力からJSON配列を取り出す。読めなければ None。"""
+    return jsonout.extract_list(text)
 
 
 def _decompose(goal: str) -> List[dict]:

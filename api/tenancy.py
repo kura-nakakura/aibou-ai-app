@@ -20,7 +20,6 @@
 
 import base64
 import hashlib
-import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -326,13 +325,9 @@ def create_tables(user_id: str) -> dict:
         return {"error": "テーブル作成には DB接続URL（postgresql://…）が必要です。"
                          "Supabaseの Connect → Session pooler の文字列を入れてください"}
     import migrate
-    # migrate は環境変数/KEYCHAIN から接続文字列を読むので、この呼び出しの間だけ差し込む
-    prev = os.environ.get("SUPABASE_DB_URL")
-    os.environ["SUPABASE_DB_URL"] = db_url
-    try:
-        return migrate.run_migrations()
-    finally:
-        if prev is None:
-            os.environ.pop("SUPABASE_DB_URL", None)
-        else:
-            os.environ["SUPABASE_DB_URL"] = prev
+    # 誰のDBかを引数で渡す。
+    # 以前は os.environ["SUPABASE_DB_URL"] を一時的に書き換えて渡していたが、
+    # 環境変数はプロセス全体で1つしかない。ここは実行スレッドの上で動くので、
+    # 差し替えている最中に別の人の要求が同じ変数を読むと、その人のテーブル作成が
+    # こちらのDBに対して走る。渡す先を引数にすれば、そもそも混ざらない。
+    return migrate.run_migrations(db_url)

@@ -3,6 +3,8 @@
 # 相談チャットの system prompt に常に注入する。通常CHATが業務エージェントなのに
 # 対し、ME はプライベート込みの人生・お金の相談相手。
 # Supabase 未設定ならプロセス内メモリにフォールバック（絶対に crash しない）。
+import jsonout
+
 import json
 import re
 import uuid
@@ -156,25 +158,12 @@ def build_life_prompt(name: str = "") -> str:
 
 # ── 会話から経験を抽出（箱への自動提案） ─────────────────────────────
 def _extract_json(text: str):
-    if not text:
-        return None
-    m = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    s = (m.group(1) if m else text).strip()
-    start = s.find("{")
-    if start < 0:
-        return None
-    depth = 0
-    for i in range(start, len(s)):
-        if s[i] == "{":
-            depth += 1
-        elif s[i] == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    return json.loads(re.sub(r",\s*([}\]])", r"\1", s[start:i + 1]))
-                except Exception:
-                    return None
-    return None
+    """AIの出力からJSONを取り出す。読めなければ None。
+
+    中身は jsonout に1本化してある（同じ関数が10か所にあり、崩れ方への
+    強さがばらついていたため）。
+    """
+    return jsonout.extract(text)
 
 
 def extract_entries(turns: list) -> dict:
