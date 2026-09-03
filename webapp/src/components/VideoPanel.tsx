@@ -183,7 +183,7 @@ export default function VideoPanel() {
               </button>
             ))}
           </div>
-          <p className="mt-1 text-[9px] text-muted">{cur.label} · {cur.w}×{cur.h}</p>
+          <p className="mt-1 text-[11px] text-muted">{cur.label} · {cur.w}×{cur.h}</p>
 
           <div className="mt-2.5 text-[9px] tracking-[0.16em] text-muted label-mono">シーン数</div>
           <div className="mt-1 flex gap-1">
@@ -238,7 +238,7 @@ export default function VideoPanel() {
               ナレーションを字幕として焼き込む
             </label>
             {caps && !caps.subs && (
-              <p className="mt-1 text-[9px] leading-relaxed text-muted">
+              <p className="mt-1 text-[11px] leading-relaxed text-muted">
                 ※ この環境には日本語フォントが無いため字幕は焼けません（音声のみで書き出します）。
               </p>
             )}
@@ -247,11 +247,11 @@ export default function VideoPanel() {
               {busy === "render" ? "…" : "▶ 動画(MP4)を書き出す"}
             </button>
             {caps && !caps.available && (
-              <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
                 ※ バックエンドに ffmpeg が無いため書き出せません（絵コンテの作成までは使えます）。
               </p>
             )}
-            <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+            <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
               各シーンの画像と読み上げを合成し、ゆっくりズーム（ケン・バーンズ）を掛けて繋ぎます。
             </p>
           </div>

@@ -286,7 +286,7 @@ export default function SlideEditor({
                 {busy === "ai" ? "…" : "直す"}
               </button>
             </div>
-            <p className="mt-1 text-[9px] text-muted">他のスライドは変わりません。</p>
+            <p className="mt-1 text-[11px] text-muted">他のスライドは変わりません。</p>
           </div>
         )}
 

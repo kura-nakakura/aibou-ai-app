@@ -129,7 +129,7 @@ export default function Guide() {
                     style={{ color: on ? "var(--fg-strong)" : "var(--fg)" }}>
                 {t.label}
               </span>
-              <span className="mt-0.5 block text-[9px] leading-tight text-muted">{t.hint}</span>
+              <span className="mt-0.5 block text-[11px] leading-tight text-muted">{t.hint}</span>
             </button>
           );
         })}

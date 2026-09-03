@@ -232,7 +232,7 @@ function OfflineVault() {
       <div className="flex items-center justify-between rounded-forge border border-panel p-3">
         <div>
           <div className="text-[10px] tracking-[0.2em] text-fg-strong label-mono">🔐 オフライン下書き · UNLOCKED</div>
-          <div className="text-[9px] text-muted">AES-256-GCM · 端末内で暗号化 · localStorageには暗号文のみ</div>
+          <div className="text-[11px] text-muted">AES-256-GCM · 端末内で暗号化 · localStorageには暗号文のみ</div>
         </div>
         <button type="button" onClick={lock} className="rounded-forge border border-[var(--line)] px-3 py-1.5 text-[10px] tracking-[0.14em] text-fg-strong label-mono">🔒 LOCK</button>
       </div>
@@ -260,7 +260,7 @@ function OfflineVault() {
                     <span className="text-[11px] tracking-[0.1em] text-fg-strong label-mono">{k.label}</span>
                     <InfoBtn open={openGuide === k.name} onClick={() => setOpenGuide(openGuide === k.name ? null : k.name)} />
                   </div>
-                  <div className="text-[9px] text-muted">{k.hint}</div>
+                  <div className="text-[11px] text-muted">{k.hint}</div>
                 </div>
                 <span className="text-[9px] tracking-[0.12em] label-mono" style={{ color: set ? "#60d394" : "#6a6f77" }}>
                   {set ? (reveal[k.name] ? keys[k.name] : `SET · ${maskValue(keys[k.name])}`) : "NOT SET"}
@@ -431,7 +431,7 @@ function SupabaseVault() {
                     <span className="text-[11px] tracking-[0.1em] text-fg-strong label-mono">{k.label || k.name}</span>
                     <InfoBtn open={openGuide === k.name} onClick={() => setOpenGuide(openGuide === k.name ? null : k.name)} />
                   </div>
-                  {k.hint && <div className="text-[9px] text-muted">{k.hint}</div>}
+                  {k.hint && <div className="text-[11px] text-muted">{k.hint}</div>}
                 </div>
                 <span className="text-[9px] tracking-[0.12em] label-mono" style={{ color: k.set ? "#60d394" : "#6a6f77" }}>
                   {k.set ? `SET · ${k.masked}` : "NOT SET"}

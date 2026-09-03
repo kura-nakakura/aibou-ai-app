@@ -174,7 +174,7 @@ export default function PseoPanel() {
                   {isOpen && (
                     <div className="mt-2 border-t border-panel pt-2">
                       {p.content?.disclosure && (
-                        <p className="mb-1 text-[9px] text-[#ffd060]">{p.content.disclosure}</p>
+                        <p className="mb-1 text-[11px] text-[#ffd060]">{p.content.disclosure}</p>
                       )}
                       {p.content?.lead && <p className="text-[11px] leading-relaxed text-muted">{p.content.lead}</p>}
                       {(p.content?.sections ?? []).map((s, i) => (
@@ -191,7 +191,7 @@ export default function PseoPanel() {
             })}
           </div>
         )}
-        <p className="mt-2 text-[9px] leading-relaxed text-muted">
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
           ※ 公開ページには景品表示法（ステマ規制）対応の表記が自動で入ります。
           Google Search Console に <code className="text-fg">/sitemap.xml</code> を登録すると承認済みページが順次インデックスされます。
         </p>

@@ -115,7 +115,7 @@ export default function AiProviderSettings() {
         ))}
       </select>
 
-      <p className="mt-2 text-[9px] leading-relaxed text-muted">
+      <p className="mt-2 text-[11px] leading-relaxed text-muted">
         ※ モデル指定はHuggingFace使用時に有効（Geminiは自動で最適モデルを選択）。
         HFトークンは KEYCHAIN の HUGGINGFACE_TOKEN に。
       </p>

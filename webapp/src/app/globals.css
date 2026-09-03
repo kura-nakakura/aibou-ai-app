@@ -37,6 +37,34 @@
   box-sizing: border-box;
 }
 
+/* ---- 押せるものの最小の大きさ ----------------------------------------
+   このアプリは、ほぼスマホで指で使う。実機サイズで測ったところ、押せる物
+   54種の高さが13〜31pxで、Appleの目安（44px）の半分ほどしかなかった。
+   小さいと隣を押す。BOARDの ✎⧉✕ のように並んでいる所ではとくに起きる。
+
+   要素セレクタ（詳細度が最も低い）で書いてあるので、Tailwind の h-* /
+   min-h-* を付けた所はそちらが優先される。意図して小さいままにしたい所は
+   .tap-free を付けて外す。 */
+button,
+[role="button"],
+select {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* チェックボックスは、四角そのものを大きくすると間延びして見える。
+   このアプリでは必ず <label> が文言ごと包んでいて、行のどこを押しても
+   切り替わるので、押しどころはその行のほうを 44px にする。 */
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]) {
+  min-height: 44px;
+}
+
+.tap-free {
+  min-height: 0;
+  min-width: 0;
+}
+
 html,
 body {
   margin: 0;

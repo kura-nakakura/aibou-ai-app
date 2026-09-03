@@ -787,13 +787,13 @@ export default function CodeMode() {
             style={{ color: deep ? "var(--accent)" : "var(--muted)" }}
             title="計画→実装→自己レビューの多段思考（高品質・少し遅い）"
           >
-            <span className="grid h-3.5 w-3.5 place-items-center rounded-full border text-[8px]"
+            <span className="grid h-3.5 w-3.5 place-items-center rounded-full border text-[11px]"
               style={{ borderColor: deep ? "var(--accent)" : "var(--panel-bd)", background: deep ? "var(--accent)" : "transparent", color: deep ? "#05171a" : "transparent" }}>
               ✓
             </span>
             🧠 深く考える
           </button>
-          <span className="text-[9px] text-muted">{deep ? "計画→実装→自己レビュー" : "通常（高速）"}</span>
+          <span className="text-[11px] text-muted">{deep ? "計画→実装→自己レビュー" : "通常（高速）"}</span>
         </div>
         <div className="panel flex items-end gap-1.5 p-2">
           <textarea
@@ -936,7 +936,7 @@ export default function CodeMode() {
                 {hits.map((h, i) => (
                   <button key={i} type="button"
                     onClick={() => { setSelected(h.path); setPreview(false); }}
-                    className="rounded px-1 py-0.5 text-left text-[9px] leading-tight text-muted transition hover:text-fg-strong"
+                    className="rounded px-1 py-0.5 text-left text-[11px] leading-tight text-muted transition hover:text-fg-strong"
                     title={`${h.path}:${h.line}`}>
                     <span className="text-[var(--accent)]">{h.path}:{h.line}</span> {h.text}
                   </button>
@@ -1252,7 +1252,7 @@ function DiffPane({
       {/* 行差分 */}
       <div className="min-h-0 flex-1 overflow-auto font-mono text-[11px] leading-relaxed">
         {rows.map((r, i) => r.kind === "gap" ? (
-          <div key={i} className="px-2 py-0.5 text-[9px] text-muted"
+          <div key={i} className="px-2 py-0.5 text-[11px] text-muted"
             style={{ background: "rgba(255,255,255,0.02)" }}>
             ⋯ {r.count}行省略
           </div>
@@ -1262,8 +1262,8 @@ function DiffPane({
               background: r.line.op === "add" ? "rgba(96,211,148,0.10)"
                 : r.line.op === "del" ? "rgba(255,155,155,0.10)" : "transparent",
             }}>
-            <span className="w-8 shrink-0 select-none text-right text-[9px] text-muted">{r.line.a ?? ""}</span>
-            <span className="w-8 shrink-0 select-none text-right text-[9px] text-muted">{r.line.b ?? ""}</span>
+            <span className="w-8 shrink-0 select-none text-right text-[11px] text-muted">{r.line.a ?? ""}</span>
+            <span className="w-8 shrink-0 select-none text-right text-[11px] text-muted">{r.line.b ?? ""}</span>
             <span className="w-3 shrink-0 select-none"
               style={{ color: r.line.op === "add" ? "#60d394" : r.line.op === "del" ? "#ff9b9b" : "var(--muted)" }}>
               {r.line.op === "add" ? "+" : r.line.op === "del" ? "-" : ""}

@@ -167,7 +167,7 @@ export default function ImageStudio() {
               </button>
             ))}
           </div>
-          <p className="mt-1 text-[9px] text-muted">{cur.label} · {cur.w}×{cur.h}</p>
+          <p className="mt-1 text-[11px] text-muted">{cur.label} · {cur.w}×{cur.h}</p>
 
           <div className="mt-2.5 text-[9px] tracking-[0.16em] text-muted label-mono">エンジン</div>
           <div className="mt-1 flex gap-1">
@@ -188,7 +188,7 @@ export default function ImageStudio() {
               );
             })}
           </div>
-          <p className="mt-1 text-[9px] leading-relaxed text-muted">
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
             {engine === "hf"
               ? `${engs.hf?.model ?? ""}（1枚ずつ数秒〜数十秒。枚数は2までに絞られます）`
               : engs.hf?.ready === false
@@ -243,7 +243,7 @@ export default function ImageStudio() {
               <button type="button" onClick={() => { setPrompt(shown); setImages([]); setOffset(0); setNote(null); }}
                 className="rounded-forge border border-panel py-2 text-[10px] tracking-[0.12em] text-muted transition hover:text-fg-strong label-mono">指示を編集する</button>
             </div>
-            <p className="mt-2 text-[9px] leading-relaxed text-muted">
+            <p className="mt-2 text-[11px] leading-relaxed text-muted">
               ※ 同じ指示なら同じ絵が出ます（再現性あり）。「別案を見る」でseedをずらします。
             </p>
           </div>

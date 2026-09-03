@@ -105,7 +105,7 @@ function KeepalivePanel() {
         {busy ? "実行中…" : "今すぐ実行（DBを起こす）"}
       </button>
 
-      <p className="mt-2 text-[9px] leading-relaxed text-muted">
+      <p className="mt-2 text-[11px] leading-relaxed text-muted">
         ※ 確実に止めないためには、GitHubリポジトリの <b className="text-fg">Settings → Secrets and variables → Actions</b> に
         <code className="text-fg"> BACKEND_URL</code>（例 https://xxx.onrender.com）を追加してください。
         毎日 <code className="text-fg">/keepalive</code> を自動で叩きます（同梱の Supabase Keep-Alive ワークフロー）。
@@ -251,7 +251,7 @@ function SchedulerPanel() {
           ))}
         </div>
       )}
-      <p className="mt-2 text-[9px] leading-relaxed text-muted">
+      <p className="mt-2 text-[11px] leading-relaxed text-muted">
         ※ 曜日を選ばなければ毎日実行。サーバーが起きている間は自動で実行します。無料プランでスリープする場合は、
         <code className="text-fg">/scheduler/tick</code> を無料の外部cron（cron-job.org等）から定期的に叩くと確実です。定期実行は承認なしで実行されます。
       </p>

@@ -328,7 +328,7 @@ export default function Vault() {
                 >
                   {nb.name}
                   {typeof nb.doc_count === "number" && (
-                    <span className="ml-1.5 text-[9px] text-muted">{nb.doc_count}</span>
+                    <span className="ml-1.5 text-[11px] text-muted">{nb.doc_count}</span>
                   )}
                 </button>
               );
@@ -379,7 +379,7 @@ export default function Vault() {
               <p className="text-[10px] tracking-[0.16em] text-muted label-mono">
                 PDF / TXT / MD / CSV をドロップ
               </p>
-              <p className="mt-0.5 text-[9px] leading-relaxed text-muted">
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
                 PDFはサーバー側で本文を抽出してそのまま登録します
               </p>
               <label className="mt-1.5 block cursor-pointer text-[10px] text-[var(--accent)] hover:underline label-mono">
@@ -450,7 +450,7 @@ export default function Vault() {
                   </div>
                 ))}
               </div>
-              <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
                 この番号が回答の出典 [1][2] と対応します。
               </p>
             </div>
@@ -517,12 +517,12 @@ export default function Vault() {
                       })}
                     </div>
                     {answer.partial && (
-                      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
                         ※ 資料が多いため、質問に関係する箇所を選んで参照しました（全文ではありません）。
                       </p>
                     )}
                     {answer.cited.length === 0 && (
-                      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
                         ※ 回答に出典番号が付いていません。資料に根拠が無い内容が含まれている可能性があります。
                       </p>
                     )}

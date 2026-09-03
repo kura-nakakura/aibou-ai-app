@@ -536,7 +536,7 @@ function MobileNav({ view, onChange, items: navItems }:
                 key={it.key}
                 type="button"
                 onClick={() => onChange(it.key)}
-                className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 text-[8px] tracking-[0.06em] label-mono"
+                className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 text-[10px] tracking-[0.06em] label-mono"
                 style={{ color: active ? "var(--accent)" : "var(--muted)" }}
                 aria-current={active ? "page" : undefined}
               >
@@ -548,7 +548,7 @@ function MobileNav({ view, onChange, items: navItems }:
           <button
             type="button"
             onClick={() => setSheetOpen((v) => !v)}
-            className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 text-[8px] tracking-[0.06em] text-muted label-mono"
+            className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 text-[10px] tracking-[0.06em] text-muted label-mono"
             aria-label="More modes"
           >
             <span className="text-base leading-none">⋯</span>
@@ -608,7 +608,7 @@ function ModeLauncher({ view, onChange, items: navItems }:
                         key={it.key}
                         type="button"
                         onClick={() => { onChange(it.key); setOpen(false); }}
-                        className="flex h-[4.25rem] flex-col items-center justify-center gap-1.5 rounded-forge border text-[9px] tracking-[0.06em] label-mono transition duration-150 hover:-translate-y-0.5 hover:scale-[1.05]"
+                        className="flex h-[4.25rem] flex-col items-center justify-center gap-1.5 rounded-forge border text-[10px] tracking-[0.06em] label-mono transition duration-150 hover:-translate-y-0.5 hover:scale-[1.05]"
                         style={{
                           borderColor: active ? "var(--accent)" : "var(--panel-bd)",
                           color: active ? "var(--fg-strong)" : "var(--muted)",
@@ -839,7 +839,7 @@ function SettingsPanel({
                       }}
                     >
                       <div className="text-[11px] text-fg-strong">{o.label}</div>
-                      <div className="text-[9px] text-muted">{o.hint}</div>
+                      <div className="text-[11px] text-muted">{o.hint}</div>
                     </button>
                   );
                 })}
@@ -1205,7 +1205,7 @@ function CoreTypeSetting() {
           );
         })}
       </div>
-      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
         {CORE_TYPES.find((c) => c.key === kind)?.hint}
       </p>
     </div>
@@ -1266,7 +1266,7 @@ function SkinSetting() {
           );
         })}
       </div>
-      <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+      <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
         {SKINS.find((s) => s.key === skin)?.hint}
         ／ 画面の構成（モードの並びや操作）は変わりません。
       </p>

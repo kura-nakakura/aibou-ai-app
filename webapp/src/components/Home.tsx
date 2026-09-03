@@ -159,10 +159,13 @@ export default function Home({
       {/* 初回設定が残っている人にだけ、残りの手順を出す（済んだら二度と出ない）。 */}
       {!offline && <FirstRun onOpenGuide={() => onNavigate("guide")} />}
 
-      {/* ウィジェットは保存した並びで出す。編集中は各枠に操作バーが付く。 */}
+      {/* ウィジェットは保存した並びで出す。編集中は各枠に操作バーが付く。
+          各枠に min-w-0 が要る。無いとグリッドの枠は「中身がこれ以上縮めない幅」
+          より小さくなれず、スマホでエージェント欄が368pxになって、328pxの画面から
+          右へ切れていた。 */}
       <div className="grid gap-3 lg:grid-cols-3">
         {shown.map((id) => (
-          <div key={id} data-widget={id} className={isWide(layout, id) ? "lg:col-span-2" : ""}>
+          <div key={id} data-widget={id} className={`min-w-0 ${isWide(layout, id) ? "lg:col-span-2" : ""}`}>
             {editing && (
               <div className="mb-1 flex flex-wrap items-center gap-1 rounded-forge border border-[var(--line)] bg-[rgba(8,11,18,0.6)] px-2 py-1">
                 <span className="text-[10px] text-fg-strong label-mono">{WIDGET_META[id].label}</span>
@@ -204,7 +207,7 @@ export default function Home({
                   aria-label={`${WIDGET_META[id].label}を表示する`}
                   className="rounded-forge border border-panel px-2.5 py-1 text-[11px] text-muted transition hover:border-[var(--line)] hover:text-fg-strong">
                   ＋ {WIDGET_META[id].label}
-                  <span className="ml-1 text-[9px] text-muted/70">{WIDGET_META[id].hint}</span>
+                  <span className="ml-1 text-[11px] text-muted/70">{WIDGET_META[id].hint}</span>
                 </button>
               ))}
             </div>

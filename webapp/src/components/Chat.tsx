@@ -856,7 +856,7 @@ export default function Chat({ settings, onStateChange, voiceReplies = true }: C
                   className="accent-[var(--accent)]" />
                 <span className="text-[10px] text-muted label-mono">取り消せない操作は確認する</span>
               </label>
-              <span className="text-[9px] text-muted">
+              <span className="text-[11px] text-muted">
                 タスク・予定・資料作成・メール・検索など30種の道具を使って実際に動きます
               </span>
             </>

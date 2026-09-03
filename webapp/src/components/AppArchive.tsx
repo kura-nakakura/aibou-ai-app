@@ -250,7 +250,7 @@ export default function AppArchive() {
                   </span>
                 </div>
                 <p className="mb-2 text-[11px] text-muted line-clamp-2">{app.prompt}</p>
-                <div className="text-[9px] text-muted/60">
+                <div className="text-[11px] text-muted/60">
                   {new Date(app.createdAt).toLocaleDateString("ja-JP")}
                 </div>
                 <div className="mt-2.5 flex flex-wrap gap-1.5">

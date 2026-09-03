@@ -216,9 +216,11 @@ export default function Tasks() {
   return (
     <div className={`grid h-full min-h-0 gap-3 overflow-y-auto pb-2 lg:content-start ${view === "list" ? "lg:grid-cols-[22rem_1fr]" : ""}`}>
       {/* ── Left column: KPI + new task + filters ── */}
-      <div className={`flex flex-col gap-3 ${view === "kanban" ? "lg:flex-row lg:flex-wrap lg:items-start" : ""}`}>
-      {/* KPI row */}
-      <div className={`grid grid-cols-4 gap-2 ${view === "kanban" ? "lg:w-80" : ""}`}>
+      {/* min-w-0 が無いと、グリッドの中身は「これ以上縮めない幅」より小さくなれない。
+          スマホでは中身が451pxになり、361pxの枠から右へ切れていた（入力欄が見えない）。 */}
+      <div className={`flex min-w-0 flex-col gap-3 ${view === "kanban" ? "lg:flex-row lg:flex-wrap lg:items-start" : ""}`}>
+      {/* KPI row — スマホは2列。4列だと「AWAITING」の幅で横に溢れる。 */}
+      <div className={`grid grid-cols-2 gap-2 sm:grid-cols-4 ${view === "kanban" ? "lg:w-80" : ""}`}>
         {[
           { key: "pending", label: "PENDING" },
           { key: "in_progress", label: "ACTIVE" },

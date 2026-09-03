@@ -308,7 +308,7 @@ export default function Capture() {
                 }}
               >
                 <div className="text-[11px] text-fg-strong label-mono">{m.label}</div>
-                <div className="mt-0.5 text-[9px] text-muted">{m.hint}</div>
+                <div className="mt-0.5 text-[11px] text-muted">{m.hint}</div>
               </button>
             );
           })}
@@ -375,7 +375,7 @@ export default function Capture() {
           >
             ⭳ ダウンロード（.webm）
           </button>
-          <p className="mt-1.5 text-[9px] leading-relaxed text-muted">
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted">
             ※ WebM形式で保存されます。MP4が必要な場合は、保存後に変換ツールをご利用ください。
           </p>
         </div>
@@ -402,7 +402,7 @@ export default function Capture() {
                   {busy === "stt" ? "…" : "✎ AIで文字起こし"}
                 </button>
                 {caps && !caps.transcribe && (
-                  <span className="text-[9px] text-muted">
+                  <span className="text-[11px] text-muted">
                     {caps.ffmpeg
                       ? "Geminiのキー、または 設定 → HF で文字起こしモデルの割り当てが必要です"
                       : "サーバーに ffmpeg がありません"}
@@ -414,7 +414,7 @@ export default function Capture() {
                   </span>
                 )}
                 {liveText && !transcript && (
-                  <span className="text-[9px] text-muted">下書き（ブラウザの音声認識）があります</span>
+                  <span className="text-[11px] text-muted">下書き（ブラウザの音声認識）があります</span>
                 )}
               </div>
 

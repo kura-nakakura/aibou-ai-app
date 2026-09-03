@@ -217,12 +217,12 @@ export default function HfModels() {
                   )}
                 </select>
                 {list.length === 0 && (
-                  <p className="mt-0.5 text-[9px] text-muted">
+                  <p className="mt-0.5 text-[11px] text-muted">
                     {taskMeta(r.task)?.label}のモデルが未登録です（下の「＋ モデルを追加」から）
                   </p>
                 )}
                 {cur && curRow && !curRow.verified && (
-                  <p className="mt-0.5 text-[9px] text-[#ffd060]">動作未確認のモデルです（テストで確認できます）</p>
+                  <p className="mt-0.5 text-[11px] text-[#ffd060]">動作未確認のモデルです（テストで確認できます）</p>
                 )}
               </div>
             );
@@ -262,7 +262,7 @@ export default function HfModels() {
                   <span className="min-w-0 flex-1 truncate text-[11px] text-fg-strong" title={m.model}>{m.model}</span>
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-[9px]"
+                  <span className="min-w-0 truncate text-[11px]"
                         style={{ color: m.verified ? "#60d394" : m.last_error ? "#ff9b9b" : "var(--muted)" }}>
                     {m.verified ? "✓ 動作確認済み" : m.last_error ? `⚠ ${m.last_error}` : "動作未確認"}
                   </span>
@@ -287,7 +287,7 @@ export default function HfModels() {
                   </span>
                 </div>
                 {meta && !meta.wired && (
-                  <p className="mt-1 text-[9px] text-muted">※ このタスクはお試し実行のみ（機能には未組み込み）</p>
+                  <p className="mt-1 text-[11px] text-muted">※ このタスクはお試し実行のみ（機能には未組み込み）</p>
                 )}
               </div>
             );
@@ -308,7 +308,7 @@ export default function HfModels() {
                 <option key={t.key} value={t.key} className="bg-[#0a0e16]">{t.label}</option>
               ))}
             </select>
-            <p className="mb-2 text-[9px] leading-relaxed text-muted">
+            <p className="mb-2 text-[11px] leading-relaxed text-muted">
               {taskMeta(task)?.note}
               {taskMeta(task)?.wired
                 ? ` → ${taskMeta(task)?.wired} で使われます`
@@ -345,7 +345,7 @@ export default function HfModels() {
 
             {hits && (
               <div className="mb-2 grid max-h-40 gap-1 overflow-y-auto">
-                {hits.length === 0 && <p className="text-[9px] text-muted">見つかりませんでした</p>}
+                {hits.length === 0 && <p className="text-[11px] text-muted">見つかりませんでした</p>}
                 {hits.map((h) => (
                   <button
                     key={h.id}
@@ -419,7 +419,7 @@ export default function HfModels() {
               ))}
             </select>
             {models.some((m) => m.task === "asr") && (
-              <p className="mb-1.5 text-[9px] text-muted">
+              <p className="mb-1.5 text-[11px] text-muted">
                 ※ 文字起こしは音声が必要なので、CAPTUREモードで試してください
               </p>
             )}

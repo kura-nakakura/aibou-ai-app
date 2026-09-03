@@ -271,7 +271,7 @@ export default function MyDatabase({ compact = false }: { compact?: boolean } = 
       )}
 
       {!compact && (
-        <p className="mt-2 text-[9px] leading-relaxed text-muted">
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
           service_role キーは強い権限を持ちます。サーバーで暗号化して保管し、画面には伏せ字でしか出しません。
           他人に渡さないでください。
         </p>

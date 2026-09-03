@@ -135,7 +135,7 @@ export default function FlowBuilder({ target, onCreated, onError }: {
             )}
           </div>
           {trigger === "schedule" && (
-            <p className="mt-1 text-center text-[9px] leading-relaxed text-muted">
+            <p className="mt-1 text-center text-[11px] leading-relaxed text-muted">
               バックエンドが動いている間、毎日この時刻に自動で実行して結果を通知します
             </p>
           )}

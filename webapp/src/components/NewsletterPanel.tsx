@@ -88,7 +88,7 @@ export default function NewsletterPanel() {
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[9px] leading-relaxed text-muted">
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
           SEOページ（/g/…）の登録フォームから集まります。確認メールのリンクを踏んだ方だけが配信対象です。
         </p>
         {subs.length > 0 && (
@@ -148,7 +148,7 @@ export default function NewsletterPanel() {
             ))}
           </div>
         )}
-        <p className="mt-2 text-[9px] leading-relaxed text-muted">
+        <p className="mt-2 text-[11px] leading-relaxed text-muted">
           ※ 全配信メールに配信停止リンクが自動で入ります。送信には KEYCHAIN の EMAIL_ADDRESS / EMAIL_PASSWORD が必要です。
           配信停止リンクを機能させるには、バックエンドに <code className="text-fg">PUBLIC_SITE_URL</code> を設定してください。
         </p>

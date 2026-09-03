@@ -112,7 +112,7 @@ export default function CalendarPanel() {
                   <span key={i} className="inline-block h-[4px] w-[4px] rounded-full"
                         style={{ background: e.source === "google" ? "#8ab4f8" : "var(--accent)" }} />
                 ))}
-                {evs.length > 3 && <span className="text-[8px] text-muted">+{evs.length - 3}</span>}
+                {evs.length > 3 && <span className="text-[11px] text-muted">+{evs.length - 3}</span>}
               </span>
             </button>
           );

@@ -531,7 +531,8 @@ test.describe("board on desktop", () => {
     await expect(canvas).toBeVisible({ timeout: 8_000 });
     // ボードが読み込み終わるまで待つ（未読込だとダブルクリックが空振りする）。
     // 座標はレイアウトが落ち着いた後に取る（先に取ると枠外を叩いてしまう）。
-    await expect(page.getByText(/ダブルクリックで付箋を追加/)).toBeVisible({ timeout: 8_000 });
+    // 併用技の案内は loaded のときだけ、かつ広い画面でだけ出るので、合図に使える。
+    await expect(page.getByText(/Shift\+ドラッグで範囲選択/)).toBeVisible({ timeout: 8_000 });
     const box = (await canvas.boundingBox())!;
 
     // 付箋を3つ作る。連続ダブルクリックは3連打として扱われることがあるので間を置く
@@ -738,7 +739,7 @@ test("BOARD opens the Miro whiteboard by default; AUTOMATION tab keeps the build
   await goMode(page, "BOARD");
   // Whiteboard toolbar (default tab)
   await expect(page.getByRole("button", { name: "＋ 付箋" })).toBeVisible({ timeout: 5_000 });
-  await expect(page.getByText(/ダブルクリックで付箋を追加/)).toBeVisible();
+  await expect(page.getByText(/何もない所をダブルクリック/)).toBeVisible();
   // Switch to the automation tab — Zapier-copilot hero + manual builder
   await page.getByRole("button", { name: "⚡ AUTOMATION" }).click();
   await expect(page.getByText("AUTOMATION COPILOT")).toBeVisible({ timeout: 5_000 });

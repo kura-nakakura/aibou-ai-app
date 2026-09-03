@@ -123,7 +123,7 @@ export default function SnsMode() {
                   boxShadow: active ? "0 0 10px var(--glow)" : "none",
                 }}>
                 <div className="text-[12px] text-fg-strong label-mono">{p.label}</div>
-                <div className="mt-0.5 text-[9px] text-muted">{p.hint}</div>
+                <div className="mt-0.5 text-[11px] text-muted">{p.hint}</div>
               </button>
             );
           })}
@@ -234,7 +234,7 @@ export default function SnsMode() {
       ))}
 
       {posts.length > 0 && (
-        <p className="px-1 text-[9px] leading-relaxed text-muted">
+        <p className="px-1 text-[11px] leading-relaxed text-muted">
           {platform === "x" && xReady
             ? "※ 「𝕏 に投稿」を押したときだけ送ります。自動実行からは投稿しません。PR案件は表記を消さないでください。"
             : platform === "x"

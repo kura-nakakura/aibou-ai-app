@@ -589,7 +589,7 @@ export default function Whiteboard() {
               }}
             >
               ▦ {m.name}
-              {typeof m.count === "number" && <span className="text-[8px] opacity-60">{m.count}</span>}
+              {typeof m.count === "number" && <span className="text-[11px] opacity-60">{m.count}</span>}
             </button>
           );
         })}
@@ -680,7 +680,11 @@ export default function Whiteboard() {
         }}
       >
         {/* 空のキャンバスは、何をする場所なのかも次の一手も分からない。
-            使い始めたら消えるので、作業の邪魔にはならない。 */}
+            使い始めたら消えるので、作業の邪魔にはならない。
+
+            以前はここと下に、同じ真ん中へ置く案内が2つあった。どちらも
+            absolute inset-0 の中央寄せなので、文字がそのまま重なって
+            読めなくなっていた。1つにまとめてある。 */}
         {nodes.length === 0 && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center">
             <div>
@@ -691,6 +695,13 @@ export default function Whiteboard() {
               <p className="mt-1 text-[11px] leading-relaxed text-muted/70">
                 付箋どうしは線でつなげます。書いた内容はそのまま保存されます。
               </p>
+              {/* キーボードの併用技は指では使えないので、狭い画面には出さない。 */}
+              {loaded && (
+                <p className="mt-3 hidden text-[10px] leading-relaxed tracking-[0.1em] text-muted/60 label-mono sm:block">
+                  Shift+ドラッグで範囲選択 · Shift+クリックで複数選択<br />
+                  線はクリックで種類切替 / Shift+クリックでラベル / Alt+クリックで削除
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -908,17 +919,8 @@ export default function Whiteboard() {
           </div>
         )}
 
-        {/* empty hint */}
-        {loaded && nodes.length === 0 && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <p className="text-center text-[11px] leading-relaxed tracking-[0.14em] text-muted/60 label-mono">
-              ダブルクリックで付箋を追加<br />
-              ＋付箋 / Ｔテキスト / ▭フレーム · 🔗で矢印接続 · ↩︎↪︎で取り消し<br />
-              Shift+ドラッグで範囲選択 · Shift+クリックで複数選択<br />
-              線はクリックで種類切替 / Shift+クリックでラベル / Alt+クリックで削除
-            </p>
-          </div>
-        )}
+        {/* 空のときの案内は上の1か所にまとめた（ここにも同じ物があり、
+            真ん中で重なって読めなくなっていた）。 */}
       </div>
     </div>
   );

@@ -193,7 +193,7 @@ export default function LpBuilder({ kind = "lp" }: { kind?: "lp" | "app" }) {
               <button type="button" onClick={() => void save()} disabled={busy}
                 className="rounded-forge border border-panel py-2 text-[10px] tracking-[0.12em] text-muted transition hover:text-fg-strong disabled:opacity-40 label-mono">生成物に保存</button>
             </div>
-            <p className="mt-2 text-[9px] leading-relaxed text-muted">{t.note}</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted">{t.note}</p>
           </div>
         )}
       </div>
