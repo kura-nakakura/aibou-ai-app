@@ -37,6 +37,7 @@ import automations
 import conversations
 import compliance
 import config
+import capabilities
 import code_agent
 import evolve
 import fileread
@@ -1023,7 +1024,8 @@ async def chat(req: ChatRequest, _auth: None = Depends(require_auth)):
     system_prompt = build_system_prompt(req.name, req.persona, memory_block)
     # ツール実行を許可（行動を頼まれた時だけマーカーを使う旨をルール付けする）
     system_prompt += (
-        "\n\n" + tools.TOOLS_DOC + "\n"
+        # 使う物だけを渡す（agent と同じ理由）
+        "\n\n" + agent._tools_doc() + "\n"
         "【ツールの使い方】行動（記憶・通知・副業投入・メモ保存など）を明確に頼まれた時だけ、"
         "返答の冒頭で必ず " + tools.TOOL_CALL_MARKER + '{"tool":"名","params":{...}} を1行で出すこと。'
         "通常の会話・質問では絶対に使わないこと。"
@@ -3398,6 +3400,119 @@ async def delete_key(name: str, _auth: None = Depends(require_auth)):
     """キーを削除する。"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: keychain.delete_key(name))
+
+
+# ── できること（パックと # コマンド） ────────────────────────────────
+
+class PacksRequest(BaseModel):
+    packs: List[str] = []
+
+
+class CommandRequest(BaseModel):
+    text: str = ""
+
+
+@app.get("/capabilities")
+async def capabilities_status(claims: dict = Depends(current_claims),
+                              _auth: None = Depends(require_auth)):
+    """パックの状態と、いま使える # コマンドの一覧。"""
+    owner = is_owner_claims(claims)
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: capabilities.status(owner))
+
+
+@app.post("/capabilities/packs")
+async def capabilities_set_packs(req: PacksRequest,
+                                 _auth: None = Depends(require_auth),
+                                 _store: None = Depends(require_storage)):
+    """使う機能のかたまりを切り替える。"""
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, lambda: capabilities.set_packs(req.packs))
+    if isinstance(res, dict) and res.get("error"):
+        return JSONResponse(status_code=409, content=res)
+    return res
+
+
+@app.post("/command")
+async def run_command(req: CommandRequest, claims: dict = Depends(current_claims),
+                      _auth: None = Depends(require_auth)):
+    """「#画像 猫の絵」を、AIに考えさせずそのまま実行する。
+
+    ふつうに「猫の絵を描いて」と書けば、AIが道具を選んで同じことをする。
+    こちらはその一手を飛ばす近道で、速くて結果が読める。
+    どちらでも同じことができるのが大事で、# を覚えないと使えないなら負け。
+
+    知らないコマンドは実行しない。呼び出し側は、ふつうの文としてAIに渡すこと
+    （打ち間違いで会話が止まらないように）。
+    """
+    owner = is_owner_claims(claims)
+    loop = asyncio.get_event_loop()
+    parsed = await loop.run_in_executor(None, lambda: capabilities.parse(req.text, owner))
+    if not parsed:
+        return {"ok": False, "unknown": True,
+                "message": "知らないコマンドです。ふつうの文としてお使いください"}
+
+    cap = parsed["capability"]
+    rest = parsed["rest"]
+
+    # 画面を開くだけのもの（道具ではない）
+    if not cap.get("tool"):
+        return {"ok": True, "kind": "view", "view": cap.get("view", ""),
+                "label": cap["label"]}
+
+    # 引数の要る道具に、引数が無いまま突っ込まない
+    if cap.get("arg") and not rest:
+        return {"ok": False, "kind": "needs_arg", "cmd": cap["cmd"],
+                "arg": cap["arg"], "label": cap["label"],
+                "message": f"#{cap['cmd']} のあとに「{cap['arg']}」を書いてください"}
+
+    def _work() -> dict:
+        params = _command_params(cap, rest)
+        if params is None:
+            # 自由文から埋めきれない道具は、AIに任せたほうが早い
+            return {"ok": False, "kind": "delegate",
+                    "message": "この指示はAIに任せます"}
+        out = tools.execute_tool(cap["tool"], params)
+        return {"ok": True, "kind": "done", "tool": cap["tool"],
+                "label": cap["label"], "view": cap.get("view", ""), "result": out}
+
+    return await loop.run_in_executor(None, _work)
+
+
+def _command_params(cap: dict, rest: str):
+    """# のうしろの自由文を、道具の引数に流し込む。
+
+    ここで埋めきれない道具（宛先と件名と本文、のように複数に割れる物）は
+    None を返す。無理に切り分けると取り違えるので、そこはAIに任せる。
+    """
+    tool = cap["tool"]
+    simple = {
+        "add_task": "title", "remember": "content", "recall": "query",
+        "web_search": "query", "web_read": "url", "notify": "message",
+        "generate_image": "prompt", "create_slides": "topic",
+        "create_google_slides": "topic", "create_document": "title",
+        "create_spreadsheet": "title", "board_add_note": "text",
+        "save_note": "content", "notion_add": "title",
+        "create_mission": "objective", "enqueue_income": "theme",
+        "create_automation": "name", "run_automation": "name",
+        "google_doc": "title",
+    }
+    if tool in simple:
+        return {simple[tool]: rest}
+    if tool in ("watch_report", "income_status"):
+        return {}
+    if tool == "email_inbox":
+        try:
+            return {"limit": int(rest)} if rest else {}
+        except ValueError:
+            return {}
+    if tool == "calendar_list":
+        try:
+            return {"days": int(rest)} if rest else {}
+        except ValueError:
+            return {}
+    # 予定・メール送信・定期実行・ドライブ等は、1つの文から機械的に割れない
+    return None
 
 
 # ── 押すだけの外部連携（OAuth） ──────────────────────────────────────

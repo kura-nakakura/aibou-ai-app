@@ -55,13 +55,28 @@ def _today_str() -> str:
         return ""
 
 
+def _tools_doc() -> str:
+    """AIに渡す道具の説明。パックと連携の状況で絞る。
+
+    絞り込みが何かの理由で失敗しても、会話が止まってはいけないので、
+    そのときは全部入りに落とす。
+    """
+    try:
+        import capabilities
+        return capabilities.tools_doc()
+    except Exception:
+        return tools.TOOLS_DOC
+
+
 def _system_prompt(name: str) -> str:
     assistant = (name or "AIbou").strip() or "AIbou"
     return (
         f"あなたは「{assistant}」。THE FORGE OS のホーム・エージェントであり、"
         "ユーザーの手足となって“会話だけで終わらせず実際に手を動かす”自律エージェントです。\n"
         f"今日の日付: {_today_str()}\n\n"
-        + tools.TOOLS_DOC + "\n\n"
+        # 使う物だけを渡す。全部渡すと毎回3,900文字が乗るうえ、選択肢が
+        # 多いほど道具の選び間違いが増える。
+        + _tools_doc() + "\n\n"
         "【行動プロトコル（厳守）】\n"
         "1. 目的の達成に行動が必要なら、返答の一番最初の行に必ず次の形式を“1行だけ”出力する：\n"
         f'   {_MARKER}{{"tool":"ツール名","params":{{...}}}}\n'

@@ -18,6 +18,7 @@
 
 import json
 import os
+from typing import Dict
 
 # requests は通知(notify)で使う。未インストールでも import 自体は失敗させない。
 try:
@@ -45,88 +46,92 @@ TOOL_CALL_MARKER = "<<<TOOL_CALL>>>"
 # === ツール説明文（system prompt 用） =======================================
 # 各ツールの「名前・用途・params」を箇条書きにした説明。/chat の system prompt に
 # 差し込み、モデルにどんな行動が取れるかを伝えるためのドキュメント。
-TOOLS_DOC = (
-    "【利用可能なツール】\n"
-    '- add_task: ToDo（タスク）を1件追加する。「〜しておいて」「〜を忘れないように」等の依頼で使う。'
-    'priorityは high|mid|low、dueは YYYY-MM-DD、projectはグループ名（すべて任意） '
-    '/ params: { "title": "タスク名", "content": "補足", "priority": "high", "due": "2026-07-20", "project": "副業" }\n'
-    '- complete_task: タイトル（部分一致）でタスクを探して完了にする '
-    '/ params: { "title": "牛乳" }\n'
-    '- board_add_note: Miro風ホワイトボード（BOARD）に付箋を追加する。ブレスト・アイデア整理に使う。'
-    'colorは yellow|cyan|green|pink|purple|orange、boardでボード名も指定可（省略時は最新のボード） '
-    '/ params: { "text": "付箋の内容", "color": "yellow", "board": "企画" }\n'
-    '- add_agenda: 予定（カレンダー）を1件追加する。日付は YYYY-MM-DD、時刻は HH:MM。'
-    '相対表現（明日・金曜など）は system に記載の今日の日付を基準に自分で計算して埋める '
-    '/ params: { "title": "予定名", "date": "2026-07-17", "time": "15:00" }\n'
-    '- list_state: 今のタスク・予定・副業ジョブ・未読通知の件数と概要を取得する（状況把握に使う） '
-    "/ params: { }\n"
-    '- watch_report: 見張りの報告。期限の来たタスク・今日の予定・業務・新着メール・Slack・LINEを '
-    'まとめて確認する。「何かあった？」「状況は？」「新着ある？」に使う。'
-    '読めなかった対象はその理由も返るので、そのまま伝えること '
-    '/ params: { "new_only": false }\n'
-    '- create_document: Markdownのドキュメントを生成してAibou内に保存（ダウンロード可）。'
-    '★Googleドライブには入らない。「ドライブに」「Googleに」と言われたら使わず '
-    'drive_upload か google_doc を使うこと。'
-    'contentには完成した本文を自分で書いて渡す '
-    '/ params: { "title": "見出し", "content": "Markdown本文" }\n'
-    '- create_spreadsheet: 表データからCSVスプレッドシートを生成してAibou内に保存（ダウンロード可）。'
-    '★Googleドライブには入らない。ドライブに置くなら google_sheet を使う。'
-    'rowsは1行目を見出しにした二次元配列 '
-    '/ params: { "title": "表の名前", "rows": [["名前","金額"],["家賃","80000"]] }\n'
-    '- drive_upload: Googleドライブにファイルをそのまま作る（Google連携が必要）。'
-    '「ドライブにファイルを作って」はこれ。作った直後に実在を確認して報告する '
-    '/ params: { "name": "メモ.txt", "content": "本文", "mime": "text/plain" }\n'
-    '- create_slides: スライド資料（プレゼン）を作る。topicを渡すと内容も自動生成、'
-    'slides配列で直接指定も可。ビジュアル表示・PDF/Googleスライド化できる '
-    '/ params: { "topic": "新規事業の提案", "n": 6 }  または '
-    '{ "title": "提案", "slides": [{"title":"背景","bullets":["要点1","要点2"]}] }\n'
-    '- create_google_slides: 上記をGoogleスライドとして作成する（Google連携が必要） '
-    '/ params: { "topic": "新規事業の提案" }\n'
-    '- google_sheet: Googleスプレッドシートを新規作成してrowsを書き込む（Google連携が必要）。'
-    'クラウドで共有・編集したい表に使う '
-    '/ params: { "title": "表の名前", "rows": [["名前","金額"],["家賃","80000"]] }\n'
-    '- google_doc: Googleドキュメントを新規作成して本文を書く（Google連携が必要） '
-    '/ params: { "title": "見出し", "content": "本文" }\n'
-    '- calendar_add: Googleカレンダーに予定を追加する（Google連携が必要）。日付=YYYY-MM-DD、時刻=HH:MM '
-    '/ params: { "title": "予定名", "date": "2026-07-20", "time": "15:00" }\n'
-    '- calendar_list: Googleカレンダーの直近の予定を取得する '
-    '/ params: { "days": 7 }\n'
-    '- send_email: メールを送信する（機微な操作。承認が必要な場合あり） '
-    '/ params: { "to": "宛先@example.com", "subject": "件名", "body": "本文" }\n'
-    '- email_inbox: 受信トレイの最新メールを確認する '
-    '/ params: { "limit": 5 }\n'
-    '- web_search: Webを検索して最新情報の上位結果（タイトル/URL/要約）を得る '
-    '/ params: { "query": "検索したいこと" }\n'
-    '- web_read: 指定URLのページ本文を読み取る（記事や資料の要約に使う） '
-    '/ params: { "url": "https://example.com/article" }\n'
-    '- generate_image: プロンプトから画像を生成する（HOMEの生成物に保存される） '
-    '/ params: { "prompt": "夕焼けの富士山、油絵風" }\n'
-    '- schedule_add: きまった時刻に指示を自動実行する定期タスクを登録する。'
-    'daysは "daily"（毎日）か "mon,wed,fri" のような曜日カンマ区切り '
-    '/ params: { "instruction": "AIニュースを検索してメールで送る", "time": "07:00", "days": "daily" }\n'
-    '- schedule_list: 登録済みの定期実行を一覧する / params: { }\n'
-    '- notion_add: Notionのページ/データベースにメモ（新規ページ）を追記する '
-    '/ params: { "title": "メモの見出し", "content": "本文" }\n'
-    '- create_automation: ノーコード自動化フロー（Zapier風）を作る。stepsのtypeは '
-    'ai_generate / notify / create_task のみ '
-    '/ params: { "name": "フロー名", "steps": [{"type":"ai_generate","params":{"prompt":"..."}}] }\n'
-    '- run_automation: 既存の自動化フローを名前かIDで実行する '
-    '/ params: { "name": "フロー名", "input": "任意の入力" }\n'
-    '- create_mission: オートパイロットのミッション（ゴールを自動でステップ分解）を作る '
-    '/ params: { "objective": "達成したいゴール" }\n'
-    '- remember: ユーザーが「覚えておいて」と言った事実・好み・重要情報を長期記憶に保存する '
-    '/ params: { "content": "覚える内容（例：私の誕生日は6月12日）" }\n'
-    '- recall: 長期記憶から過去の事実・文脈を検索して思い出す '
-    '/ params: { "query": "思い出したいキーワード" }\n'
-    '- enqueue_income: 副業オートメーションにテーマを投入し、各媒体メタデータを生成して承認待ちに積む '
-    '/ params: { "theme": "生成テーマ（例：雪のロッジの環境音）" }\n'
-    '- income_status: 副業ジョブの状況（承認待ち/承認済/完了/失敗 などの件数）を報告する '
-    "/ params: { }\n"
-    '- notify: 設定済みの通知先（LINE / Discord / Slack）へメッセージを送る '
-    '/ params: { "message": "送信するメッセージ" }\n'
-    '- save_note: ノート（Vault）にメモを保存する。ノートブックが無ければ作成する '
-    '/ params: { "notebook": "保存先ノートブック名", "title": "タイトル", "content": "本文" }'
-)
+# 道具ごとの説明。まとめて1つの文字列にしていたが、使わない道具の説明まで
+# 毎回AIに送ることになっていた（全部で約3,900文字）。送る量が増えるほど返事は
+# 遅くなり、選択肢が多いほど道具の選び間違いも増える。
+# 使う物だけを組み立てられるように、1つずつ持つ。
+TOOL_DOCS: Dict[str, str] = {
+    "add_task":
+        'ToDo（タスク）を1件追加する。「〜しておいて」「〜を忘れないように」等の依頼で使う。priorityは high|mid|low、dueは YYYY-MM-DD、projectはグループ名（すべて任意） / params: { "title": "タスク名", "content": "補足", "priority": "high", "due": "2026-07-20", "project": "副業" }',
+    "complete_task":
+        'タイトル（部分一致）でタスクを探して完了にする / params: { "title": "牛乳" }',
+    "board_add_note":
+        'Miro風ホワイトボード（BOARD）に付箋を追加する。ブレスト・アイデア整理に使う。colorは yellow|cyan|green|pink|purple|orange、boardでボード名も指定可（省略時は最新のボード） / params: { "text": "付箋の内容", "color": "yellow", "board": "企画" }',
+    "add_agenda":
+        '予定（カレンダー）を1件追加する。日付は YYYY-MM-DD、時刻は HH:MM。相対表現（明日・金曜など）は system に記載の今日の日付を基準に自分で計算して埋める / params: { "title": "予定名", "date": "2026-07-17", "time": "15:00" }',
+    "list_state":
+        '今のタスク・予定・副業ジョブ・未読通知の件数と概要を取得する（状況把握に使う） / params: { }',
+    "watch_report":
+        '見張りの報告。期限の来たタスク・今日の予定・業務・新着メール・Slack・LINEを まとめて確認する。「何かあった？」「状況は？」「新着ある？」に使う。読めなかった対象はその理由も返るので、そのまま伝えること / params: { "new_only": false }',
+    "create_document":
+        'Markdownのドキュメントを生成してAibou内に保存（ダウンロード可）。★Googleドライブには入らない。「ドライブに」「Googleに」と言われたら使わず drive_upload か google_doc を使うこと。contentには完成した本文を自分で書いて渡す / params: { "title": "見出し", "content": "Markdown本文" }',
+    "create_spreadsheet":
+        '表データからCSVスプレッドシートを生成してAibou内に保存（ダウンロード可）。★Googleドライブには入らない。ドライブに置くなら google_sheet を使う。rowsは1行目を見出しにした二次元配列 / params: { "title": "表の名前", "rows": [["名前","金額"],["家賃","80000"]] }',
+    "drive_upload":
+        'Googleドライブにファイルをそのまま作る（Google連携が必要）。「ドライブにファイルを作って」はこれ。作った直後に実在を確認して報告する / params: { "name": "メモ.txt", "content": "本文", "mime": "text/plain" }',
+    "create_slides":
+        'スライド資料（プレゼン）を作る。topicを渡すと内容も自動生成、slides配列で直接指定も可。ビジュアル表示・PDF/Googleスライド化できる / params: { "topic": "新規事業の提案", "n": 6 }  または { "title": "提案", "slides": [{"title":"背景","bullets":["要点1","要点2"]}] }',
+    "create_google_slides":
+        '上記をGoogleスライドとして作成する（Google連携が必要） / params: { "topic": "新規事業の提案" }',
+    "google_sheet":
+        'Googleスプレッドシートを新規作成してrowsを書き込む（Google連携が必要）。クラウドで共有・編集したい表に使う / params: { "title": "表の名前", "rows": [["名前","金額"],["家賃","80000"]] }',
+    "google_doc":
+        'Googleドキュメントを新規作成して本文を書く（Google連携が必要） / params: { "title": "見出し", "content": "本文" }',
+    "calendar_add":
+        'Googleカレンダーに予定を追加する（Google連携が必要）。日付=YYYY-MM-DD、時刻=HH:MM / params: { "title": "予定名", "date": "2026-07-20", "time": "15:00" }',
+    "calendar_list":
+        'Googleカレンダーの直近の予定を取得する / params: { "days": 7 }',
+    "send_email":
+        'メールを送信する（機微な操作。承認が必要な場合あり） / params: { "to": "宛先@example.com", "subject": "件名", "body": "本文" }',
+    "email_inbox":
+        '受信トレイの最新メールを確認する / params: { "limit": 5 }',
+    "web_search":
+        'Webを検索して最新情報の上位結果（タイトル/URL/要約）を得る / params: { "query": "検索したいこと" }',
+    "web_read":
+        '指定URLのページ本文を読み取る（記事や資料の要約に使う） / params: { "url": "https://example.com/article" }',
+    "generate_image":
+        'プロンプトから画像を生成する（HOMEの生成物に保存される） / params: { "prompt": "夕焼けの富士山、油絵風" }',
+    "schedule_add":
+        'きまった時刻に指示を自動実行する定期タスクを登録する。daysは "daily"（毎日）か "mon,wed,fri" のような曜日カンマ区切り / params: { "instruction": "AIニュースを検索してメールで送る", "time": "07:00", "days": "daily" }',
+    "schedule_list":
+        '登録済みの定期実行を一覧する / params: { }',
+    "notion_add":
+        'Notionのページ/データベースにメモ（新規ページ）を追記する / params: { "title": "メモの見出し", "content": "本文" }',
+    "create_automation":
+        'ノーコード自動化フロー（Zapier風）を作る。stepsのtypeは ai_generate / notify / create_task のみ / params: { "name": "フロー名", "steps": [{"type":"ai_generate","params":{"prompt":"..."}}] }',
+    "run_automation":
+        '既存の自動化フローを名前かIDで実行する / params: { "name": "フロー名", "input": "任意の入力" }',
+    "create_mission":
+        'オートパイロットのミッション（ゴールを自動でステップ分解）を作る / params: { "objective": "達成したいゴール" }',
+    "remember":
+        'ユーザーが「覚えておいて」と言った事実・好み・重要情報を長期記憶に保存する / params: { "content": "覚える内容（例：私の誕生日は6月12日）" }',
+    "recall":
+        '長期記憶から過去の事実・文脈を検索して思い出す / params: { "query": "思い出したいキーワード" }',
+    "enqueue_income":
+        '副業オートメーションにテーマを投入し、各媒体メタデータを生成して承認待ちに積む / params: { "theme": "生成テーマ（例：雪のロッジの環境音）" }',
+    "income_status":
+        '副業ジョブの状況（承認待ち/承認済/完了/失敗 などの件数）を報告する / params: { }',
+    "notify":
+        '設定済みの通知先（LINE / Discord / Slack）へメッセージを送る / params: { "message": "送信するメッセージ" }',
+    "save_note":
+        'ノート（Vault）にメモを保存する。ノートブックが無ければ作成する / params: { "notebook": "保存先ノートブック名", "title": "タイトル", "content": "本文" }',
+}
+
+
+def tools_doc(names=None) -> str:
+    """AIに渡す道具の説明を組み立てる。
+
+    names を渡すと、その道具だけの説明になる。渡さなければ全部。
+    並びは定義順（AIが上から順に見るので、揺らさない）。
+    """
+    picked = [(n, d) for n, d in TOOL_DOCS.items() if names is None or n in names]
+    if not picked:
+        return "【利用可能なツール】\n（いま使える道具はありません）"
+    return "【利用可能なツール】\n" + "\n".join(f"- {n}: {d}" for n, d in picked)
+
+
+# 後方互換：全部入りの説明（従来どおりの文字列）。
+TOOLS_DOC = tools_doc()
 
 
 # === ツール呼び出しの抽出 ===================================================
