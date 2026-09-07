@@ -834,7 +834,13 @@ def _do_notion_add(params: dict) -> str:
     if requests is None:
         return "requests が無いためNotionに送れません。"
     import keychain
-    token = (keychain.get_key("NOTION_TOKEN") or "").strip()
+    token = ""
+    try:
+        import oauth
+        token = oauth.access_token("notion")
+    except Exception:
+        token = ""
+    token = (token or keychain.get_key("NOTION_TOKEN") or "").strip()
     parent = (params.get("parent") or keychain.get_key("NOTION_PARENT_ID") or "").strip()
     if not token:
         return "NOTION_TOKEN が未設定です。KEYCHAIN で設定してください（発行手順は各欄の「?」参照）。"

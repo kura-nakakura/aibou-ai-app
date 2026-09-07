@@ -48,6 +48,18 @@ _ERRORS = {
 
 
 def _token() -> str:
+    """使うトークン。押すだけの連携が先、手で貼ったものが後。
+
+    どちらでも動く形にしてあるのは、すでに SLACK_BOT_TOKEN を貼って使っている
+    人を、こちらの都合で止めないため。
+    """
+    try:
+        import oauth
+        tok = oauth.access_token("slack")
+        if tok:
+            return tok
+    except Exception:
+        pass
     return (keychain.get_key("SLACK_BOT_TOKEN") or "").strip()
 
 

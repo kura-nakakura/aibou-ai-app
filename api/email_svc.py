@@ -18,6 +18,13 @@ from email.utils import parseaddr
 
 import keychain
 
+# Gmail を Google連携で読むときに使う。SMTP/IMAP だけの構成でも
+# import で落ちないように、無ければ None にしておく。
+try:
+    import requests
+except Exception:  # pragma: no cover
+    requests = None
+
 
 def _addr() -> str:
     return (keychain.get_key("EMAIL_ADDRESS") or "").strip()
@@ -42,12 +49,87 @@ def _smtp_port() -> int:
         return 465
 
 
+def _gmail_ready() -> bool:
+    """Googleを連携済みなら、メールはそちらで読める。
+
+    アプリパスワードを作る手順（2段階認証→アプリパスワード→16文字を貼る）は、
+    設定の中でいちばん脱落する所だった。Googleを「押すだけ」で繋いであるなら、
+    その権限で読めるので、この手順そのものが要らなくなる。
+    """
+    try:
+        import oauth
+        return oauth.connected("google")
+    except Exception:
+        return False
+
+
 def configured() -> bool:
-    return bool(_addr() and _password())
+    """メールを扱えるか。Google連携済みなら、アドレスとパスワードは要らない。"""
+    return bool(_gmail_ready() or (_addr() and _password()))
 
 
 def status() -> dict:
-    return {"configured": configured(), "address": _addr()}
+    out = {"configured": configured(), "address": _addr()}
+    if _gmail_ready():
+        out["via"] = "google"
+        out["address"] = out["address"] or _gmail_address()
+    elif out["configured"]:
+        out["via"] = "imap"
+    return out
+
+
+def _gmail_address() -> str:
+    try:
+        import oauth
+        rec = oauth._load("google") or {}
+        return rec.get("account") or ""
+    except Exception:
+        return ""
+
+
+def _gmail_inbox(limit: int) -> dict:
+    """Gmail API で受信トレイを読む。{ok, items} / {ok:False, error}。"""
+    import oauth
+    tok = oauth.access_token("google")
+    if not tok:
+        return {"ok": False, "error": "Google連携の期限が切れています。繋ぎ直してください"}
+    if requests is None:
+        return {"ok": False, "error": "requests が利用できません"}
+    head = {"Authorization": f"Bearer {tok}"}
+    base = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+    try:
+        r = requests.get(base, headers=head,
+                         params={"maxResults": limit, "labelIds": "INBOX"}, timeout=30)
+        d = r.json() if r.content else {}
+    except Exception as e:
+        return {"ok": False, "error": f"Gmailに繋がりませんでした（{str(e)[:120]}）"}
+    if d.get("error"):
+        msg = (d["error"] or {}).get("message", "")
+        if "insufficient" in msg.lower() or "scope" in msg.lower():
+            return {"ok": False, "error": "メールを読む権限がありません。"
+                                          "拡張機能からGoogleを繋ぎ直してください"}
+        return {"ok": False, "error": f"Gmailが受け付けませんでした（{msg[:120]}）"}
+
+    items = []
+    for m in (d.get("messages") or [])[:limit]:
+        try:
+            rr = requests.get(f"{base}/{m['id']}", headers=head, timeout=30, params={
+                "format": "metadata",
+                "metadataHeaders": ["From", "Subject", "Date"],
+            })
+            md = rr.json() if rr.content else {}
+        except Exception:
+            continue
+        headers = {h.get("name", "").lower(): h.get("value", "")
+                   for h in ((md.get("payload") or {}).get("headers") or [])}
+        items.append({
+            "id": md.get("id") or m.get("id") or "",
+            "from": parseaddr(headers.get("from", ""))[1] or headers.get("from", ""),
+            "subject": headers.get("subject", ""),
+            "date": headers.get("date", ""),
+            "snippet": (md.get("snippet") or "")[:240],
+        })
+    return {"ok": True, "items": items}
 
 
 def send(to: str, subject: str, body: str) -> dict:
@@ -95,10 +177,19 @@ def _body_snippet(m, limit: int = 240) -> str:
 
 
 def inbox(limit: int = 5) -> dict:
-    """受信トレイの最新メールを返す。{ok, items:[{from,subject,date,snippet}]}。"""
-    if not configured():
-        return {"ok": False, "error": "メール未設定（KEYCHAINでEMAIL_ADDRESS/EMAIL_PASSWORDを設定）"}
+    """受信トレイの最新メールを返す。{ok, items:[{id,from,subject,date,snippet}]}。
+
+    Googleを繋いであればそちらで読む。繋いでいなければ、これまで通り
+    アドレスとアプリパスワードでIMAPに繋ぐ。
+    """
     limit = max(1, min(int(limit or 5), 20))
+    if _gmail_ready():
+        return _gmail_inbox(limit)
+    if not (_addr() and _password()):
+        return {"ok": False,
+                "error": "メールが未設定です。拡張機能からGoogleを繋ぐと、"
+                         "パスワードを入れずに読めるようになります"
+                         "（Google以外のメールは EMAIL_ADDRESS と EMAIL_PASSWORD を設定）"}
     try:
         M = imaplib.IMAP4_SSL(_imap_host(), timeout=30)
         M.login(_addr(), _password())

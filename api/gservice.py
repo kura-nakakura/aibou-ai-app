@@ -52,11 +52,18 @@ def redirect_uri(default: str = "") -> str:
 
 
 def configured() -> bool:
-    return bool(_client_id() and _client_secret())
+    """アプリ登録が済んでいるか。
+
+    client_id / secret は「このアプリ自身の身分証」なので、持ち主が1回だけ
+    サーバーに置けば、利用者は誰も入力しなくてよい。
+    """
+    import oauth
+    return oauth.configured("google")
 
 
 def connected() -> bool:
-    return bool(_refresh_token())
+    import oauth
+    return oauth.connected("google")
 
 
 def status() -> dict:
@@ -72,72 +79,32 @@ def status() -> dict:
     return out
 
 
-def auth_url(redirect: str) -> str:
-    from urllib.parse import urlencode
-    params = {
-        "client_id": _client_id(),
-        "redirect_uri": redirect,
-        "response_type": "code",
-        "scope": " ".join(SCOPES),
-        "access_type": "offline",   # refresh_token を得る
-        "prompt": "consent",        # 毎回同意 → refresh_token を確実に発行
-        "include_granted_scopes": "true",
-    }
-    return f"{AUTH_URL}?{urlencode(params)}"
+def auth_url(redirect: str, user_id: str = "") -> str:
+    """同意画面のURL（共通の仕組みに委譲）。"""
+    import oauth
+    return (oauth.start_url("google", redirect, user_id) or {}).get("url", "")
 
 
 def exchange_code(code: str, redirect: str) -> dict:
-    """認可コードを refresh_token に交換し、KEYCHAIN に保存する。"""
-    if requests is None:
-        return {"ok": False, "error": "requests が利用できません"}
-    if not code:
-        return {"ok": False, "error": "認可コードがありません"}
-    try:
-        r = requests.post(TOKEN_URL, data={
-            "code": code,
-            "client_id": _client_id(),
-            "client_secret": _client_secret(),
-            "redirect_uri": redirect,
-            "grant_type": "authorization_code",
-        }, timeout=30)
-        d = r.json() if r.content else {}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-    rt = d.get("refresh_token")
-    if rt:
-        try:
-            keychain.set_key("GOOGLE_REFRESH_TOKEN", rt)
-        except Exception:
-            pass
-        return {"ok": True}
-    return {"ok": False, "error": d.get("error_description") or d.get("error") or "refresh_token を取得できませんでした"}
+    """認可コードをトークンに替えて保存する（共通の仕組みに委譲）。"""
+    import oauth
+    return oauth.finish("google", code, redirect)
 
 
 def disconnect() -> dict:
-    try:
-        keychain.delete_key("GOOGLE_REFRESH_TOKEN")
-    except Exception:
-        pass
-    return {"ok": True}
+    import oauth
+    return oauth.disconnect("google")
 
 
 def _access_token():
-    """refresh_token から access_token を取得。失敗時 None。"""
-    if requests is None:
-        return None
-    rt = _refresh_token()
-    if not (rt and configured()):
-        return None
-    try:
-        r = requests.post(TOKEN_URL, data={
-            "client_id": _client_id(),
-            "client_secret": _client_secret(),
-            "refresh_token": rt,
-            "grant_type": "refresh_token",
-        }, timeout=30)
-        return (r.json() or {}).get("access_token")
-    except Exception:
-        return None
+    """使えるアクセストークン。失敗時 None。
+
+    取り回しは oauth に寄せてある。以前はここで毎回 refresh を叩いていたが、
+    Googleを使う操作のたびに余分な往復が1回増えていた。共通側は期限内なら
+    そのまま使い回す。
+    """
+    import oauth
+    return oauth.access_token("google") or None
 
 
 def _err_not_connected() -> dict:

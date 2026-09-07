@@ -59,6 +59,7 @@ import llm
 import lp as lp_mod
 import migrate
 import newsletter
+import oauth
 import note_client
 import notify
 import x_client
@@ -3085,42 +3086,30 @@ async def google_status(_auth: None = Depends(require_auth)):
     return gservice.status()
 
 
+# Google は以前からこのURLで動いており、Google Cloud 側に「承認済みの
+# リダイレクトURI」として登録されている。URLを変えると既存の設定が壊れるので、
+# 入口はそのまま残し、中身だけ共通の仕組みに寄せる。
 @app.get("/google/auth/start")
-async def google_auth_start(request: Request):
-    """Googleの同意画面へリダイレクト（KEYCHAINにCLIENT_ID/SECRETが必要）。"""
-    if not gservice.configured():
-        return HTMLResponse(
-            "<h3>Google未設定です</h3><p>Settings → KEYCHAIN で "
-            "GOOGLE_CLIENT_ID と GOOGLE_CLIENT_SECRET を設定してください。</p>",
-            status_code=400,
-        )
-    return RedirectResponse(gservice.auth_url(_google_redirect(request)))
+async def google_auth_start(request: Request, user_id: str = Depends(current_user),
+                            claims: dict = Depends(current_claims),
+                            _auth: None = Depends(require_auth)):
+    """Googleの同意画面へ送る。"""
+    res = oauth.start_url("google", _connect_redirect(request, "google"), user_id,
+                          owner=is_owner_claims(claims))
+    if res.get("error"):
+        return _connect_page("連携を始められません", res["error"], ok=False, status=400)
+    return RedirectResponse(res["url"])
 
 
 @app.get("/google/auth/callback")
-async def google_auth_callback(request: Request, code: str = "", error: str = ""):
-    """Googleからのコールバック。コードを refresh_token に交換して保存する。"""
-    if error:
-        return HTMLResponse(f"<h3>接続に失敗しました</h3><p>{error}</p>")
-    redirect = _google_redirect(request)
-    res = await asyncio.get_event_loop().run_in_executor(None, lambda: gservice.exchange_code(code, redirect))
-    if res.get("ok"):
-        return HTMLResponse(
-            "<div style='font-family:sans-serif;text-align:center;margin-top:15%'>"
-            "<h2>✓ Google連携が完了しました</h2>"
-            "<p>このタブを閉じて、アプリに戻ってください。</p></div>"
-        )
-    return HTMLResponse(
-        "<div style='font-family:sans-serif;text-align:center;margin-top:12%'>"
-        f"<h3>接続に失敗しました</h3><p>{res.get('error')}</p>"
-        f"<p style='color:#888;font-size:13px'>Google Cloud の『承認済みのリダイレクトURI』が<br>"
-        f"<code>{redirect}</code><br>と完全一致しているか確認してください。</p></div>"
-    )
+async def google_auth_callback(request: Request, code: str = "", state: str = "",
+                               error: str = ""):
+    return await _connect_finish("google", request, code, state, error)
 
 
 @app.post("/google/disconnect")
 async def google_disconnect(_auth: None = Depends(require_auth)):
-    return gservice.disconnect()
+    return oauth.disconnect("google")
 
 
 @app.get("/slides/layouts")
@@ -3409,6 +3398,123 @@ async def delete_key(name: str, _auth: None = Depends(require_auth)):
     """キーを削除する。"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: keychain.delete_key(name))
+
+
+# ── 押すだけの外部連携（OAuth） ──────────────────────────────────────
+# start は本人が押すので認証あり。callback は提供元がブラウザを飛ばして
+# くるだけでログイン情報が付かないため、認証を付けられない。
+# 代わりに、送り出すときに「誰が始めたか」を署名して state に載せ、
+# 戻りで検証してから、その人の保管庫にだけ保存する。
+#
+# ここを省いていたのが元の不具合だった。利用者を特定できないまま鍵を
+# 保存していたので、keychain が「1人運用」とみなして os.environ に書き、
+# 誰か1人の連携がサーバー全体の既定値になっていた
+# （自分で繋いでいない他の利用者が、その人のアカウントで動いていた）。
+
+def _connect_redirect(request: Request, provider: str) -> str:
+    """提供元に登録する戻り先。Googleだけは以前のURLを保つ（登録済みのため）。"""
+    base = str(request.base_url).rstrip("/")
+    if provider == "google":
+        return gservice.redirect_uri(default=f"{base}/google/auth/callback")
+    return f"{base}/connect/{provider}/callback"
+
+
+def _connect_page(title: str, body: str, ok: bool = True,
+                  status: int = 200) -> HTMLResponse:
+    """連携の結果を出す小さなページ（提供元からの戻りはブラウザで開かれる）。
+
+    失敗のときに 200 を返さないこと。画面には赤く出ているのに、機械から見ると
+    成功に見える——という食い違いを作らない。
+    """
+    mark = "✅" if ok else "⚠️"
+    return HTMLResponse(
+        f"<!doctype html><meta charset='utf-8'>"
+        f"<div style='font-family:system-ui;max-width:34rem;margin:12vh auto;padding:0 1.2rem;"
+        f"line-height:1.9;color:#c9ccd2;background:#0a0b0f'>"
+        f"<h3 style='color:#fff'>{mark} {title}</h3><p>{body}</p>"
+        f"<p style='color:#8b8f97'>このタブは閉じて、AIbouに戻ってください。</p></div>",
+        status_code=status if not ok else 200,
+    )
+
+
+@app.get("/connect")
+async def connect_status(_auth: None = Depends(require_auth)):
+    """連携できる先と、その状態。鍵の値は返さない。"""
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(None, oauth.status_all)
+    return {"ok": True, "providers": items, "no_oauth": oauth.NO_OAUTH}
+
+
+@app.get("/connect/{provider}/start")
+async def connect_start(provider: str, request: Request,
+                        user_id: str = Depends(current_user),
+                        claims: dict = Depends(current_claims),
+                        _auth: None = Depends(require_auth)):
+    """提供元の同意画面へ送る。誰が始めたかを署名して持たせる。"""
+    res = oauth.start_url(provider, _connect_redirect(request, provider), user_id,
+                          owner=is_owner_claims(claims))
+    if res.get("error"):
+        return _connect_page("連携を始められません", res["error"], ok=False, status=400)
+    return RedirectResponse(res["url"])
+
+
+async def _connect_finish(provider: str, request: Request, code: str, state: str,
+                          error: str) -> HTMLResponse:
+    label = (oauth.PROVIDERS.get(provider) or {}).get("label", provider)
+    if error:
+        return _connect_page("連携に失敗しました", error, ok=False, status=400)
+
+    checked = oauth.verify_state(state, provider)
+    if checked.get("error"):
+        return _connect_page("連携を確認できませんでした", checked["error"], ok=False, status=400)
+    user_id = checked.get("user_id") or ""
+    redirect = _connect_redirect(request, provider)
+
+    is_owner = bool(checked.get("owner"))
+
+    def _work() -> dict:
+        # 始めた本人の保存先に束ねてから保存する。ここを飛ばすと、その鍵が
+        # サーバー全体の既定になり、繋いでいない他の利用者にも使われる。
+        #
+        # 保存先を持たない人でも「束ねる」ことが要る。束ねずに素通りさせると
+        # keychain が「1人運用」とみなしてプロセスへ書き、結局そこから漏れる。
+        # 束ねて中身を None にしておけば、keychain が断ってくれる。
+        # 持ち主だけは例外で、繋いでいなくてもサーバー既定のDBが自分の物。
+        bound = None
+        if user_id:
+            client = tenancy.client_for(user_id)
+            # 保存先が無い人も束ねる（中身 None）。そうすると keychain が断る。
+            # 束ねずに素通りさせると「1人運用」とみなされてプロセスへ書かれる。
+            # 持ち主だけは、繋いでいなくてもサーバー既定のDBが自分の物なので束ねない。
+            if client is not None or not is_owner:
+                bound = config.bind_request_client(client)
+        try:
+            return oauth.finish(provider, code, redirect)
+        finally:
+            if bound is not None:
+                config.reset_request_client(bound)
+
+    res = await asyncio.get_event_loop().run_in_executor(None, _work)
+    if res.get("error"):
+        return _connect_page("連携に失敗しました", res["error"], ok=False, status=502)
+    who = f"（{res['account']}）" if res.get("account") else ""
+    body = f"{label}{who} と繋がりました。"
+    if res.get("warning"):
+        body += "<br>" + res["warning"]
+    return _connect_page("連携できました", body, ok=not res.get("warning"))
+
+
+@app.get("/connect/{provider}/callback")
+async def connect_callback(provider: str, request: Request,
+                           code: str = "", state: str = "", error: str = ""):
+    return await _connect_finish(provider, request, code, state, error)
+
+
+@app.post("/connect/{provider}/disconnect")
+async def connect_disconnect(provider: str, _auth: None = Depends(require_auth),
+                             _store: None = Depends(require_storage)):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: oauth.disconnect(provider))
 
 
 # ローカル実行用エントリ（uvicorn main:app --reload と同等）

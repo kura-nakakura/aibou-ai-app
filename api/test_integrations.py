@@ -42,20 +42,40 @@ def test_gservice_status_default():
 
 
 def test_gservice_exchange_code_stores_refresh(monkeypatch):
-    import keychain
-    monkeypatch.setattr(gservice, "_client_id", lambda: "cid")
-    monkeypatch.setattr(gservice, "_client_secret", lambda: "sec")
+    """認可コードを交換して、更新用トークンが残ること。
+
+    保存の形は共通の仕組み（oauth）に移した。以前は GOOGLE_REFRESH_TOKEN
+    という1つの鍵だったが、提供元ごとに期限や口座名も持つ必要があるので
+    OAUTH_GOOGLE にまとめてある。
+    """
+    import oauth
+    monkeypatch.setattr(oauth, "_app_credentials", lambda p: ("cid", "sec"))
+    monkeypatch.setattr(oauth, "_whoami", lambda p, t: "me@example.com")
 
     class FakeResp:
         content = b"{}"
         def json(self):
-            return {"refresh_token": "rt-xyz"}
+            return {"refresh_token": "rt-xyz", "access_token": "at-1", "expires_in": 3600}
 
-    monkeypatch.setattr(gservice.requests, "post", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(oauth.requests, "post", lambda *a, **k: FakeResp())
     res = gservice.exchange_code("code123", "https://x/callback")
-    assert res["ok"] is True
-    assert keychain.get_key("GOOGLE_REFRESH_TOKEN") == "rt-xyz"
-    keychain.delete_key("GOOGLE_REFRESH_TOKEN")  # cleanup
+    assert res["ok"] is True and res["account"] == "me@example.com"
+    assert oauth.connected("google") is True
+    assert oauth._load("google")["refresh_token"] == "rt-xyz"
+    oauth.disconnect("google")  # cleanup
+
+
+def test_an_old_google_connection_still_works(monkeypatch):
+    """以前の形（GOOGLE_REFRESH_TOKEN だけ）で繋いである人が、
+    繋ぎ直さずにそのまま使えること。"""
+    import keychain, oauth
+    keychain.set_key("GOOGLE_REFRESH_TOKEN", "rt-old")
+    try:
+        assert oauth.connected("google") is True
+        assert oauth._load("google")["refresh_token"] == "rt-old"
+        assert gservice.connected() is True
+    finally:
+        keychain.delete_key("GOOGLE_REFRESH_TOKEN")
 
 
 def test_gservice_create_sheet_mocked(monkeypatch):
@@ -89,8 +109,10 @@ def test_google_status_endpoint():
 
 
 def test_google_auth_start_without_config():
+    """アプリ登録が済んでいなければ、始められないと伝えること（200で成功に見せない）。"""
     r = client.get("/google/auth/start")
-    assert r.status_code == 400 and "Google未設定" in r.text
+    assert r.status_code == 400
+    assert "GOOGLE_CLIENT_ID" in r.text and "持ち主が1回だけ" in r.text
 
 
 def test_google_auth_start_redirects_when_configured(monkeypatch):
@@ -103,8 +125,9 @@ def test_google_auth_start_redirects_when_configured(monkeypatch):
 
 
 def test_google_callback_error_shows_message():
+    """許可されなかったとき、理由を出し、成功に見せないこと。"""
     r = client.get("/google/auth/callback", params={"error": "access_denied"})
-    assert r.status_code == 200 and "access_denied" in r.text
+    assert r.status_code == 400 and "access_denied" in r.text
 
 
 # ── DB 自動マイグレーション ──────────────────────────────────────────

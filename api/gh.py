@@ -24,6 +24,13 @@ _TEXT_EXT = {
 
 
 def _token() -> str:
+    try:
+        import oauth
+        tok = oauth.access_token("github")
+        if tok:
+            return tok
+    except Exception:
+        pass
     return keychain.get_key("GITHUB_TOKEN")
 
 
