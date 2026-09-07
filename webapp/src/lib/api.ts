@@ -832,6 +832,54 @@ export async function googleDisconnect(): Promise<boolean> {
   return Boolean(data.ok);
 }
 
+/* ---------------- 押すだけの連携（OAuth） ---------------- */
+/**
+ * 連携先1つぶんの状態。
+ *
+ * configured と connected を分けているのが肝。
+ *   configured … アプリの持ち主が提供元にアプリ登録を済ませたか
+ *   connected  … この利用者が「許可」を押したか
+ * 混ぜると、利用者が自分では直せないこと（アプリ登録）を直そうとして詰まる。
+ */
+export interface ConnectProvider {
+  key: string;
+  label: string;
+  configured: boolean;
+  connected: boolean;
+  account?: string;
+  unlocks: string[];
+  note?: string;
+}
+
+/** GET /connect — 連携できる先と、その状態。 */
+export async function connectStatus(): Promise<{
+  providers: ConnectProvider[];
+  noOauth: Record<string, string>;
+}> {
+  const res = await fetch(`${requireApiUrl()}/connect`, { headers: authHeaders(), cache: "no-store" });
+  if (!res.ok) return { providers: [], noOauth: {} };
+  const d = (await res.json().catch(() => ({}))) as
+    { providers?: ConnectProvider[]; no_oauth?: Record<string, string> };
+  return { providers: asArray<ConnectProvider>(d.providers), noOauth: d.no_oauth ?? {} };
+}
+
+/** 同意画面へ向かうURL（新しいタブで開く）。 */
+export function connectStartUrl(provider: string): string {
+  // Google は以前からこのURLで動いており、提供元にも登録されているので変えない
+  return provider === "google"
+    ? `${requireApiUrl()}/google/auth/start`
+    : `${requireApiUrl()}/connect/${provider}/start`;
+}
+
+/** POST /connect/{provider}/disconnect — 保存したトークンを忘れる。 */
+export async function connectDisconnect(provider: string): Promise<boolean> {
+  const res = await fetch(`${requireApiUrl()}/connect/${provider}/disconnect`, {
+    method: "POST", headers: authHeaders(),
+  });
+  const d = (await res.json().catch(() => ({ ok: false }))) as { ok?: boolean };
+  return Boolean(d.ok);
+}
+
 /* ---------------- DB persistence (auto-migration) ---------------- */
 export interface DbStatus {
   connected: boolean;

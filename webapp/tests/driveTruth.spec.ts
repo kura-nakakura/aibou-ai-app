@@ -23,7 +23,9 @@ test("繋いでいるGoogleアカウントを画面に出す", () => {
   expect(api).toMatch(/account\?: string/);
 
   const ext = src("components/Extensions.tsx");
-  expect(ext).toContain("google.account");
+  // 連携の状態は提供元ごとの共通の仕組みから取るようになった（provider）。
+  // 見せたいこと（どのアカウントに作られるか）は変わっていない。
+  expect(ext).toContain("provider.account");
   expect(ext).toContain("のドライブに作られます");
 });
 

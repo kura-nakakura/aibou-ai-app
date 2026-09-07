@@ -15,9 +15,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  API_URL, deleteKey, googleAuthStartUrl, googleDisconnect, googleStatus,
+  API_URL, connectDisconnect, connectStartUrl, connectStatus, deleteKey, googleStatus,
   keyOrphans, keyRescue, listKeys, myDatabase, profileGet, rulesSync, sendNotify, setKey,
-  type ApiKeyInfo, type GoogleStatus, type OrphanKey,
+  type ApiKeyInfo, type ConnectProvider, type GoogleStatus, type OrphanKey,
 } from "@/lib/api";
 import {
   EXTENSIONS, GROUP_LABEL, GROUP_ORDER, NO_KEY_FEATURES, isConnected, visibleExtensions,
@@ -33,6 +33,8 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
   const [orphans, setOrphans] = useState<OrphanKey[]>([]);
   const [isOwner, setIsOwner] = useState<boolean | null>(null);
   const [google, setGoogle] = useState<GoogleStatus | null>(null);
+  // 押すだけで繋げる先の状態（提供元ごと）。key → 状態。
+  const [providers, setProviders] = useState<Map<string, ConnectProvider>>(new Map());
   const [dbOn, setDbOn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,12 +43,13 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
   const load = useCallback(async () => {
     if (!API_URL) { setLoading(false); return; }
     setError(null);
-    const [keys, prof, g, db, orph] = await Promise.all([
+    const [keys, prof, g, db, orph, conn] = await Promise.all([
       listKeys().catch((e) => { setError(explain(e, "連携状況の読み込み")); return null; }),
       profileGet().catch(() => null),
       googleStatus().catch(() => null),
       myDatabase().catch(() => null),
       keyOrphans().catch(() => null),
+      connectStatus().catch(() => null),
     ]);
     if (keys) {
       setKeysSet(new Set(keys.filter((k) => k.set).map((k) => k.name)));
@@ -54,6 +57,7 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
     }
     if (prof) setIsOwner(Boolean(prof.is_owner));
     setGoogle(g);
+    setProviders(new Map((conn?.providers ?? []).map((p) => [p.key, p])));
     setOrphans(orph?.items ?? []);
     // 既定DBに保存されている人も「保存先は決まっている」ので済み扱いにする
     setDbOn(Boolean(db?.connected) || Boolean(db?.using_server_db));
@@ -64,12 +68,16 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
 
   const exts = useMemo(() => visibleExtensions(isOwner), [isOwner]);
 
-  /** 連携済みか。Googleは鍵だけでなく「許可」まで済んで初めて使える。 */
+  /** 連携済みか。
+   *
+   * 押すだけで繋げる先は「許可」が済んでいれば連携済み。まだなら、手で貼った
+   * 鍵でも動くので、そちらも見る（両方の道を塞がない）。 */
   const connectedOf = useCallback((e: Extension) => {
+    if (e.oauth && providers.get(e.oauth)?.connected) return true;
     if (e.kind === "oauth") return Boolean(google?.connected);
     if (e.kind === "database") return dbOn;
     return isConnected(e, keysSet);
-  }, [google, keysSet, dbOn]);
+  }, [google, providers, keysSet, dbOn]);
 
   const doneCount = exts.filter((e) => connectedOf(e) === true).length;
 
@@ -174,6 +182,7 @@ export default function Extensions({ onNavigate }: { onNavigate?: (v: "guide") =
           ext={open}
           connected={connectedOf(open)}
           google={google}
+          provider={open.oauth ? providers.get(open.oauth) : undefined}
           info={keyInfo}
           onClose={() => setOpen(null)}
           onChanged={() => void load()}
@@ -270,8 +279,9 @@ function Card({ ext, state, onOpen }:
 }
 
 /* ── 詳細（本文に出す。祖先の transform に captured されないように） ── */
-function Detail({ ext, connected, google, info, onClose, onChanged }: {
+function Detail({ ext, connected, google, provider, info, onClose, onChanged }: {
   ext: Extension;
+  provider?: ConnectProvider;
   connected: boolean | null;
   google: GoogleStatus | null;
   info: Map<string, ApiKeyInfo>;
@@ -281,6 +291,9 @@ function Detail({ ext, connected, google, info, onClose, onChanged }: {
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
+  const [showKeys, setShowKeys] = useState(false);
+  // 押すだけで繋げる先では、貼る欄は「使わなくてよい道」。前に出さない。
+  const foldKeys = Boolean(provider) || ext.fields.some((f) => f.appOnly);
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
@@ -443,10 +456,61 @@ function Detail({ ext, connected, google, info, onClose, onChanged }: {
           </div>
         )}
 
-        {/* ③ 値の入力 */}
+        {/* ③ まずは「押すだけ」。鍵を貼る道は、その下に畳んで残す。 */}
+        {provider && (
+          <div className="mb-3">
+            {provider.configured ? (
+              <>
+                {provider.connected ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {provider.account && (
+                      <span className="rounded-forge border border-panel px-2 py-1 text-[11px] text-fg">
+                        {provider.account} と繋がっています
+                      </span>
+                    )}
+                    <button type="button" disabled={busy}
+                            onClick={() => { setBusy(true); void connectDisconnect(provider.key)
+                              .finally(() => { setBusy(false); onChanged(); }); }}
+                            className="rounded-forge border border-panel px-3 py-2 text-[11px] text-[#ff9b9b] label-mono disabled:opacity-40">
+                      連携を解除
+                    </button>
+                  </div>
+                ) : (
+                  <a href={connectStartUrl(provider.key)} target="_blank" rel="noreferrer"
+                     className="inline-flex min-h-[44px] items-center rounded-forge border px-3.5 text-[12px] label-mono"
+                     style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}>
+                    {provider.label}と連携する
+                  </a>
+                )}
+                {provider.note && !provider.connected && (
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{provider.note}</p>
+                )}
+              </>
+            ) : (
+              /* 「持ち主の登録がまだ」と「この人がまだ許可していない」は別のこと。
+                 混ぜると、利用者が自分では直せないことを直そうとして詰まる。 */
+              <p className="rounded-forge border p-2 text-[11px] leading-relaxed"
+                 style={{ borderColor: "#ffd07f55", color: "#ffd07f" }}>
+                このアプリの持ち主が {provider.label} へのアプリ登録をまだ済ませていないため、
+                押すだけの連携は使えません。下の欄に値を貼れば、いまでも使えます。
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ④ 値の入力。
+            「押すだけ」で済むようになった今、貼る欄は主役ではない。
+            ・アプリ登録の値（appOnly）は持ち主がサーバーに置く物なので常に畳む
+            ・繋がっているなら、貼る欄も畳む（両方の道は残すが、前には出さない） */}
         {ext.fields.length > 0 && (
           <div className="mb-3 grid gap-1.5">
-            {ext.fields.map((f) => (
+            {foldKeys && (
+              <button type="button" onClick={() => setShowKeys((v) => !v)}
+                      className="self-start rounded-forge border border-panel px-3 py-2 text-[11px] text-muted label-mono">
+                {showKeys ? "▲ 手で入れる欄を隠す" : "▼ 手で入れる（上級者向け）"}
+              </button>
+            )}
+            {(!foldKeys || showKeys) && ext.fields.map((f) => (
               <div key={f.name}>
                 <label htmlFor={`ext-${f.name}`}
                        className="text-[10px] tracking-[0.14em] text-muted label-mono">
@@ -468,11 +532,13 @@ function Detail({ ext, connected, google, info, onClose, onChanged }: {
               </div>
             ))}
             <div className="mt-1 flex flex-wrap gap-1.5">
+              {(!foldKeys || showKeys) && (
               <button type="button" onClick={() => void save()} disabled={busy}
                       className="rounded-forge border px-3 py-2 text-[11px] label-mono disabled:opacity-40"
                       style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}>
                 {busy ? "…" : "保存する"}
               </button>
+              )}
               {connected === true && (
                 <button type="button" onClick={() => void remove()} disabled={busy}
                         className="rounded-forge border border-panel px-3 py-2 text-[11px] text-[#ff9b9b] label-mono disabled:opacity-40">
@@ -498,37 +564,14 @@ function Detail({ ext, connected, google, info, onClose, onChanged }: {
           </div>
         )}
 
-        {/* ④ Google は許可（OAuth）まで済ませて初めて使える */}
-        {ext.kind === "oauth" && google?.connected && google.account && (
-          /* どのアカウントに作られるのかを先に見せる。
-             「作ったと言われたのにドライブに無い」の原因が、見に行ったのと
-             違うアカウントに繋いでいた、ということがある。 */
+        {/* どのアカウントに作られるのかを先に見せる。
+            「作ったと言われたのにドライブに無い」の原因が、見に行ったのと
+            違うアカウントに繋いでいた、ということがある。 */}
+        {ext.oauth === "google" && provider?.connected && provider.account && (
           <p className="mb-2 rounded-forge border border-panel p-2 text-[11px] leading-relaxed text-muted">
-            ファイルは <span className="text-fg-strong">{google.account}</span> のドライブに作られます。
+            ファイルは <span className="text-fg-strong">{provider.account}</span> のドライブに作られます。
             別のアカウントのドライブを見ていると、見つかりません。
           </p>
-        )}
-        {ext.kind === "oauth" && (
-          <div className="mb-3 flex flex-wrap items-center gap-1.5">
-            {google?.connected ? (
-              <button type="button" disabled={busy}
-                      onClick={() => { setBusy(true); void googleDisconnect().finally(() => { setBusy(false); onChanged(); }); }}
-                      className="rounded-forge border border-panel px-3 py-2 text-[11px] text-[#ff9b9b] label-mono disabled:opacity-40">
-                Googleとの接続を解除
-              </button>
-            ) : (
-              <a href={googleAuthStartUrl()} target="_blank" rel="noreferrer"
-                 className="rounded-forge border px-3 py-2 text-[11px] label-mono"
-                 style={{ borderColor: "var(--accent)", color: "var(--fg-strong)", background: "var(--btn-bg)" }}>
-                Googleと接続する
-              </a>
-            )}
-            {!google?.configured && (
-              <span className="text-[10px] text-muted">
-                先に上の2つを保存してください
-              </span>
-            )}
-          </div>
         )}
 
         {note && (

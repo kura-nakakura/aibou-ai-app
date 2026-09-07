@@ -20,6 +20,13 @@ export type ExtField = {
   secret?: boolean;
   /** 空でも連携できる（任意項目） */
   optional?: boolean;
+  /**
+   * このアプリ自身の登録情報（利用者が入れる物ではない）。
+   *
+   * 持ち主がサーバーに1回置けば、利用者は誰も触らなくてよい。全員に見せると
+   * 「自分が取ってこないといけない値」に見えてしまうので、畳んでおく。
+   */
+  appOnly?: boolean;
 };
 
 export type Extension = {
@@ -31,6 +38,14 @@ export type Extension = {
   unlocks: string[];
   /** つなぎ方。keys=値を貼る / oauth=ボタンで許可 / database=専用画面 */
   kind: "keys" | "oauth" | "database";
+  /**
+   * 押すだけで繋げる提供元の名前（api/oauth.py の PROVIDERS と対応）。
+   *
+   * これが付いていると、鍵の入力欄ではなく「◯◯と連携」ボタンを先に出す。
+   * 入力欄は残してあるが畳んである——すでに手で貼って使っている人や、
+   * アプリ登録がまだの環境でも詰まらないようにするため。
+   */
+  oauth?: "google" | "slack" | "notion" | "github";
   fields: ExtField[];
   /** 値のとり方。番号付きで出す */
   howto: string[];
@@ -143,6 +158,7 @@ export const EXTENSIONS: Extension[] = [
   },
   {
     id: "slack",
+    oauth: "slack",
     name: "Slack",
     tagline: "チームのチャンネルに結果を流す",
     group: "notify",
@@ -223,6 +239,7 @@ export const EXTENSIONS: Extension[] = [
   /* ── 仕事の道具 ───────────────────────────────────────────── */
   {
     id: "google",
+    oauth: "google",
     name: "Google",
     tagline: "カレンダー・スプレッドシート・ドキュメント・スライド",
     group: "work",
@@ -234,24 +251,28 @@ export const EXTENSIONS: Extension[] = [
       "文章をGoogleドキュメントにする",
       "スライドをGoogleスライドにする",
       "ドライブにファイルをそのまま作る（作った直後に実在を確認します）",
+      "受信メールを読む（アプリパスワードを作る手順が要らなくなります）",
     ],
     fields: [
-      { name: "GOOGLE_CLIENT_ID", label: "クライアントID", placeholder: "…apps.googleusercontent.com" },
-      { name: "GOOGLE_CLIENT_SECRET", label: "クライアントシークレット", secret: true },
+      { name: "GOOGLE_CLIENT_ID", label: "クライアントID", placeholder: "…apps.googleusercontent.com", appOnly: true },
+      { name: "GOOGLE_CLIENT_SECRET", label: "クライアントシークレット", secret: true, appOnly: true },
     ],
     howto: [
+      "（この手順はアプリの持ち主が1回だけ行います。ふだんは「連携する」を押すだけです）",
       "console.cloud.google.com でプロジェクトを作る",
-      "「APIとサービス」→ ライブラリ で Calendar / Sheets / Docs / Slides を有効にする",
-      "「OAuth同意画面」を作る（テストユーザーに自分のアドレスを入れる）",
+      "「APIとサービス」→ ライブラリ で Calendar / Sheets / Docs / Slides / Gmail を有効にする",
+      "「OAuth同意画面」を作る（テストユーザーに使う人のアドレスを入れる）",
       "「認証情報」→「OAuth クライアントID」→ ウェブアプリケーション",
-      "IDとシークレットをここに貼り、下の「Googleと接続」を押して許可する",
+      "できたIDとシークレットを、サーバー（Render）の環境変数 GOOGLE_CLIENT_ID / "
+        + "GOOGLE_CLIENT_SECRET に置く",
     ],
-    warning: "2つの値を保存したあと、「Googleと接続」ボタンで許可するまで使えません。"
-      + " Gmailの送受信はこれとは別で、下の「メール」から設定します。"
+    warning: "「連携する」を押して許可すれば使えます。"
+      + " メールもこの連携で読めるので、アプリパスワードを作る必要はありません。"
       + " YouTubeへの投稿には対応していません。",
   },
   {
     id: "github",
+    oauth: "github",
     name: "GitHub",
     tagline: "自分のリポジトリを読み書きする（CODEモード）",
     group: "work",
@@ -297,6 +318,7 @@ export const EXTENSIONS: Extension[] = [
   },
   {
     id: "notion",
+    oauth: "notion",
     name: "Notion",
     tagline: "決まったページにメモを書き足す",
     group: "work",
